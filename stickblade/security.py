@@ -131,7 +131,7 @@ def check_model_spend_policy(model_id: str, roster: dict):
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "ALLOWALL",
+    "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Cross-Origin-Opener-Policy": "same-origin",
 }
