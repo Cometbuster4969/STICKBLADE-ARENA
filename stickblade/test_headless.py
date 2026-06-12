@@ -23,7 +23,7 @@ while match.phase != Match.PH_OVER and frames < 60 * 240:
         rend.draw_fx(screen, fx, (0, 0))
         for f in (match.f1, match.f2):
             rend.draw_fighter(screen, f, (0, 0))
-            rend.draw_sword(screen, f, match.sharp, (0, 0))
+            rend.draw_weapon(screen, f, match.sharp, (0, 0), arrows=match.arrows[f.fid] if match.arrows else None)
         rend.draw_hud(screen, match.f1, match.f2, match.turn, C.MAX_TURNS,
                       match.sharp, match.phase)
         rend.draw_thought(screen, match.f1, match.thoughts[0], 0)
@@ -35,7 +35,7 @@ screen.blit(rend.bg, (0, 0))
 rend.draw_fx(screen, fx, (0, 0))
 for f in (match.f1, match.f2):
     rend.draw_fighter(screen, f, (0, 0))
-    rend.draw_sword(screen, f, match.sharp, (0, 0))
+    rend.draw_weapon(screen, f, match.sharp, (0, 0), arrows=match.arrows[f.fid] if match.arrows else None)
 rend.draw_hud(screen, match.f1, match.f2, match.turn, C.MAX_TURNS, match.sharp, "")
 pygame.image.save(screen, "shot_end.png")
 print("RESULT:", match.winner, "| turns:", match.turn,

@@ -67,9 +67,11 @@ class Servo:
 
 
 class Fighter:
-    def __init__(self, space, x, facing, color, dark, name, fid):
+    def __init__(self, space, x, facing, color, dark, name, fid,
+                 weapon="sword"):
         self.space, self.x0, self.facing = space, x, facing
         self.color, self.dark, self.name, self.fid = color, dark, name, fid
+        self.weapon = weapon
         self.hp = C.START_HP
         self.dead = False
         self.stun = 0.0
@@ -124,31 +126,19 @@ class Fighter:
         for nm in ("shin_f", "shin_b"):
             self.shapes[nm].friction = 1.6
 
-        # ---- sword ----
+        # ---- weapon (sword / flail / bow via weapons.py builders) ----
         hand = Vec2d(x, neck_y - 6 - 26 - 24)
-        g0 = 0.55                                   # initial blade tilt
-        ang = math.pi + f * g0                      # rel to forearm(angle 0)
-        sw = pymunk.Body(SWORD_MASS, pymunk.moment_for_segment(
-            SWORD_MASS, (0, C.SWORD_POMMEL), (0, C.SWORD_TIP), C.SWORD_R))
-        grip_local = Vec2d(0, C.SWORD_HANDLE)
-        sw.angle = ang
-        sw.position = hand - grip_local.rotated(ang)
-        blade = pymunk.Segment(sw, (0, C.SWORD_POMMEL), (0, C.SWORD_TIP), C.SWORD_R)
-        blade.friction = 0.4
-        blade.elasticity = 0.1
-        blade.filter = self.filter
-        blade.collision_type = CT_SWORD[self.fid]
-        blade.fighter = self
-        blade.part = "sword"
-        space.add(sw, blade)
-        self.bodies["sword"], self.shapes["sword"] = sw, blade
+        from weapons import BUILDERS
+        sw, grip_cfg = BUILDERS.get(self.weapon, BUILDERS["sword"])(
+            self, space, hand, f)
 
         # ---- joints:  (parent, child, pivot, sign, offset, lo, hi, gain) ----
         J = {
             "neck":        (torso, head, (x, neck_y + 2), f, 0, -0.4, 0.4, 7),
             "shoulder":    (torso, ua, (x, neck_y - 6), f, 0, -0.9, 3.05, 9),
             "elbow":       (ua, fa, (x, neck_y - 6 - 26), f, 0, 0.0, 2.55, 10),
-            "grip":        (fa, sw, hand, f, math.pi, -1.45, 1.45, 11),
+            "grip":        (fa, sw, hand, f, grip_cfg["grip_offset"],
+                            grip_cfg["grip_lo"], grip_cfg["grip_hi"], 11),
             "off_shoulder": (torso, oua, (x, neck_y - 6), f, 0, -0.9, 3.05, 8),
             "off_elbow":   (oua, ofa, (x, neck_y - 6 - 26), f, 0, 0.0, 2.55, 9),
             "hip_f":       (torso, tf, (x, hip_y), f, 0, -0.65, 1.9, 9),
