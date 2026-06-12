@@ -101,6 +101,11 @@ def run_simulation(mid):
             fx.update(1 / 60)
             rec.tick()
         res = match.result
+        
+        # Fallback if the physics engine aborted unexpectedly
+        if res is None:
+            res = {"winner": None, "method": "engine error (check physics log)", "turns": 0}
+            
         if res["winner"] is None:
             side = "draw"
         else:
