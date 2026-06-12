@@ -5,6 +5,42 @@
 function initPlayer(R) {
   if (window.__sbPlayer) { window.__sbPlayer.destroy(); }
   let alive = true;
+  // ---- compat: roundRect is missing on older browsers (pre-Chrome99/Saf16/FF112)
+  (function polyfillRoundRect(){
+    const CRP = (typeof CanvasRenderingContext2D !== "undefined")
+      ? CanvasRenderingContext2D.prototype : null;
+    if (CRP && !CRP.roundRect) {
+      CRP.roundRect = function (x, y, w, h, r) {
+        if (typeof r === "number") r = [r, r, r, r];
+        else if (Array.isArray(r)) { while (r.length < 4) r.push(r[r.length-1] ?? 0); }
+        else r = [0, 0, 0, 0];
+        this.moveTo(x + r[0], y);
+        this.arcTo(x + w, y, x + w, y + h, r[1]);
+        this.arcTo(x + w, y + h, x, y + h, r[2]);
+        this.arcTo(x, y + h, x, y, r[3]);
+        this.arcTo(x, y, x + w, y, r[0]);
+        this.closePath();
+        return this;
+      };
+    }
+  })();
+  // ---- never fail silently: surface errors on the page
+  function showError(e) {
+    try {
+      const el = document.getElementById("subtitle");
+      if (el) { el.style.display = "block"; el.style.color = "#ff6464";
+        el.textContent = "Replay player error: " + (e && e.message ? e.message : e); }
+      const cvEl = document.getElementById("cv");
+      if (cvEl) {
+        const c = cvEl.getContext("2d");
+        c.fillStyle = "#181a24"; c.fillRect(0, 0, cvEl.width, cvEl.height);
+        c.fillStyle = "#ff6464"; c.font = "bold 22px Arial"; c.textAlign = "center";
+        c.fillText("⚠ Replay player error — see message above / console",
+                   cvEl.width / 2, cvEl.height / 2);
+      }
+      console.error("[stickblade player]", e);
+    } catch (_) {}
+  }
 
 
 
@@ -13,6 +49,11 @@ const BODY = ["torso","head","uarm","farm","off_uarm","off_farm",
               "thigh_f","shin_f","thigh_b","shin_b","sword"];
 const FLAIL_EXTRA = 4;          // 3 links + ball appended per fighter
 const WEAPON = (R.meta.weapon || "sword");
+  if (R.v && R.v > 2) {
+    showError(new Error("replay format v" + R.v +
+      " is newer than this player — hard-refresh the page (Ctrl+Shift+R)"));
+    return window.__sbPlayer = { destroy(){}, isAlive(){ return false; } };
+  }
 const HALF = {torso:28, uarm:13, farm:12, off_uarm:13, off_farm:12,
               thigh_f:15, shin_f:15, thigh_b:15, shin_b:15};
 const WIDTHS = {torso:12, uarm:9, farm:8, off_uarm:8, off_farm:7,
@@ -260,6 +301,10 @@ function drawThought(text, meta, side){
 }
 
 /* ---------- playback loop ---------- */
+if (!R || !R.frames || !R.frames.length || !R.meta) {
+  showError(new Error("replay data is empty or malformed"));
+  return window.__sbPlayer = { destroy(){}, isAlive(){ return false; } };
+}
 const total = R.frames.length;
 let cursor = 0, playing = true, lastT = performance.now(), acc = 0;
 const bPlay=document.getElementById("bPlay"), scrub=document.getElementById("scrub"),
@@ -267,8 +312,13 @@ const bPlay=document.getElementById("bPlay"), scrub=document.getElementById("scr
 scrub.max = total-1;
 document.getElementById("subtitle").textContent =
   `${R.meta.p1.name}  vs  ${R.meta.p2.name}  ·  sharp: ${R.meta.sharp.join("+")}`;
-document.getElementById("cardResult").innerHTML =
-  `<b>Result:</b> ${R.meta.winner} · ${R.meta.result.turns} turns · method: ${R.meta.result.method}`;
+{
+  const res = R.meta.result || {};
+  document.getElementById("cardResult").innerHTML =
+    `<b>Result:</b> ${R.meta.winner || "unknown"}` +
+    (res.turns !== undefined ? ` · ${res.turns} turns` : "") +
+    (res.method ? ` · method: ${res.method}` : "");
+}
 function fmt(f){ const s=f/FPS; return Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0"); }
 
 function gotoFrame(i, hard){
@@ -309,11 +359,13 @@ function render(){
 }
 function loop(now){
   if (!alive) return;
+  try {
   const dt = Math.min(0.1,(now-lastT)/1000); lastT = now;
   const sp = parseFloat(speedEl.value) * (slowmo>0?0.22:1);
   if (playing){ acc += dt*FPS*sp; while (acc>=1){ acc--; advance(); } }
   stepFx(dt*(slowmo>0?0.4:1));
   render();
+  } catch (e) { alive = false; showError(e); return; }
   requestAnimationFrame(loop);
 }
 bPlay.onclick = ()=>{ playing=!playing;
@@ -330,6 +382,6 @@ document.addEventListener("keydown",(e)=>{
 });
 requestAnimationFrame(loop);
   window.__sbPlayer = { destroy(){ alive = false; },
-    isAlive(){ return alive; } };
+    isAlive(){ return alive; }, showError };
   return window.__sbPlayer;
 }
