@@ -75,6 +75,7 @@ class Match:
                           p1_kind.upper(), 1, weapon=self.weapon)
         self.f2 = Fighter(self.space, C.WIDTH - 430, -1, C.C_P2, C.C_P2_DARK,
                           p2_kind.upper(), 2, weapon=self.weapon)
+        self.f1.enemy, self.f2.enemy = self.f2, self.f1
         self.combat = CombatSystem(self.space, {1: self.f1, 2: self.f2},
                                    self.sharp, fx)
         # arrows (bow only)
@@ -104,6 +105,12 @@ class Match:
 
     # ---------- LLM querying (background thread so UI stays alive) ----------
     def _start_thinking(self):
+        # fighters crossed during the last exchange? turn them around so
+        # poses/strikes face the enemy again (footwork already self-corrects)
+        for f in (self.f1, self.f2):
+            dx = f.enemy.pos().x - f.pos().x
+            if abs(dx) > 2 and (1 if dx > 0 else -1) != f.facing:
+                f.turn_around()
         self.turn += 1
         s1 = build_state(self.f1, self.f2, self.turn, C.MAX_TURNS, self.last_events)
         s2 = build_state(self.f2, self.f1, self.turn, C.MAX_TURNS, self.last_events)
