@@ -3,8 +3,8 @@ queue caps. Zero external dependencies (in-memory sliding windows) — right-
 sized for a free-tier single-instance deployment.
 
 All knobs are env vars (defaults in parentheses):
-    RL_MATCHES_PER_HOUR   (6)    matches one IP may start per hour
-    RL_VOTES_PER_HOUR     (30)   votes one IP may cast per hour
+    RL_MATCHES_PER_HOUR   (50)   matches one IP may start per hour
+    RL_VOTES_PER_HOUR     (100)  votes one IP may cast per hour
     RL_REQS_PER_MIN       (120)  any API requests per IP per minute
     MAX_QUEUE             (10)   pending sims before new matches are rejected
     MAX_MATCHES_PER_DAY   (300)  global daily cap (LLM spend ceiling)
@@ -26,12 +26,15 @@ def _int_env(name, default):
         return default
 
 
-RL_MATCHES_PER_HOUR = _int_env("RL_MATCHES_PER_HOUR", 6)
-RL_VOTES_PER_HOUR = _int_env("RL_VOTES_PER_HOUR", 30)
+RL_MATCHES_PER_HOUR = _int_env("RL_MATCHES_PER_HOUR", 50)
+RL_VOTES_PER_HOUR = _int_env("RL_VOTES_PER_HOUR", 100)
 RL_REQS_PER_MIN = _int_env("RL_REQS_PER_MIN", 120)
 MAX_QUEUE = _int_env("MAX_QUEUE", 10)
 MAX_MATCHES_PER_DAY = _int_env("MAX_MATCHES_PER_DAY", 300)
 ALLOW_PAID_CUSTOM = os.environ.get("ALLOW_PAID_CUSTOM", "0") == "1"
+# Owner bypass: set ADMIN_TOKEN env var, send X-Admin-Token header to skip
+# all rate limits (for testing your own arena without burning the budget).
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 
 class SlidingWindow:
@@ -66,6 +69,11 @@ _req_rl = SlidingWindow(RL_REQS_PER_MIN, 60)
 _daily_rl = SlidingWindow(MAX_MATCHES_PER_DAY, 86400)
 
 
+def is_admin(request: Request) -> bool:
+    return bool(ADMIN_TOKEN) and \
+        request.headers.get("x-admin-token", "") == ADMIN_TOKEN
+
+
 def client_ip(request: Request) -> str:
     """Real client IP behind HF Spaces / Render / Vercel proxies."""
     fwd = request.headers.get("x-forwarded-for")
@@ -75,12 +83,18 @@ def client_ip(request: Request) -> str:
 
 
 def check_request(request: Request):
+    if is_admin(request):
+        return
     ok, retry = _req_rl.allow(client_ip(request))
     if not ok:
         raise HTTPException(429, f"too many requests; retry in {retry}s")
 
 
 def check_match_allowed(request: Request, queue_size: int):
+    if is_admin(request):
+        if queue_size >= MAX_QUEUE:
+            raise HTTPException(503, "arena is busy — try again in a minute")
+        return
     ip = client_ip(request)
     if queue_size >= MAX_QUEUE:
         raise HTTPException(503, "arena is busy — try again in a minute")
@@ -95,6 +109,8 @@ def check_match_allowed(request: Request, queue_size: int):
 
 
 def check_vote_allowed(request: Request):
+    if is_admin(request):
+        return
     ok, retry = _vote_rl.allow(client_ip(request))
     if not ok:
         raise HTTPException(429, f"vote limit reached; retry in {retry}s")
@@ -115,7 +131,7 @@ def check_model_spend_policy(model_id: str, roster: dict):
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "ALLOWALL",
+    "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Cross-Origin-Opener-Policy": "same-origin",
 }

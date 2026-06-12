@@ -4,7 +4,7 @@ Python physics engine (server-side) and the future web frontend.
 
 Replay format (v1):
 {
-  "v": 1,
+  "v": 2,
   "meta": { width, height, floor_y, fps, sharp, winner, result,
             p1: {name, color, dark, facing}, p2: {...} },
   "frames": [ [hp1, hp2, turn, over, x,y,a * 11 bodies * 2 fighters], ... ],
@@ -102,13 +102,25 @@ class ReplayRecorder:
     # ------------------------------------------------------------ output
     def build(self):
         m = self.match
+        result = m.result
+        if result is None:          # match didn't finish: synthesize
+            if abs(m.f1.hp - m.f2.hp) < 0.5:
+                w, method = None, "incomplete_draw"
+            else:
+                w = m.f1.name if m.f1.hp > m.f2.hp else m.f2.name
+                method = "incomplete_points"
+            result = {"winner": w, "method": method, "turns": m.turn,
+                      "final_hp": {m.f1.name: round(m.f1.hp, 1),
+                                   m.f2.name: round(m.f2.hp, 1)}}
+        winner_txt = m.winner or (f"{result['winner']} ahead" if result["winner"]
+                                  else "unfinished")
         return {
-            "v": 1,
+            "v": 2,
             "meta": {
                 "width": C.WIDTH, "height": C.HEIGHT, "floor_y": C.FLOOR_Y,
                 "fps": 60 // self.every, "sharp": m.sharp,
                 "weapon": m.weapon,
-                "winner": m.winner, "result": m.result,
+                "winner": winner_txt, "result": result,
                 "p1": {"name": m.f1.name, "color": _css(m.f1.color),
                        "dark": _css(m.f1.dark), "facing": m.f1.facing},
                 "p2": {"name": m.f2.name, "color": _css(m.f2.color),

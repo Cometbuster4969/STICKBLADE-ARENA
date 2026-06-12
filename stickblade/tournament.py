@@ -39,11 +39,19 @@ def run_match_headless(p1, p2, sharp, log_path, weapon="sword"):
         pygame.display.set_mode((C.WIDTH, C.HEIGHT))
     fx = FX()
     m = Match(p1, p2, sharp, fx, log_path=log_path, weapon=weapon)
-    frames = 0
-    while m.phase != Match.PH_OVER and frames < 60 * 600:
+    import time as _t
+    deadline = _t.time() + 45 * 60
+    sim_frames = 0
+    while m.phase != Match.PH_OVER and _t.time() < deadline \
+            and sim_frames < 60 * 600:
         m.update(1 / 60, True)            # fast flag = 3x substeps
         fx.update(1 / 60)
-        frames += 1
+        if m.phase == Match.PH_THINK:
+            _t.sleep(0.02)
+        else:
+            sim_frames += 1
+    if m.result is None:
+        m._finish()
     return m
 
 

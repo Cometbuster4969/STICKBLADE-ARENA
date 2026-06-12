@@ -27,6 +27,8 @@ import config as C
 import security
 from storage import LocalStorage
 
+VERSION = "1.3.0"   # weapons + joint mode + player polyfill + admin bypass
+
 app = FastAPI(title="Stickblade Arena", docs_url=None, redoc_url=None,
               openapi_url=None)
 # Allow the standalone Next.js frontend (Vercel) to call this API.
@@ -50,6 +52,8 @@ async def security_middleware(request: Request, call_next):
         response.headers[k] = v
     return response
 
+print(f"[server] STICKBLADE ARENA v1.3.0 — weapons: sword/flail/bow, "
+      f"modes: macro/joint")
 if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
     from storage_supabase import SupabaseStorage
     store = SupabaseStorage()
@@ -68,11 +72,14 @@ BLIND_COLORS = {"a": ("#56dc82", 1), "b": ("#5aa0ff", 2)}
 # ------------------------------------------------------------- simulation
 def run_simulation(mid):
     """Worker: run one headless match and store the replay (names hidden)."""
+    import time as _t
     import pygame
     from main import Match
     from recorder import ReplayRecorder, RecordingFX
 
     m = store.get_match(mid)
+    if m is None:
+        raise RuntimeError(f"match row {mid} not found in storage")
     store.set_status(mid, "running")
     try:
         if not pygame.get_init():
@@ -90,22 +97,26 @@ def run_simulation(mid):
             match.f1.name = match.b1.label = BLIND_NAMES["a"]
             match.f2.name = match.b2.label = BLIND_NAMES["b"]
         rec.attach(match)
-        frames = 0
-        while match.phase != Match.PH_OVER and frames < 60 * 60 * 30:
+        # Budget SIM frames only — LLM thinking time must not eat the match.
+        # Hard wall-clock ceiling protects against a hung brain.
+        deadline = _t.time() + 45 * 60
+        sim_frames = 0
+        while match.phase != Match.PH_OVER and _t.time() < deadline \
+                and sim_frames < 60 * 60 * 10:
             match.update(1 / 60, False)
             fx.update(1 / 60)
             rec.tick()
-            frames += 1
+            if match.phase == Match.PH_THINK:
+                _t.sleep(0.02)      # don't burn CPU while LLMs think
+            else:
+                sim_frames += 1
         for _ in range(90):
             match.update(1 / 60, False)
             fx.update(1 / 60)
             rec.tick()
+        if match.result is None:    # timeout/ceiling hit mid-match:
+            match._finish()         # decide on points from current HP
         res = match.result
-        
-        # Fallback if the physics engine aborted unexpectedly
-        if res is None:
-            res = {"winner": None, "method": "engine error (check physics log)", "turns": 0}
-            
         if res["winner"] is None:
             side = "draw"
         else:
@@ -146,6 +157,14 @@ class MatchReq(BaseModel):
 
 class VoteReq(BaseModel):
     choice: str = Field(max_length=8)  # a | b | draw
+
+
+@app.get("/api/version")
+def version():
+    from weapons import WEAPONS
+    return {"version": VERSION, "weapons": WEAPONS,
+            "modes": ["macro", "joint"], "replay_format": 2,
+            "admin_bypass": bool(os.environ.get("ADMIN_TOKEN"))}
 
 
 @app.get("/api/models")
@@ -265,4 +284,5 @@ def index():
 def player_js():
     from fastapi.responses import FileResponse
     return FileResponse(os.path.join(HERE, "player.js"),
-                        media_type="application/javascript")
+                        media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache, max-age=0"})

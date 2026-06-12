@@ -97,18 +97,29 @@ The backend ships with `security.py`, active out of the box:
 
 | Protection | Default | Env var |
 |---|---|---|
-| Matches per IP per hour | 6 | `RL_MATCHES_PER_HOUR` |
-| Votes per IP per hour | 30 | `RL_VOTES_PER_HOUR` |
+| Matches per IP per hour | 50 | `RL_MATCHES_PER_HOUR` |
+| Votes per IP per hour | 100 | `RL_VOTES_PER_HOUR` |
 | Any API requests per IP per minute | 120 | `RL_REQS_PER_MIN` |
 | Max queued sims (backpressure) | 10 | `MAX_QUEUE` |
 | **Global daily match cap (spend ceiling)** | 300 | `MAX_MATCHES_PER_DAY` |
 | Custom model ids must be `:free` | on | `ALLOW_PAID_CUSTOM=1` to lift |
+| **Owner bypass of all rate limits** | off | set `ADMIN_TOKEN=<secret>`; send header `X-Admin-Token: <secret>` |
 
 Also active: strict model-id validation (regex, length caps), Pydantic input
 limits, one-vote-per-match, API docs disabled in production
 (`/docs`, `/openapi.json` → 404), and security headers
 (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`,
 `Cross-Origin-Opener-Policy`) on every response.
+
+**Testing your own arena without hitting limits:** the default
+50 matches/hour/IP is comfortable for normal use. For unlimited testing,
+set an `ADMIN_TOKEN` secret on the Space and send the `X-Admin-Token`
+header (curl/Postman), or temporarily raise `RL_MATCHES_PER_HOUR`.
+
+⚠️ Note the interplay with the global cap: at 50 matches/hour a single
+heavy user can exhaust `MAX_MATCHES_PER_DAY=300` in ~6 hours. If you use
+paid models in the roster, either lower the hourly limit again or raise
+the daily cap consciously — the daily cap is your spend ceiling.
 
 **The spend model in plain words:**
 - Roster models (the dropdown) can include paid ones **you** chose — fine.

@@ -31,17 +31,25 @@ def record(p1, p2, sharp, out_name=None, max_minutes=10, mode="macro", weapon="s
     match = Match(p1, p2, sharp, fx, mode=mode, weapon=weapon,
                   log_path=os.path.join("replays", name + "_log.json"))
     rec.attach(match)
-    frames = 0
-    while match.phase != Match.PH_OVER and frames < 60 * 60 * max_minutes:
+    import time as _t
+    deadline = _t.time() + max_minutes * 60
+    sim_frames = 0
+    while match.phase != Match.PH_OVER and _t.time() < deadline \
+            and sim_frames < 60 * 60 * 10:
         match.update(1 / 60, False)
         fx.update(1 / 60)
         rec.tick()
-        frames += 1
+        if match.phase == Match.PH_THINK:
+            _t.sleep(0.02)
+        else:
+            sim_frames += 1
     # a few extra frames so the death/final pose settles on screen
     for _ in range(90):
         match.update(1 / 60, False)
         fx.update(1 / 60)
         rec.tick()
+    if match.result is None:
+        match._finish()
     j = rec.save_json(os.path.join("replays", name + ".json"))
     h = rec.save_html(os.path.join("replays", name + ".html"))
     return match, j, h
