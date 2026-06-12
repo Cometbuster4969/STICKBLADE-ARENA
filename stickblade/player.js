@@ -164,12 +164,17 @@ function drawFighter(frame, fi, meta, dead, ox, oy){
   const hb = bodyAt(frame,fi,1);
   ctx.fillStyle = col;
   ctx.beginPath(); ctx.arc(sx(hb[0],ox), sy(hb[1],oy), HEAD_R, 0, 7); ctx.fill();
-  const eye = local(hb, meta.facing*5.5, 2);
+  const eye = local(hb, liveFacing(frame, fi, meta)*5.5, 2);
   ctx.strokeStyle="#0f1016"; ctx.fillStyle="#0f1016"; ctx.lineWidth=2;
   if (!dead){ ctx.beginPath(); ctx.arc(sx(eye[0],ox), sy(eye[1],oy), 2, 0, 7); ctx.fill(); }
   else { const ex=sx(eye[0],ox), ey=sy(eye[1],oy);
     ctx.beginPath(); ctx.moveTo(ex-3,ey-3); ctx.lineTo(ex+3,ey+3);
     ctx.moveTo(ex-3,ey+3); ctx.lineTo(ex+3,ey-3); ctx.stroke(); }
+}
+function liveFacing(frame, fi, meta){
+  const me = bodyAt(frame, fi, 0), foe = bodyAt(frame, 1 - fi, 0);
+  const dx = foe[0] - me[0];
+  return Math.abs(dx) > 2 ? (dx > 0 ? 1 : -1) : meta.facing;
 }
 function drawWeapon(frame, fi, meta, ox, oy){
   if (WEAPON === "flail") return drawFlail(frame, fi, meta, ox, oy);
@@ -210,7 +215,8 @@ function drawFlail(frame, fi, meta, ox, oy){
 function drawBow(frame, fi, meta, ox, oy){
   const sharp = R.meta.sharp;
   const bb = bodyAt(frame,fi,10);
-  const top = local(bb,0,46), bot = local(bb,0,-46), mid = local(bb,meta.facing*7,0);
+  const fcb = liveFacing(frame, fi, meta);
+  const top = local(bb,0,46), bot = local(bb,0,-46), mid = local(bb,fcb*7,0);
   ctx.strokeStyle = sharp.includes("bow_limb") ? "#ff4646" : "#8c6032";
   ctx.lineWidth = 4; ctx.lineCap = "round";
   ctx.beginPath();
@@ -232,11 +238,12 @@ function drawBow(frame, fi, meta, ox, oy){
 function drawSword(frame, fi, meta, ox, oy){
   const b = bodyAt(frame,fi,10), sharp = R.meta.sharp;
   const span = SW.tip - SW.handle, tipY = SW.handle + SW.tipFrac*span;
+  const fc = liveFacing(frame, fi, meta);
   line(local(b,0,0), local(b,0,SW.tip), 5, "#d6dae6", ox, oy);
   if (sharp.includes("edge"))
-    line(local(b, meta.facing*2.4, 2), local(b, meta.facing*2.4, tipY), 2, "#ff4646", ox, oy);
+    line(local(b, fc*2.4, 2), local(b, fc*2.4, tipY), 2, "#ff4646", ox, oy);
   if (sharp.includes("back_edge"))
-    line(local(b,-meta.facing*2.4, 2), local(b,-meta.facing*2.4, tipY), 2, "#ff4646", ox, oy);
+    line(local(b,-fc*2.4, 2), local(b,-fc*2.4, tipY), 2, "#ff4646", ox, oy);
   if (sharp.includes("tip"))
     line(local(b,0,tipY), local(b,0,SW.tip), 5, "#ff4646", ox, oy);
   line(local(b,-9,-2), local(b,9,-2), 4, "#d4af60", ox, oy);

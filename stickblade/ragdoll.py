@@ -36,6 +36,7 @@ class Servo:
 
     def __init__(self, space, parent, child, pivot_world, sign, offset,
                  lim_lo, lim_hi, gain, base_force):
+        self.space = space
         self.parent, self.child = parent, child
         self.sign, self.offset = sign, offset
         self.gain, self.base_force = gain, base_force
@@ -59,6 +60,16 @@ class Servo:
         rel = self.child.angle - self.parent.angle
         return (rel - self.offset) / self.sign
 
+    def flip(self):
+        """Mirror this joint (fighter turned around): pose targets and limits
+        now interpret intuitive angles in the opposite rotation direction."""
+        self.sign = -self.sign
+        a, b = sorted((self.offset + self.sign * self.lo,
+                       self.offset + self.sign * self.hi))
+        self.space.remove(self.limit)
+        self.limit = pymunk.RotaryLimitJoint(self.parent, self.child, a, b)
+        self.space.add(self.limit)
+
     def update(self):
         rel = self.child.angle - self.parent.angle
         rel_t = self.offset + self.sign * self.target
@@ -72,6 +83,7 @@ class Fighter:
         self.space, self.x0, self.facing = space, x, facing
         self.color, self.dark, self.name, self.fid = color, dark, name, fid
         self.weapon = weapon
+        self.enemy = None          # set by Match; enables enemy-seeking footwork
         self.hp = C.START_HP
         self.dead = False
         self.stun = 0.0
@@ -198,8 +210,9 @@ class Fighter:
             fy = (err * 3000 - torso.velocity.y * 520) * weak
             torso.apply_force_at_world_point(
                 (0, max(0.0, min(5.2e4, fy))), torso.position)
-        # footwork
-        fdir = self.facing
+        # footwork — move toward where the enemy ACTUALLY is (fighters can
+        # cross during lunges; spawn-facing alone would walk them apart)
+        fdir = self.move_dir()
         vx = torso.velocity.x
         if self.foot_mode == "advance" and vx * fdir < 215:
             torso.apply_force_at_world_point((fdir * 6.5e4, 0), torso.position)
@@ -211,6 +224,25 @@ class Fighter:
             torso.apply_force_at_world_point((-vx * 95, 0), torso.position)
 
     # ---------------- queries ----------------
+    def turn_around(self):
+        """Fighters crossed: flip facing + mirror all joints so poses and
+        strikes aim at the enemy again. Called between turns; the servos
+        re-pose the body over the next few frames (brief scramble is fine)."""
+        if self.dead:
+            return
+        self.facing *= -1
+        for s in self.servos.values():
+            s.flip()
+        self.set_pose(STANCE)
+
+    def move_dir(self):
+        """+1/-1 toward the enemy's current position (falls back to facing)."""
+        if self.enemy is not None:
+            dx = self.enemy.bodies["torso"].position.x - self.bodies["torso"].position.x
+            if abs(dx) > 2:
+                return 1 if dx > 0 else -1
+        return self.facing
+
     def pos(self):
         return self.bodies["torso"].position
 
