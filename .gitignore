@@ -15,6 +15,8 @@ credentials*.json
 service-account*.json
 .netrc
 .git-credentials
+.aws/
+.ssh/
 
 # ---------------- Local data / generated match output ----------------
 # Arena runtime data (SQLite DB + stored replays + turn logs)
@@ -29,8 +31,13 @@ log_*.json
 replays/
 tournaments/
 shot_*.png
+design_*.png
 joint_shot*.png
+wp_*.png
+fl_*.png
 *.pid
+*.mp4
+*.gif
 
 # ---------------- Python ----------------
 __pycache__/
@@ -40,16 +47,20 @@ __pycache__/
 .eggs/
 build/
 dist/
+wheels/
 .venv/
 venv/
 env/
+.python-version
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .tox/
 .nox/
 .coverage
+.coverage.*
 htmlcov/
+.ipynb_checkpoints/
 
 # ---------------- Node / Next.js (stickblade-web) ----------------
 node_modules/
@@ -57,6 +68,8 @@ node_modules/
 out/
 .vercel/
 .turbo/
+.swc/
+*.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -64,14 +77,19 @@ yarn-error.log*
 
 # ---------------- OS / editor noise ----------------
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
 Desktop.ini
+ehthumbs.db
 *.swp
 *.swo
 *~
 .idea/
 .vscode/
 *.sublime-*
+.spyderproject
+.ropeproject
 
 # ---------------- Misc caches / sandbox dirs ----------------
 .cache/
@@ -80,3 +98,6 @@ Desktop.ini
 .arena/
 nohup.out
 *.log
+*.tmp
+tmp/
+temp/

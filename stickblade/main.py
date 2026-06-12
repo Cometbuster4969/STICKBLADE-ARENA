@@ -33,6 +33,8 @@ def parse_args():
     ap.add_argument("--mode", default="macro", choices=["macro", "joint"],
                     help="macro = tactician picks moves; joint = raw "
                          "Toribash-style joint control")
+    ap.add_argument("--weapon", default="sword",
+                    choices=["sword", "flail", "bow"])
     return ap.parse_args()
 
 
@@ -47,7 +49,7 @@ def interactive_setup(args):
     p1 = args.p1 or ask("Player 1 brain (gpt/gemini/duelist/berserker)", None, "gpt")
     p2 = args.p2 or ask("Player 2 brain (gpt/gemini/duelist/berserker)", None, "gemini")
     sharp_in = args.sharp or ask("Sharpened zone(s) tip/edge/back_edge/pommel, comma-sep", None, "tip")
-    sharp = [z.strip() for z in sharp_in.split(",") if z.strip() in C.ALL_ZONES] or ["tip"]
+    sharp = [z.strip() for z in sharp_in.split(",") if z.strip()] or ["tip"]
     return p1, p2, sharp
 
 
@@ -56,8 +58,12 @@ class Match:
     PH_THINK, PH_SIM, PH_BANNER, PH_OVER = "THINKING", "SIM", "BANNER", "OVER"
 
     def __init__(self, p1_kind, p2_kind, sharp, fx, log_path=None,
-                 mode="macro"):
-        self.sharp = sharp
+                 mode="macro", weapon="sword"):
+        from weapons import WEAPONS, WEAPON_ZONES
+        self.weapon = weapon if weapon in WEAPONS else "sword"
+        # keep only zones valid for this weapon; default to first zone
+        zs = [z for z in sharp if z in WEAPON_ZONES[self.weapon]]
+        self.sharp = zs or [WEAPON_ZONES[self.weapon][0]]
         self.fx = fx
         self.log_path = log_path
         self.mode = mode if mode in ("macro", "joint") else "macro"
@@ -66,12 +72,20 @@ class Match:
         self.space.damping = C.SPACE_DAMPING
         make_ground(self.space)
         self.f1 = Fighter(self.space, 430, 1, C.C_P1, C.C_P1_DARK,
-                          p1_kind.upper(), 1)
+                          p1_kind.upper(), 1, weapon=self.weapon)
         self.f2 = Fighter(self.space, C.WIDTH - 430, -1, C.C_P2, C.C_P2_DARK,
-                          p2_kind.upper(), 2)
-        self.combat = CombatSystem(self.space, {1: self.f1, 2: self.f2}, sharp, fx)
-        self.b1 = make_brain(p1_kind, sharp, mode=self.mode)
-        self.b2 = make_brain(p2_kind, sharp, mode=self.mode)
+                          p2_kind.upper(), 2, weapon=self.weapon)
+        self.combat = CombatSystem(self.space, {1: self.f1, 2: self.f2},
+                                   self.sharp, fx)
+        # arrows (bow only)
+        from weapons import ArrowManager
+        self.arrows = {1: ArrowManager(self.space, self.f1),
+                       2: ArrowManager(self.space, self.f2)} \
+            if self.weapon == "bow" else None
+        self.b1 = make_brain(p1_kind, self.sharp, mode=self.mode,
+                             weapon=self.weapon)
+        self.b2 = make_brain(p2_kind, self.sharp, mode=self.mode,
+                             weapon=self.weapon)
         if self.b1.label == self.b2.label:          # mirror match: disambiguate
             self.b1.label += " #1"
             self.b2.label += " #2"
@@ -109,8 +123,12 @@ class Match:
             self.ctrl = (JointController(self.f1, r1["joints"], r1["footwork"]),
                          JointController(self.f2, r2["joints"], r2["footwork"]))
         else:
-            self.ctrl = (MoveController(self.f1, r1["action"], r1["footwork"]),
-                         MoveController(self.f2, r2["action"], r2["footwork"]))
+            am1 = self.arrows[1] if self.arrows else None
+            am2 = self.arrows[2] if self.arrows else None
+            self.ctrl = (MoveController(self.f1, r1["action"], r1["footwork"],
+                                        arrow_mgr=am1, enemy=self.f2),
+                         MoveController(self.f2, r2["action"], r2["footwork"],
+                                        arrow_mgr=am2, enemy=self.f1))
         self.log.append({"turn": self.turn,
                          self.f1.name: r1, self.f2.name: r2})
         self.sim_t = 0.0
@@ -121,6 +139,9 @@ class Match:
         self.combat.sim_time += dt
         for f in (self.f1, self.f2):
             f.update(dt)
+        if self.arrows:
+            self.arrows[1].update(dt)
+            self.arrows[2].update(dt)
         self.space.step(dt)
 
     def update(self, frame_dt, fast):
@@ -203,7 +224,7 @@ def main():
     clock = pygame.time.Clock()
     rend = Renderer(screen)
     fx = FX()
-    match = Match(p1, p2, sharp, fx, mode=args.mode)
+    match = Match(p1, p2, sharp, fx, mode=args.mode, weapon=args.weapon)
 
     paused = False
     fast = False
@@ -222,7 +243,7 @@ def main():
                     fast = not fast
                 elif ev.key == pygame.K_r:
                     fx = FX()
-                    match = Match(p1, p2, sharp, fx, mode=args.mode)
+                    match = Match(p1, p2, sharp, fx, mode=args.mode, weapon=args.weapon)
 
         if not paused:
             match.update(frame_dt, fast)
@@ -236,7 +257,8 @@ def main():
         rend.draw_fx(screen, fx, off)
         for f in (match.f1, match.f2):
             rend.draw_fighter(screen, f, off)
-            rend.draw_sword(screen, f, sharp, off)
+            rend.draw_weapon(screen, f, match.sharp, off,
+                             arrows=match.arrows[f.fid] if match.arrows else None)
         rend.draw_hud(screen, match.f1, match.f2, match.turn, C.MAX_TURNS, sharp,
                       {"THINKING": "🧠 LLMs are thinking…", "SIM": "",
                        "BANNER": "FIGHT!", "OVER": ""}.get(match.phase, ""))

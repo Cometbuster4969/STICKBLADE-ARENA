@@ -140,6 +140,67 @@ class Renderer:
             pygame.draw.line(surf, (15, 16, 22), (eye[0] - 3, eye[1] - 3), (eye[0] + 3, eye[1] + 3), 2)
             pygame.draw.line(surf, (15, 16, 22), (eye[0] - 3, eye[1] + 3), (eye[0] + 3, eye[1] - 3), 2)
 
+    def draw_weapon(self, surf, f, sharp_zones, off, arrows=None):
+        w = getattr(f, "weapon", "sword")
+        if w == "flail":
+            self._draw_flail(surf, f, sharp_zones, off)
+        elif w == "bow":
+            self._draw_bow(surf, f, sharp_zones, off, arrows)
+        else:
+            self.draw_sword(surf, f, sharp_zones, off)
+
+    def _draw_flail(self, surf, f, sharp, off):
+        from weapons import FLAIL_HANDLE_LEN, FLAIL_LINKS, FLAIL_BALL_R, SPIKE_SPEED
+        def P(body, local):
+            wpt = body.local_to_world(local)
+            return (int(wpt.x + off[0]), int(C.HEIGHT - wpt.y + off[1]))
+        hb = f.bodies["sword"]
+        hcol = C.C_SHARP if "handle" in sharp else (96, 70, 46)
+        pygame.draw.line(surf, hcol, P(hb, (0, -8)), P(hb, (0, FLAIL_HANDLE_LEN)), 6)
+        ccol = C.C_SHARP if "chain" in sharp else (160, 164, 178)
+        for i in range(FLAIL_LINKS):
+            lb = f.bodies[f"flail_link{i}"]
+            pygame.draw.line(surf, ccol, P(lb, (0, 0)), P(lb, (0, 9)), 3)
+        bb = f.bodies["flail_ball"]
+        bp = P(bb, (0, 0))
+        fast = bb.velocity.length >= SPIKE_SPEED
+        ball_sharp = ("spikes" in sharp and fast) or "ball" in sharp
+        bcol = C.C_SHARP if ball_sharp else (120, 124, 140)
+        pygame.draw.circle(surf, bcol, bp, int(FLAIL_BALL_R))
+        # spikes drawn when the spikes zone exists; glow red only when fast
+        if "spikes" in sharp:
+            scol = C.C_SHARP if fast else (150, 150, 162)
+            for k in range(8):
+                a = k * math.tau / 8 + bb.angle
+                tip = (bp[0] + math.cos(a) * (FLAIL_BALL_R + 5),
+                       bp[1] - math.sin(a) * (FLAIL_BALL_R + 5))
+                pygame.draw.line(surf, scol, bp, tip, 2)
+
+    def _draw_bow(self, surf, f, sharp, off, arrows):
+        from weapons import BOW_LEN, ARROW_LEN
+        def P(body, local):
+            wpt = body.local_to_world(local)
+            return (int(wpt.x + off[0]), int(C.HEIGHT - wpt.y + off[1]))
+        bb = f.bodies["sword"]
+        scol = C.C_SHARP if "bow_limb" in sharp else (140, 96, 50)
+        top, bot = P(bb, (0, BOW_LEN)), P(bb, (0, -BOW_LEN))
+        mid = P(bb, (f.facing * 7, 0))
+        pygame.draw.lines(surf, scol, False, [bot, mid, top], 4)
+        pygame.draw.line(surf, (210, 212, 222), top, bot, 1)   # string
+        if arrows:
+            head_c = C.C_SHARP if "arrowhead" in sharp else (200, 204, 214)
+            shaft_c = C.C_SHARP if "arrow_shaft" in sharp else (150, 120, 80)
+            for ab, _, _ in arrows.arrows:
+                a0 = ab.local_to_world((0, 0))
+                a1 = ab.local_to_world((0, ARROW_LEN))
+                ah = ab.local_to_world((0, ARROW_LEN * 0.7))
+                pygame.draw.line(surf, shaft_c,
+                                 (a0.x + off[0], C.HEIGHT - a0.y + off[1]),
+                                 (ah.x + off[0], C.HEIGHT - ah.y + off[1]), 2)
+                pygame.draw.line(surf, head_c,
+                                 (ah.x + off[0], C.HEIGHT - ah.y + off[1]),
+                                 (a1.x + off[0], C.HEIGHT - a1.y + off[1]), 3)
+
     def draw_sword(self, surf, f, sharp_zones, off):
         sw = f.bodies["sword"]
 

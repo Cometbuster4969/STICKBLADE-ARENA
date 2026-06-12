@@ -92,6 +92,14 @@
                       border-radius:8px; padding:8px 12px; font-size:13px;">
       </div>
       <div>
+        <label>Weapon</label>
+        <div class="zones" id="weaponSel">
+          <div class="zone on" data-w="sword">🗡 SWORD</div>
+          <div class="zone" data-w="flail">⛓ FLAIL</div>
+          <div class="zone" data-w="bow">🏹 BOW</div>
+        </div>
+      </div>
+      <div>
         <label>Control mode</label>
         <div class="zones" id="modeSel">
           <div class="zone on" data-m="macro" title="LLM picks tactical moves; engine executes clean swordplay">🎯 MACRO (tactician)</div>
@@ -99,13 +107,8 @@
         </div>
       </div>
       <div>
-        <label>Sharpened zones — the twist</label>
-        <div class="zones" id="zones">
-          <div class="zone on" data-z="tip">TIP</div>
-          <div class="zone" data-z="edge">EDGE</div>
-          <div class="zone" data-z="back_edge">BACK EDGE</div>
-          <div class="zone" data-z="pommel">POMMEL</div>
-        </div>
+        <label>Dangerous zones — the twist</label>
+        <div class="zones" id="zones"></div>
       </div>
       <button id="bFight">⚔ FIGHT</button>
       <div class="status" id="status"></div>
@@ -197,6 +200,33 @@ $("zones").addEventListener("click", (e) => {
 function sharpList() {
   return [...document.querySelectorAll("#zones .zone.on")].map(z => z.dataset.z);
 }
+const WEAPON_ZONES = {
+  sword: ["tip", "edge", "back_edge", "pommel"],
+  flail: ["ball", "spikes", "chain", "handle"],
+  bow:   ["arrowhead", "arrow_shaft", "bow_limb"],
+};
+function renderZones(weapon) {
+  const holder = $("zones");
+  holder.innerHTML = "";
+  WEAPON_ZONES[weapon].forEach((z, i) => {
+    const d = document.createElement("div");
+    d.className = "zone" + (i === 0 ? " on" : "");
+    d.dataset.z = z;
+    d.textContent = z.replace("_", " ").toUpperCase();
+    holder.appendChild(d);
+  });
+}
+renderZones("sword");
+$("weaponSel").addEventListener("click", (e) => {
+  const w = e.target.closest(".zone");
+  if (!w) return;
+  document.querySelectorAll("#weaponSel .zone").forEach(x => x.classList.remove("on"));
+  w.classList.add("on");
+  renderZones(w.dataset.w);
+});
+function pickedWeapon() {
+  return document.querySelector("#weaponSel .zone.on")?.dataset.w || "sword";
+}
 $("modeSel").addEventListener("click", (e) => {
   const m = e.target.closest(".zone");
   if (!m) return;
@@ -219,7 +249,7 @@ $("bFight").onclick = async () => {
       body: JSON.stringify({ model_a: pickedModel($("selA"), $("customA")),
                              model_b: pickedModel($("selB"), $("customB")),
                              sharp: sharpList(), blind: true,
-                             mode: pickedMode() }),
+                             mode: pickedMode(), weapon: pickedWeapon() }),
     });
     currentMatch = res.match_id;
     $("status").textContent = "🧠 simulating — LLMs are fighting…";

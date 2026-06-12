@@ -11,6 +11,8 @@ function initPlayer(R) {
 /* ---------- constants mirrored from the Python engine ---------- */
 const BODY = ["torso","head","uarm","farm","off_uarm","off_farm",
               "thigh_f","shin_f","thigh_b","shin_b","sword"];
+const FLAIL_EXTRA = 4;          // 3 links + ball appended per fighter
+const WEAPON = (R.meta.weapon || "sword");
 const HALF = {torso:28, uarm:13, farm:12, off_uarm:13, off_farm:12,
               thigh_f:15, shin_f:15, thigh_b:15, shin_b:15};
 const WIDTHS = {torso:12, uarm:9, farm:8, off_uarm:8, off_farm:7,
@@ -41,10 +43,25 @@ const bg = document.createElement("canvas"); bg.width = W; bg.height = H;
 }
 
 /* ---------- replay indexing ---------- */
-const NB = BODY.length, STRIDE = 3, OFF = 4;        // hp1,hp2,turn,over
+const NB = BODY.length + (WEAPON === "flail" ? FLAIL_EXTRA : 0);
+const STRIDE = 3, OFF = 4;                           // hp1,hp2,turn,over
 function bodyAt(frame, fi, bi) {                     // fighter 0/1, body index
   const o = OFF + (fi*NB + bi)*STRIDE;
   return [frame[o], frame[o+1], frame[o+2]];
+}
+function arrowsAt(frame, fi) {                       // bow: parse arrow block
+  if (WEAPON !== "bow") return [];
+  let o = OFF + 2*NB*STRIDE;
+  for (let f = 0; f < 2; f++) {
+    const n = frame[o]; o++;
+    if (f === fi) {
+      const out = [];
+      for (let i = 0; i < n; i++) out.push([frame[o+i*3], frame[o+i*3+1], frame[o+i*3+2]]);
+      return out;
+    }
+    o += n*3;
+  }
+  return [];
 }
 const eventsByFrame = {};
 for (const e of R.events) (eventsByFrame[e.f] ||= []).push(e);
@@ -113,6 +130,64 @@ function drawFighter(frame, fi, meta, dead, ox, oy){
     ctx.beginPath(); ctx.moveTo(ex-3,ey-3); ctx.lineTo(ex+3,ey+3);
     ctx.moveTo(ex-3,ey+3); ctx.lineTo(ex+3,ey-3); ctx.stroke(); }
 }
+function drawWeapon(frame, fi, meta, ox, oy){
+  if (WEAPON === "flail") return drawFlail(frame, fi, meta, ox, oy);
+  if (WEAPON === "bow")   return drawBow(frame, fi, meta, ox, oy);
+  drawSword(frame, fi, meta, ox, oy);
+}
+function drawFlail(frame, fi, meta, ox, oy){
+  const sharp = R.meta.sharp;
+  const hb = bodyAt(frame,fi,10);
+  line(local(hb,0,-8), local(hb,0,26), 6,
+       sharp.includes("handle") ? "#ff4646" : "#60462e", ox, oy);
+  const ccol = sharp.includes("chain") ? "#ff4646" : "#a0a4b2";
+  for (let i=0;i<3;i++){
+    const lb = bodyAt(frame,fi,11+i);
+    line(local(lb,0,0), local(lb,0,9), 3, ccol, ox, oy);
+  }
+  const bb = bodyAt(frame,fi,14);
+  const bp = [sx(bb[0],ox), sy(bb[1],oy)];
+  // ball speed estimated from previous frame for spike glow
+  let fast = false;
+  if (cursor>0){
+    const pb = bodyAt(R.frames[cursor-1],fi,14);
+    const dt = 1/FPS;
+    fast = Math.hypot(bb[0]-pb[0], bb[1]-pb[1])/dt >= 200;
+  }
+  const ballSharp = (sharp.includes("spikes") && fast) || sharp.includes("ball");
+  ctx.fillStyle = ballSharp ? "#ff4646" : "#787c8c";
+  ctx.beginPath(); ctx.arc(bp[0], bp[1], 7, 0, 7); ctx.fill();
+  if (sharp.includes("spikes")){
+    ctx.strokeStyle = fast ? "#ff4646" : "#9696a2"; ctx.lineWidth = 2;
+    for (let k=0;k<8;k++){
+      const a = k*Math.PI/4 + bb[2];
+      ctx.beginPath(); ctx.moveTo(bp[0], bp[1]);
+      ctx.lineTo(bp[0]+Math.cos(a)*13, bp[1]-Math.sin(a)*13); ctx.stroke();
+    }
+  }
+}
+function drawBow(frame, fi, meta, ox, oy){
+  const sharp = R.meta.sharp;
+  const bb = bodyAt(frame,fi,10);
+  const top = local(bb,0,46), bot = local(bb,0,-46), mid = local(bb,meta.facing*7,0);
+  ctx.strokeStyle = sharp.includes("bow_limb") ? "#ff4646" : "#8c6032";
+  ctx.lineWidth = 4; ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(sx(bot[0],ox), sy(bot[1],oy));
+  ctx.lineTo(sx(mid[0],ox), sy(mid[1],oy));
+  ctx.lineTo(sx(top[0],ox), sy(top[1],oy));
+  ctx.stroke();
+  line(top, bot, 1, "#d2d4de", ox, oy);
+  // arrows
+  const headC = sharp.includes("arrowhead") ? "#ff4646" : "#c8ccd6";
+  const shaftC = sharp.includes("arrow_shaft") ? "#ff4646" : "#967850";
+  for (const [axp, ayp, aa] of arrowsAt(frame, fi)){
+    const ca = Math.cos(aa), sa = Math.sin(aa);
+    const pt = (ly) => [axp - ly*sa, ayp + ly*ca];
+    line(pt(0), pt(24), 2, shaftC, ox, oy);
+    line(pt(24), pt(34), 3, headC, ox, oy);
+  }
+}
 function drawSword(frame, fi, meta, ox, oy){
   const b = bodyAt(frame,fi,10), sharp = R.meta.sharp;
   const span = SW.tip - SW.handle, tipY = SW.handle + SW.tipFrac*span;
@@ -165,7 +240,7 @@ function drawHud(frame){
   ctx.fillText(turn, W/2, 48);
   ctx.font="11px Arial"; ctx.fillStyle="#969aac"; ctx.fillText("TURN", W/2, 64);
   ctx.font="bold 14px Arial"; ctx.fillStyle="#ff4646";
-  ctx.fillText("SHARP: "+R.meta.sharp.map(z=>z.toUpperCase()).join(" + "), W/2, 86);
+  ctx.fillText(WEAPON.toUpperCase()+" — SHARP: "+R.meta.sharp.map(z=>z.toUpperCase()).join(" + "), W/2, 86);
 }
 function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); }
 function wrap(t,max){ const out=[]; let cur="";
@@ -218,9 +293,9 @@ function render(){
   drawFx(ox,oy);
   const over = frame[3]===1;
   drawFighter(frame,0,R.meta.p1, frame[0]<=0, ox,oy);
-  drawSword(frame,0,R.meta.p1, ox,oy);
+  drawWeapon(frame,0,R.meta.p1, ox,oy);
   drawFighter(frame,1,R.meta.p2, frame[1]<=0, ox,oy);
-  drawSword(frame,1,R.meta.p2, ox,oy);
+  drawWeapon(frame,1,R.meta.p2, ox,oy);
   drawHud(frame);
   const th = thoughtIdx>=0 ? R.thoughts[thoughtIdx] : null;
   if (th){ drawThought(th.a, R.meta.p1, 0); drawThought(th.b, R.meta.p2, 1); }

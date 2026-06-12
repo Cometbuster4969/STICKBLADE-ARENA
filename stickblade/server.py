@@ -83,7 +83,8 @@ def run_simulation(mid):
         fx = RecordingFX(rec)
         match = Match(m["model_a"], m["model_b"], sharp, fx,
                       log_path=os.path.join(store.root, f"log_{mid}.json"),
-                      mode=MATCH_MODES.get(mid, "macro"))
+                      mode=MATCH_MODES.get(mid, {}).get("mode", "macro"),
+                      weapon=MATCH_MODES.get(mid, {}).get("weapon", "sword"))
         # blind mode: hide model identity in the replay itself
         if m["blind"]:
             match.f1.name = match.b1.label = BLIND_NAMES["a"]
@@ -135,6 +136,7 @@ class MatchReq(BaseModel):
     sharp: list[str] = Field(default=["tip"], max_length=4)
     blind: bool = True
     mode: str = Field(default="macro", max_length=8)  # macro | joint
+    weapon: str = Field(default="sword", max_length=8)  # sword | flail | bow
 
 
 class VoteReq(BaseModel):
@@ -144,6 +146,12 @@ class VoteReq(BaseModel):
 @app.get("/api/models")
 def models():
     return [{"id": k, "name": v} for k, v in C.ARENA_MODELS.items()]
+
+
+@app.get("/api/weapons")
+def weapons_list():
+    from weapons import WEAPONS, WEAPON_ZONES
+    return [{"id": w, "zones": WEAPON_ZONES[w]} for w in WEAPONS]
 
 
 import re
@@ -166,12 +174,16 @@ def create_match(req: MatchReq, request: Request):
             raise HTTPException(400, f"unknown model: {mdl}")
         security.check_model_spend_policy(mdl, C.ARENA_MODELS)
     security.check_match_allowed(request, jobs.qsize())
-    sharp = [z for z in req.sharp if z in C.ALL_ZONES] or ["tip"]
+    from weapons import WEAPONS, WEAPON_ZONES
+    weapon = req.weapon if req.weapon in WEAPONS else "sword"
+    sharp = [z for z in req.sharp if z in WEAPON_ZONES[weapon]] \
+        or [WEAPON_ZONES[weapon][0]]
     mode = req.mode if req.mode in ("macro", "joint") else "macro"
     mid = store.create_match(req.model_a, req.model_b, sharp, req.blind)
-    MATCH_MODES[mid] = mode
+    MATCH_MODES[mid] = {"mode": mode, "weapon": weapon}
     jobs.put(mid)
-    return {"match_id": mid, "status": "queued", "mode": mode}
+    return {"match_id": mid, "status": "queued", "mode": mode,
+            "weapon": weapon}
 
 
 @app.get("/api/match/{mid}")

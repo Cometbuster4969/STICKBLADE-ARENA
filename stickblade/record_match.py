@@ -20,7 +20,7 @@ from main import Match  # noqa: E402
 from recorder import ReplayRecorder, RecordingFX  # noqa: E402
 
 
-def record(p1, p2, sharp, out_name=None, max_minutes=10, mode="macro"):
+def record(p1, p2, sharp, out_name=None, max_minutes=10, mode="macro", weapon="sword"):
     if not pygame.get_init():
         pygame.init()
         pygame.display.set_mode((C.WIDTH, C.HEIGHT))
@@ -28,7 +28,7 @@ def record(p1, p2, sharp, out_name=None, max_minutes=10, mode="macro"):
     name = out_name or f"{p1}_vs_{p2}_{'-'.join(sharp)}_{int(time.time())}"
     rec = ReplayRecorder(every=2)
     fx = RecordingFX(rec)
-    match = Match(p1, p2, sharp, fx, mode=mode,
+    match = Match(p1, p2, sharp, fx, mode=mode, weapon=weapon,
                   log_path=os.path.join("replays", name + "_log.json"))
     rec.attach(match)
     frames = 0
@@ -54,12 +54,15 @@ def main():
     ap.add_argument("--sharp", default="tip")
     ap.add_argument("--out", default=None, help="output file basename")
     ap.add_argument("--mode", default="macro", choices=["macro", "joint"])
+    ap.add_argument("--weapon", default="sword", choices=["sword", "flail", "bow"])
     args = ap.parse_args()
-    sharp = [z.strip() for z in args.sharp.split(",") if z.strip() in C.ALL_ZONES] or ["tip"]
+    from weapons import WEAPON_ZONES
+    allowed = WEAPON_ZONES.get(args.weapon, C.ALL_ZONES)
+    sharp = [z.strip() for z in args.sharp.split(",") if z.strip() in allowed] or [allowed[0]]
 
     print(f"Recording: {args.p1} vs {args.p2} | sharp: {'+'.join(sharp)} | mode: {args.mode} ...")
     t0 = time.time()
-    m, j, h = record(args.p1, args.p2, sharp, args.out, mode=args.mode)
+    m, j, h = record(args.p1, args.p2, sharp, args.out, mode=args.mode, weapon=args.weapon)
     kb = os.path.getsize(j) // 1024
     print(f"{m.winner}  ({m.result['turns']} turns, {time.time()-t0:.1f}s)")
     print(f"  replay JSON : {j} ({kb} KB)")

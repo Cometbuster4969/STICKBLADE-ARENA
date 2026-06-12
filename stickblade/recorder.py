@@ -22,6 +22,8 @@ from render import FX
 
 BODY_ORDER = ["torso", "head", "uarm", "farm", "off_uarm", "off_farm",
               "thigh_f", "shin_f", "thigh_b", "shin_b", "sword"]
+# extra per-weapon bodies appended after BODY_ORDER (flail chain + ball)
+FLAIL_EXTRA = ["flail_link0", "flail_link1", "flail_link2", "flail_ball"]
 
 
 def _css(rgb):
@@ -82,11 +84,19 @@ class ReplayRecorder:
                                   "b": t[m.f2.name]["thought"]})
         row = [round(m.f1.hp, 1), round(m.f2.hp, 1), m.turn,
                1 if m.phase == m.PH_OVER else 0]
+        extra = FLAIL_EXTRA if m.weapon == "flail" else []
         for f in (m.f1, m.f2):
-            for bname in BODY_ORDER:
+            for bname in BODY_ORDER + extra:
                 b = f.bodies[bname]
                 row += [round(b.position.x, 1), round(b.position.y, 1),
                         round(b.angle, 3)]
+        # live arrows (bow): flat [x,y,a]*n for each fighter appended at end
+        if m.weapon == "bow" and m.arrows:
+            for fid in (1, 2):
+                pos = m.arrows[fid].positions()
+                row.append(len(pos))
+                for x, y, a in pos:
+                    row += [x, y, a]
         self.frames.append(row)
 
     # ------------------------------------------------------------ output
@@ -97,6 +107,7 @@ class ReplayRecorder:
             "meta": {
                 "width": C.WIDTH, "height": C.HEIGHT, "floor_y": C.FLOOR_Y,
                 "fps": 60 // self.every, "sharp": m.sharp,
+                "weapon": m.weapon,
                 "winner": m.winner, "result": m.result,
                 "p1": {"name": m.f1.name, "color": _css(m.f1.color),
                        "dark": _css(m.f1.dark), "facing": m.f1.facing},

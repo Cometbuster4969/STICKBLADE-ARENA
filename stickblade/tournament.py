@@ -28,7 +28,7 @@ GUARD_ACTIONS = {"guard_high", "guard_low", "ready"}
 
 
 # ------------------------------------------------------------------ running
-def run_match_headless(p1, p2, sharp, log_path):
+def run_match_headless(p1, p2, sharp, log_path, weapon="sword"):
     """Run one match as fast as possible without a window."""
     os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     import pygame
@@ -38,7 +38,7 @@ def run_match_headless(p1, p2, sharp, log_path):
         pygame.init()
         pygame.display.set_mode((C.WIDTH, C.HEIGHT))
     fx = FX()
-    m = Match(p1, p2, sharp, fx, log_path=log_path)
+    m = Match(p1, p2, sharp, fx, log_path=log_path, weapon=weapon)
     frames = 0
     while m.phase != Match.PH_OVER and frames < 60 * 600:
         m.update(1 / 60, True)            # fast flag = 3x substeps
@@ -47,7 +47,7 @@ def run_match_headless(p1, p2, sharp, log_path):
     return m
 
 
-def run_match_visual(p1, p2, sharp, log_path):
+def run_match_visual(p1, p2, sharp, log_path, weapon="sword"):
     """Run one match in a window; auto-advances when the match ends."""
     import pygame
     from main import Match
@@ -59,7 +59,7 @@ def run_match_visual(p1, p2, sharp, log_path):
     clock = pygame.time.Clock()
     rend = Renderer(screen)
     fx = FX()
-    m = Match(p1, p2, sharp, fx, log_path=log_path)
+    m = Match(p1, p2, sharp, fx, log_path=log_path, weapon=weapon)
     over_timer = 2.5
     import random as _r
     while True:
@@ -77,7 +77,7 @@ def run_match_visual(p1, p2, sharp, log_path):
         rend.draw_fx(screen, fx, off)
         for f in (m.f1, m.f2):
             rend.draw_fighter(screen, f, off)
-            rend.draw_sword(screen, f, sharp, off)
+            rend.draw_weapon(screen, f, sharp, off, arrows=m.arrows[f.fid] if m.arrows else None)
         rend.draw_hud(screen, m.f1, m.f2, m.turn, C.MAX_TURNS, sharp,
                       "THINKING…" if m.phase == Match.PH_THINK else "")
         rend.draw_thought(screen, m.f1, m.thoughts[0], 0)
@@ -242,6 +242,7 @@ def main():
                     help="repeatable; comma-combo of tip,edge,back_edge,pommel")
     ap.add_argument("--visual", action="store_true",
                     help="render every match in a window")
+    ap.add_argument("--weapon", default="sword", choices=["sword", "flail", "bow"])
     args = ap.parse_args()
 
     # mirror tournament: keep stats separate per slot
@@ -250,7 +251,9 @@ def main():
 
     configs = []
     for s in (args.sharp or ["tip"]):
-        zones = tuple(z.strip() for z in s.split(",") if z.strip() in C.ALL_ZONES)
+        from weapons import WEAPON_ZONES
+        allowed = WEAPON_ZONES[args.weapon]
+        zones = tuple(z.strip() for z in s.split(",") if z.strip() in allowed)
         if zones and zones not in configs:
             configs.append(zones)
 
@@ -279,7 +282,7 @@ def main():
             t0 = time.time()
             runner = run_match_visual if args.visual else run_match_headless
             # strip mirror suffix for brain construction
-            m = runner(a.split("#")[0], b.split("#")[0], list(sharp), log_path)
+            m = runner(a.split("#")[0], b.split("#")[0], list(sharp), log_path, weapon=args.weapon)
             # map fighter display names back to brain kinds
             kinds_by_name = {m.f1.name: a, m.f2.name: b}
             harvest(m, kinds_by_name, stats, sharp)
