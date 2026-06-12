@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STICKBLADE ARENA — LLM Sword Duels</title>
+<style>
+  :root { --bg:#0d0e14; --panel:#161821; --line:#2a2d3c; --text:#e8eaf4;
+          --dim:#969aac; --accent:#ffd65a; --red:#ff4646; --green:#56dc82;
+          --blue:#5aa0ff; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text);
+         font-family:'Segoe UI', Arial, sans-serif; min-height:100vh;
+         display:flex; flex-direction:column; align-items:center; padding:18px; }
+  h1 { font-size:24px; letter-spacing:4px; }
+  h1 .blade { color:var(--red); }
+  .sub { color:var(--dim); font-size:13px; margin:4px 0 14px; }
+  .row { width:min(1280px,96vw); display:flex; gap:10px; flex-wrap:wrap; }
+  .panel { background:var(--panel); border:1px solid var(--line);
+           border-radius:10px; padding:14px; }
+  .setup { flex:1; min-width:300px; display:flex; flex-direction:column; gap:10px; }
+  label { font-size:12px; color:var(--dim); display:block; margin-bottom:3px;
+          text-transform:uppercase; letter-spacing:1px; }
+  select, button { background:#23263a; color:var(--text);
+          border:1px solid var(--line); border-radius:8px; padding:8px 12px;
+          font-size:14px; width:100%; cursor:pointer; }
+  button:hover:not(:disabled) { background:#2e3250; }
+  button:disabled { opacity:0.45; cursor:default; }
+  .zones { display:flex; gap:6px; flex-wrap:wrap; }
+  .zone { flex:1; min-width:70px; text-align:center; padding:8px 4px;
+          border:1px solid var(--line); border-radius:8px; background:#23263a;
+          font-size:13px; cursor:pointer; user-select:none; }
+  .zone.on { background:#512228; border-color:var(--red); color:#ffb4b4; }
+  #bFight { background:#5a2330; border-color:#a03048; font-weight:bold;
+            font-size:16px; padding:12px; }
+  #bFight:hover:not(:disabled) { background:#75293c; }
+  .stage { position:relative; width:min(1280px,96vw); margin-top:10px;
+           display:none; }
+  canvas { width:100%; display:block; border:1px solid var(--line);
+           border-radius:10px; background:#10121a; }
+  .controls { width:min(1280px,96vw); background:var(--panel);
+              border:1px solid var(--line); border-radius:10px;
+              margin-top:10px; padding:10px 14px; display:none;
+              gap:12px; align-items:center; flex-wrap:wrap; }
+  .controls button { width:auto; }
+  input[type=range] { flex:1; min-width:160px; accent-color:var(--accent); }
+  .controls select { width:auto; }
+  .time { font-variant-numeric:tabular-nums; color:var(--dim); font-size:13px;
+          min-width:90px; text-align:right; }
+  .voting { width:min(1280px,96vw); margin-top:10px; display:none; gap:10px; }
+  .voting button { font-size:15px; padding:14px; font-weight:bold; }
+  #vA { border-color:var(--green); color:var(--green); }
+  #vB { border-color:var(--blue); color:var(--blue); }
+  #vDraw { color:var(--dim); }
+  .reveal { width:min(1280px,96vw); margin-top:10px; display:none;
+            text-align:center; font-size:15px; }
+  .reveal b { color:var(--accent); }
+  .status { margin-top:10px; color:var(--accent); font-size:14px;
+            min-height:20px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:normal; text-transform:uppercase;
+       font-size:11px; letter-spacing:1px; }
+  td.r, th.r { text-align:right; font-variant-numeric:tabular-nums; }
+  .lb { flex:1; min-width:300px; }
+  .lb-head { display:flex; justify-content:space-between; align-items:center;
+             margin-bottom:8px; }
+  .lb-head select { width:auto; padding:4px 8px; font-size:12px; }
+  #subtitle, #cardResult { display:none; }
+</style>
+</head>
+<body>
+  <h1>STICK<span class="blade">BLADE</span> ARENA</h1>
+  <div class="sub">two LLM swordsmen · you set the sharp zone · physics decides · you vote blind</div>
+
+  <div class="row">
+    <div class="panel setup">
+      <div>
+        <label>Fighter A (green)</label>
+        <select id="selA"></select>
+        <input type="text" id="customA" placeholder="OpenRouter model id, e.g. qwen/qwen-2.5-72b-instruct"
+               style="display:none; margin-top:6px; width:100%; background:#23263a;
+                      color:var(--text); border:1px solid var(--line);
+                      border-radius:8px; padding:8px 12px; font-size:13px;">
+      </div>
+      <div>
+        <label>Fighter B (blue)</label>
+        <select id="selB"></select>
+        <input type="text" id="customB" placeholder="OpenRouter model id, e.g. x-ai/grok-2-1212"
+               style="display:none; margin-top:6px; width:100%; background:#23263a;
+                      color:var(--text); border:1px solid var(--line);
+                      border-radius:8px; padding:8px 12px; font-size:13px;">
+      </div>
+      <div>
+        <label>Control mode</label>
+        <div class="zones" id="modeSel">
+          <div class="zone on" data-m="macro" title="LLM picks tactical moves; engine executes clean swordplay">🎯 MACRO (tactician)</div>
+          <div class="zone" data-m="joint" title="LLM drives every joint raw — emergent, chaotic, true Toribash">🧠 JOINT (raw nervous system)</div>
+        </div>
+      </div>
+      <div>
+        <label>Sharpened zones — the twist</label>
+        <div class="zones" id="zones">
+          <div class="zone on" data-z="tip">TIP</div>
+          <div class="zone" data-z="edge">EDGE</div>
+          <div class="zone" data-z="back_edge">BACK EDGE</div>
+          <div class="zone" data-z="pommel">POMMEL</div>
+        </div>
+      </div>
+      <button id="bFight">⚔ FIGHT</button>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="panel lb">
+      <div class="lb-head">
+        <label style="margin:0">Leaderboard (Elo by vote)</label>
+        <select id="lbSharp">
+          <option value="">overall</option>
+          <option value="tip">tip</option>
+          <option value="edge">edge</option>
+          <option value="back_edge">back_edge</option>
+          <option value="pommel">pommel</option>
+        </select>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>Model</th><th class="r">Elo</th>
+          <th class="r">W</th><th class="r">L</th><th class="r">D</th></tr></thead>
+        <tbody id="lbBody"><tr><td colspan="6" style="color:var(--dim)">no votes yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="stage" id="stage"><canvas id="cv" width="1280" height="720"></canvas></div>
+  <div class="controls" id="controls">
+    <button id="bPlay">⏸ Pause</button>
+    <button id="bRestart">⟲ Restart</button>
+    <input type="range" id="scrub" min="0" max="100" value="0" step="1">
+    <span class="time" id="time">0:00 / 0:00</span>
+    <select id="speed">
+      <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option><option value="2">2×</option>
+    </select>
+  </div>
+
+  <div class="row voting" id="voting">
+    <button id="vA" style="flex:2">🗳 Fighter A fought better</button>
+    <button id="vDraw" style="flex:1">Draw</button>
+    <button id="vB" style="flex:2">Fighter B fought better 🗳</button>
+  </div>
+  <div class="panel reveal" id="reveal"></div>
+
+  <span id="subtitle"></span><span id="cardResult"></span>
+
+<script src="/static/player.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let currentMatch = null, pollTimer = null;
+
+async function api(path, opts) {
+  const r = await fetch("/api" + path, opts);
+  if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+  return r.json();
+}
+
+/* ---------- setup ---------- */
+async function loadModels() {
+  const models = await api("/models");
+  for (const [sel, inp] of [[$("selA"), $("customA")], [$("selB"), $("customB")]]) {
+    sel.innerHTML = "";
+    for (const m of models) {
+      const o = document.createElement("option");
+      o.value = m.id; o.textContent = m.name;
+      sel.appendChild(o);
+    }
+    const custom = document.createElement("option");
+    custom.value = "__custom__"; custom.textContent = "✏ Custom model id…";
+    sel.appendChild(custom);
+    sel.onchange = () => {
+      inp.style.display = sel.value === "__custom__" ? "block" : "none";
+      if (sel.value === "__custom__") inp.focus();
+    };
+  }
+  $("selA").selectedIndex = 0;
+  $("selB").selectedIndex = Math.min(1, models.length - 1);
+}
+function pickedModel(sel, inp) {
+  if (sel.value !== "__custom__") return sel.value;
+  return inp.value.trim();
+}
+$("zones").addEventListener("click", (e) => {
+  const z = e.target.closest(".zone");
+  if (!z) return;
+  z.classList.toggle("on");
+  if (!document.querySelector("#zones .zone.on")) z.classList.add("on");
+});
+function sharpList() {
+  return [...document.querySelectorAll("#zones .zone.on")].map(z => z.dataset.z);
+}
+$("modeSel").addEventListener("click", (e) => {
+  const m = e.target.closest(".zone");
+  if (!m) return;
+  document.querySelectorAll("#modeSel .zone").forEach(x => x.classList.remove("on"));
+  m.classList.add("on");
+});
+function pickedMode() {
+  return document.querySelector("#modeSel .zone.on")?.dataset.m || "macro";
+}
+
+/* ---------- match flow ---------- */
+$("bFight").onclick = async () => {
+  $("bFight").disabled = true;
+  $("voting").style.display = "none";
+  $("reveal").style.display = "none";
+  $("status").textContent = "⚙ queuing match…";
+  try {
+    const res = await api("/match", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ model_a: pickedModel($("selA"), $("customA")),
+                             model_b: pickedModel($("selB"), $("customB")),
+                             sharp: sharpList(), blind: true,
+                             mode: pickedMode() }),
+    });
+    currentMatch = res.match_id;
+    $("status").textContent = "🧠 simulating — LLMs are fighting…";
+    poll();
+  } catch (e) {
+    $("status").textContent = "✖ " + e.message;
+    $("bFight").disabled = false;
+  }
+};
+function poll() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    try {
+      const s = await api("/match/" + currentMatch);
+      if (s.status === "done") return showReplay(s);
+      if (s.status === "error") {
+        $("status").textContent = "✖ simulation error: " + (s.error || "");
+        $("bFight").disabled = false;
+        return;
+      }
+      poll();
+    } catch (e) { $("status").textContent = "✖ " + e.message; $("bFight").disabled = false; }
+  }, 1500);
+}
+async function showReplay(s) {
+  $("status").textContent = "";
+  const replay = await api("/replay/" + currentMatch);
+  $("stage").style.display = "block";
+  $("controls").style.display = "flex";
+  initPlayer(replay);
+  $("stage").scrollIntoView({behavior: "smooth"});
+  if (!s.voted) $("voting").style.display = "flex";
+  $("bFight").disabled = false;
+}
+
+/* ---------- voting ---------- */
+async function vote(choice) {
+  $("voting").style.display = "none";
+  try {
+    const r = await api("/vote/" + currentMatch, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ choice }),
+    });
+    const na = r.names[r.model_a], nb = r.names[r.model_b];
+    const d = r.elo_change || {};
+    $("reveal").innerHTML =
+      `🎭 Reveal — Fighter A was <b>${na}</b> (${fmtD(d[r.model_a])}) · ` +
+      `Fighter B was <b>${nb}</b> (${fmtD(d[r.model_b])}) · ` +
+      `engine result: ${r.engine_winner_side === "draw" ? "draw"
+        : "Fighter " + r.engine_winner_side.toUpperCase() + " won"} by ${r.method}`;
+    $("reveal").style.display = "block";
+    loadLeaderboard();
+  } catch (e) { $("status").textContent = "✖ " + e.message; }
+}
+const fmtD = (v) => v === undefined ? "" : (v >= 0 ? `+${v}` : `${v}`) + " Elo";
+$("vA").onclick = () => vote("a");
+$("vB").onclick = () => vote("b");
+$("vDraw").onclick = () => vote("draw");
+
+/* ---------- leaderboard ---------- */
+async function loadLeaderboard() {
+  const sharp = $("lbSharp").value;
+  const rows = await api("/leaderboard" + (sharp ? "?sharp=" + sharp : ""));
+  const tb = $("lbBody");
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="6" style="color:var(--dim)">no votes yet</td></tr>';
+    return;
+  }
+  tb.innerHTML = rows.map((r, i) =>
+    `<tr><td>${i + 1}</td><td>${r.name}</td><td class="r">${r.rating}</td>` +
+    `<td class="r">${r.wins}</td><td class="r">${r.losses}</td><td class="r">${r.draws}</td></tr>`
+  ).join("");
+}
+$("lbSharp").onchange = loadLeaderboard;
+
+loadModels();
+loadLeaderboard();
+</script>
+</body>
+</html>
