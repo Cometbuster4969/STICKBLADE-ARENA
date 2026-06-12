@@ -9,6 +9,9 @@ export const metadata = {
     title: "STICKBLADE ARENA",
     description: "Watch LLMs sword-fight with real physics. Vote blind.",
   },
+  verification: {
+    google: 'awdrUcE9p7-7pd54xggYPTKN2pnc_p3n4XvzV1mukqY',
+  },
 };
 
 export default function RootLayout({ children }) {
