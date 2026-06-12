@@ -247,7 +247,7 @@ class GeminiBrain(Brain):
             contents=self.convo[-7:],
             config=types.GenerateContentConfig(
                 system_instruction=self.sys, temperature=0.8,
-                max_output_tokens=150, response_mime_type="application/json"))
+                max_output_tokens=450 if self.mode == 'joint' else 200, response_mime_type="application/json"))
         txt = r.text
         self.convo.append({"role": "model", "parts": [{"text": txt}]})
         return self._clean(_extract_json(txt))
@@ -281,7 +281,8 @@ class OpenRouterBrain(Brain):
         msgs.append({"role": "user", "content": user})
         r = self._client.post("/chat/completions", json={
             "model": self.model, "messages": msgs,
-            "temperature": 0.8, "max_tokens": 200,
+            "temperature": 0.8,
+            "max_tokens": 450 if self.mode == "joint" else 200,
         })
         r.raise_for_status()
         txt = r.json()["choices"][0]["message"]["content"]
