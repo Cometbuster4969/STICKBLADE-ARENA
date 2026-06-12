@@ -6,7 +6,13 @@ import LeaderboardTable from "@/components/LeaderboardTable";
 import { getModels, createMatch, getMatch, getReplay, postVote,
          getLeaderboard } from "@/lib/api";
 
-const ZONES = ["tip", "edge", "back_edge", "pommel"];
+const WEAPON_ZONES = {
+  sword: ["tip", "edge", "back_edge", "pommel"],
+  flail: ["ball", "spikes", "chain", "handle"],
+  bow: ["arrowhead", "arrow_shaft", "bow_limb"],
+};
+const WEAPONS = [["sword", "🗡 SWORD"], ["flail", "⛓ FLAIL"], ["bow", "🏹 BOW"]];
+const ZONES = ["tip", "edge", "back_edge", "pommel"]; // leaderboard tabs (sword legacy)
 
 export default function FightPage() {
   const [models, setModels] = useState([]);
@@ -16,6 +22,12 @@ export default function FightPage() {
   const [customB, setCustomB] = useState("");
   const [sharp, setSharp] = useState(["tip"]);
   const [mode, setMode] = useState("macro");
+  const [weapon, setWeapon] = useState("sword");
+
+  const pickWeapon = (w) => {
+    setWeapon(w);
+    setSharp([WEAPON_ZONES[w][0]]);
+  };
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [matchId, setMatchId] = useState(null);
@@ -55,7 +67,7 @@ export default function FightPage() {
       const { match_id } = await createMatch({
         model_a: modelOf(selA, customA),
         model_b: modelOf(selB, customB),
-        sharp, blind: true, mode,
+        sharp, blind: true, mode, weapon,
       });
       setMatchId(match_id);
       setStatus("🧠 simulating — LLMs are fighting…");
@@ -118,6 +130,15 @@ export default function FightPage() {
             models={models} value={selB} custom={customB}
             onChange={setSelB} onCustomChange={setCustomB} />
           <div>
+            <label className="lbl">Weapon</label>
+            <div className="zones">
+              {WEAPONS.map(([w, label]) => (
+                <div key={w} className={"zone" + (weapon === w ? " on" : "")}
+                  onClick={() => pickWeapon(w)}>{label}</div>
+              ))}
+            </div>
+          </div>
+          <div>
             <label className="lbl">Control mode</label>
             <div className="zones">
               <div className={"zone" + (mode === "macro" ? " on" : "")}
@@ -129,9 +150,9 @@ export default function FightPage() {
             </div>
           </div>
           <div>
-            <label className="lbl">Sharpened zones — the twist</label>
+            <label className="lbl">Dangerous zones — the twist</label>
             <div className="zones">
-              {ZONES.map((z) => (
+              {WEAPON_ZONES[weapon].map((z) => (
                 <div key={z}
                   className={"zone" + (sharp.includes(z) ? " on" : "")}
                   onClick={() => toggleZone(z)}>

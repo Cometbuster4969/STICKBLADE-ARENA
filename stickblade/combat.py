@@ -5,9 +5,26 @@ import config as C
 from ragdoll import CT_BODY, CT_SWORD
 
 
-def classify_zone(sword_body, contact_world, attacker, victim):
-    """Return which sword zone made contact: tip / edge / back_edge / pommel."""
+def classify_zone(sword_body, contact_world, attacker, victim,
+                  contact_shape=None, rel_speed=0.0):
+    """Return which weapon zone made contact, weapon-aware."""
     import math
+    weapon = getattr(attacker, "weapon", "sword")
+
+    if weapon == "flail":
+        from weapons import classify_flail_zone
+        return classify_flail_zone(attacker, contact_shape, contact_world,
+                                   rel_speed)
+
+    if weapon == "bow":
+        if contact_shape is not None and \
+           getattr(contact_shape, "part", "") == "arrow":
+            from weapons import ARROW_LEN
+            local = contact_shape.body.world_to_local(contact_world)
+            return "arrowhead" if local.y >= ARROW_LEN * 0.6 else "arrow_shaft"
+        return "bow_limb"
+
+    # ---- sword (default) ----
     local = sword_body.world_to_local(contact_world)
     y = local.y
     if y <= C.SWORD_HANDLE + 4:
@@ -15,7 +32,6 @@ def classify_zone(sword_body, contact_world, attacker, victim):
     span = C.SWORD_TIP - C.SWORD_HANDLE
     if y >= C.SWORD_HANDLE + C.SWORD_TIP_FRAC * span:
         return "tip"
-    # which flat of the blade faces the victim? (sword local +X axis in world)
     to_victim = victim.pos() - sword_body.position
     ca, sa = math.cos(sword_body.angle), math.sin(sword_body.angle)
     xaxis = pymunk.Vec2d(ca, sa)
@@ -31,11 +47,14 @@ class CombatSystem:
         self.cooldowns = {}            # (atk_id, part_shape_id) -> time
         self.events = []               # log of this turn's hits
         self.sim_time = 0.0
+        from weapons import CT_ARROW
         for atk in (1, 2):
             vic = 2 if atk == 1 else 1
             space.on_collision(CT_SWORD[atk], CT_BODY[vic],
                                post_solve=self._make_handler(atk, vic))
-        # sword vs sword spark
+            space.on_collision(CT_ARROW[atk], CT_BODY[vic],
+                               post_solve=self._make_handler(atk, vic))
+        # weapon vs weapon spark
         space.on_collision(CT_SWORD[1], CT_SWORD[2], post_solve=self._clash)
 
     def _clash(self, arb, space, data):
@@ -53,9 +72,11 @@ class CombatSystem:
             pts = arb.contact_point_set.points
             if not pts:
                 return
+            from weapons import CT_ARROW
             p = pts[0].point_a
             sword_shape, part_shape = arb.shapes
-            if part_shape.collision_type == CT_SWORD[atk_id]:
+            atk_types = (CT_SWORD[atk_id], CT_ARROW[atk_id])
+            if part_shape.collision_type in atk_types:
                 sword_shape, part_shape = part_shape, sword_shape
             # one damage event per swing: global per-attacker cooldown
             gkey = ("atk", atk_id)
@@ -64,10 +85,15 @@ class CombatSystem:
             key = (atk_id, id(part_shape))
             if self.sim_time - self.cooldowns.get(key, -99) < C.HIT_COOLDOWN:
                 return
-            sw = attacker.bodies["sword"]
-            rel_v = (sw.velocity_at_world_point(p)
+            hit_body = sword_shape.body          # actual striking body
+            rel_v = (hit_body.velocity_at_world_point(p)
                      - part_shape.body.velocity_at_world_point(p)).length
-            zone = classify_zone(sw, p, attacker, victim)
+            # arrows: post_solve speed is already absorbed; use pre-impact
+            if getattr(sword_shape, "part", "") == "arrow":
+                rel_v = max(rel_v, getattr(hit_body, "pre_speed", 0.0))
+            zone = classify_zone(attacker.bodies["sword"], p, attacker,
+                                 victim, contact_shape=sword_shape,
+                                 rel_speed=rel_v)
             part = getattr(part_shape, "part", "torso")
             sharp = zone in self.sharp
             dmg, lethal = self._damage(zone, part, rel_v, sharp)
