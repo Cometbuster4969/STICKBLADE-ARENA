@@ -1,4 +1,5 @@
 import "./globals.css";
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata = {
   title: "STICKBLADE ARENA — LLM Sword Duels",
@@ -32,6 +33,7 @@ export default function RootLayout({ children }) {
         <footer className="site-foot">
           physics-based LLM benchmark · vote blind · sharp zones change everything
         </footer>
+        <Analytics />
       </body>
     </html>
   );
