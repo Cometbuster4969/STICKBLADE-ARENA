@@ -70,11 +70,29 @@ const HEAD_R = 12, START_HP = 100;
 
 const W = R.meta.width, H = R.meta.height, FPS = R.meta.fps;
 const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
-cv.width = W; cv.height = H;
+// Resolution-aware sizing: render at the canvas's actual on-screen size
+// (capped at DPR<=1.5) instead of always 1280x720 — on a 400px-wide phone
+// the old code drew ~5.5x more pixels per frame than the user could see.
+function fitCanvas() {
+  const cssW = cv.clientWidth || W;
+  const dpr  = Math.min(window.devicePixelRatio || 1, 1.5);
+  const targetW = Math.max(320, Math.round(cssW * dpr));
+  const targetH = Math.round(targetW * (H / W));
+  if (cv.width !== targetW || cv.height !== targetH) {
+    cv.width = targetW; cv.height = targetH;
+    // bg cache becomes stale on resize — rebuild lazily by clearing the flag.
+    bgDirty = true;
+  }
+}
+let bgDirty = true;
+// Defer the first fit until the canvas has a real CSS width (React mount).
+requestAnimationFrame(fitCanvas);
+window.addEventListener("resize", () => { bgDirty = true; fitCanvas(); }, { passive: true });
 
-/* ---------- background (drawn once) ---------- */
-const bg = document.createElement("canvas"); bg.width = W; bg.height = H;
-{
+/* ---------- background (cached; rebuilt on resize) ---------- */
+const bg = document.createElement("canvas");
+function buildBg() {
+  bg.width = W; bg.height = H;       // engine coords; ctx.scale handles display
   const b = bg.getContext("2d");
   const g = b.createLinearGradient(0,0,0,H);
   g.addColorStop(0,"#10121a"); g.addColorStop(1,"#262a3a");
@@ -87,7 +105,9 @@ const bg = document.createElement("canvas"); bg.width = W; bg.height = H;
   for (let x=0; x<W; x+=64) { b.beginPath(); b.moveTo(x,fy+8); b.lineTo(x-30,H); b.stroke(); }
   b.fillStyle = "rgba(255,255,255,0.05)";
   b.beginPath(); b.ellipse(W/2, fy+20, 430, 140, 0, 0, 7); b.fill();
+  bgDirty = false;
 }
+buildBg();
 
 /* ---------- replay indexing ---------- */
 const NB = BODY.length + (WEAPON === "flail" ? FLAIL_EXTRA : 0);
@@ -178,15 +198,20 @@ function sfxWin(){
 
 /* ---------- fx state (client-side particles) ---------- */
 let blood=[], stains=[], sparks=[], numbers=[], shake=0, slowmo=0, flash=0;
+// Phones get half the particle counts so heavy turns don't tank the framerate.
+const LOW_FX = typeof window !== "undefined" &&
+  (window.matchMedia && window.matchMedia("(max-width: 720px)").matches);
+const FX_MUL = LOW_FX ? 0.5 : 1;
 function spawnEvent(e){
   if (e.k === "clash") {
-    for (let i=0;i<10;i++){ const a=Math.random()*6.283, s=60+Math.random()*180;
+    const count = Math.round(10 * FX_MUL);
+    for (let i=0;i<count;i++){ const a=Math.random()*6.283, s=60+Math.random()*180;
       sparks.push([e.x,e.y,Math.cos(a)*s,Math.sin(a)*s,0.15+Math.random()*0.25]); }
     shake = Math.max(shake,3);
     sfxClash();
     return;
   }
-  const n = e.s ? Math.min(46, 6+e.d*1.6) : 3;
+  const n = e.s ? Math.min(Math.round(46 * FX_MUL), Math.round((6+e.d*1.6) * FX_MUL)) : Math.round(3 * FX_MUL);
   for (let i=0;i<n;i++){ const a=Math.random()*6.283, s=40+Math.random()*(90+e.d*9);
     blood.push([e.x,e.y,Math.cos(a)*s,Math.sin(a)*s+80,0.5+Math.random()*0.8,1.5+Math.random()*2.1]); }
   if (e.s) { numbers.push([e.x,e.y+18, e.l?"FATAL!":("-"+e.d.toFixed(0)),
@@ -201,7 +226,8 @@ function stepFx(dt){
     const g = arr===blood ? -900 : -400;
     for (const p of arr){ p[0]+=p[2]*dt; p[1]+=p[3]*dt; p[3]+=g*dt; p[4]-=dt;
       if (arr===blood && p[1] < R.meta.floor_y+3 && p[3]<0){
-        if (stains.length<260) stains.push([p[0], R.meta.floor_y+Math.random()*3, p[5]*(0.9+Math.random()*0.8)]);
+        const cap = LOW_FX ? 120 : 260;
+        if (stains.length<cap) stains.push([p[0], R.meta.floor_y+Math.random()*3, p[5]*(0.9+Math.random()*0.8)]);
         p[4]=0; } }
   }
   blood = blood.filter(p=>p[4]>0); sparks = sparks.filter(p=>p[4]>0);
@@ -534,10 +560,17 @@ function advance(){
   }
 }
 function render(){
+  if (bgDirty) buildBg();
   const frame = R.frames[cursor];
   const ox = shake>0.3 ? (Math.random()*2-1)*shake : 0;
   const oy = shake>0.3 ? (Math.random()*2-1)*shake : 0;
-  ctx.drawImage(bg,0,0);
+  // Map engine coordinates (W x H = 1280x720) into the canvas's actual
+  // pixel size, which on mobile may be just 600x337. This is the single
+  // biggest perf win — every line/circle becomes ~5x cheaper to rasterize.
+  const sX = cv.width  / W;
+  const sY = cv.height / H;
+  ctx.setTransform(sX, 0, 0, sY, 0, 0);
+  ctx.drawImage(bg, 0, 0);
   drawFx(ox,oy);
   const over = frame[3]===1;
   drawFighter(frame,0,R.meta.p1, frame[0]<=0, ox,oy);
