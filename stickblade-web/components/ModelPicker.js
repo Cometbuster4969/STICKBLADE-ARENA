@@ -1,5 +1,5 @@
 "use client";
-import { useId, useState } from "react";
+import { useId } from "react";
 
 const CUSTOM = "__custom__";
 
@@ -9,14 +9,36 @@ export default function ModelPicker({ label, models, value, custom,
   const isCustom = value === CUSTOM;
   const selectId = useId();
   const inputId = useId();
+
+  // Visually de-emphasize the "(green)/(blue)" suffix and color the dot.
+  const m = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(label || "");
+  const main = m ? m[1] : label;
+  const sub = m ? m[2] : null;
+
   return (
     <div>
       <label
         htmlFor={selectId}
         className="lbl"
-        style={accent ? { color: accent } : undefined}
+        style={{ display: "flex", alignItems: "center", gap: 8 }}
       >
-        {label}
+        {accent && (
+          <span
+            aria-hidden="true"
+            style={{
+              width: 8, height: 8, borderRadius: 2,
+              background: accent,
+              boxShadow: `0 0 10px ${accent}`,
+              display: "inline-block",
+            }}
+          />
+        )}
+        <span style={{ color: "var(--dim)" }}>{main}</span>
+        {sub && (
+          <span style={{ color: accent || "var(--dim)", letterSpacing: 1 }}>
+            · {sub}
+          </span>
+        )}
       </label>
       <select
         id={selectId}
