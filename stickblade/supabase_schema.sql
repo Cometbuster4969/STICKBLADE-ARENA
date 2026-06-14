@@ -59,6 +59,41 @@ alter table matches add column if not exists weapon     text default 'sword';
 alter table matches add column if not exists flip       boolean default false;
 alter table matches add column if not exists commentary text;
 alter table elo     add column if not exists weapon     text default 'sword';
+
+-- ============================================================
+-- Tournaments (single-elim brackets)
+-- ============================================================
+create table if not exists tournaments (
+    id            text primary key,
+    created       double precision,
+    name          text,
+    size          integer,
+    weapon        text default 'sword',
+    sharp         text,
+    arena         text default 'normal',
+    mode          text default 'macro',
+    status        text,                 -- queued | running | done | error
+    current_round integer default 0,
+    winner_model  text,
+    models        text,                 -- JSON array of model ids in seed order
+    error         text
+);
+
+create table if not exists tournament_matches (
+    id            serial primary key,
+    tournament_id text references tournaments(id),
+    round         integer,
+    slot          integer,
+    match_id      text,
+    model_a       text,
+    model_b       text,
+    winner_model  text,
+    unique (tournament_id, round, slot)
+);
+
+create index if not exists idx_tournament_matches_tid on tournament_matches (tournament_id, round, slot);
+alter table tournaments        enable row level security;
+alter table tournament_matches enable row level security;
 -- Promote the elo PK to include weapon (only if it doesn't already):
 do $$
 begin

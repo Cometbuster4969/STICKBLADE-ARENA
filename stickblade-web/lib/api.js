@@ -39,3 +39,14 @@ export const postVote = (id, choice) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ choice }),
   });
+
+// ---------- Tournaments ----------
+export const createTournament = (body) =>
+  api("/tournament", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+export const getTournament = (id) => api(`/tournament/${id}`);
+export const listTournaments = () => api("/tournaments");
