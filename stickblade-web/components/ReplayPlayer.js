@@ -43,14 +43,20 @@ export default function ReplayPlayer({ replay }) {
       <div className="controls">
         <button id="bPlay">⏸ Pause</button>
         <button id="bRestart">⟲ Restart</button>
-        <input type="range" id="scrub" min="0" max="100" defaultValue="0" step="1" />
+        <input
+          type="range" id="scrub" min="0" max="100" defaultValue="0" step="1"
+          aria-label="Replay scrubber"
+        />
         <span className="time" id="time">0:00 / 0:00</span>
-        <select id="speed" defaultValue="1">
+        <select id="speed" defaultValue="1" aria-label="Replay speed">
           <option value="0.25">0.25×</option>
           <option value="0.5">0.5×</option>
           <option value="1">1×</option>
           <option value="2">2×</option>
         </select>
+        <button id="bMute" aria-pressed="false" title="Toggle sound effects">
+          🔊 Sound
+        </button>
       </div>
     </div>
   );

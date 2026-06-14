@@ -3,17 +3,18 @@ import { useId } from "react";
 
 const CUSTOM = "__custom__";
 
-/* Dropdown of arena models + free-text custom OpenRouter id. */
-export default function ModelPicker({ label, models, value, custom,
-                                      onChange, onCustomChange, accent }) {
+/* Dropdown of arena models + free-text custom OpenRouter id.
+
+   IMPORTANT — blind voting:
+     The picker DOES NOT show a colored swatch tied to the model. That used to
+     leak which model became the GREEN ragdoll vs the BLUE one. The server now
+     randomizes the canvas assignment per match, so we keep the picker neutral
+     and only show the slot index (1/2). */
+export default function ModelPicker({ label, slotIndex, models, value, custom,
+                                      onChange, onCustomChange }) {
   const isCustom = value === CUSTOM;
   const selectId = useId();
   const inputId = useId();
-
-  // Visually de-emphasize the "(green)/(blue)" suffix and color the dot.
-  const m = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(label || "");
-  const main = m ? m[1] : label;
-  const sub = m ? m[2] : null;
 
   return (
     <div>
@@ -22,23 +23,27 @@ export default function ModelPicker({ label, models, value, custom,
         className="lbl"
         style={{ display: "flex", alignItems: "center", gap: 8 }}
       >
-        {accent && (
+        {slotIndex != null && (
           <span
             aria-hidden="true"
             style={{
-              width: 8, height: 8, borderRadius: 2,
-              background: accent,
-              boxShadow: `0 0 10px ${accent}`,
-              display: "inline-block",
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 18, height: 18, borderRadius: 4,
+              background: "var(--bg-3)",
+              border: "1px solid var(--line-strong)",
+              color: "var(--text-2)",
+              fontSize: 11, fontWeight: 700, letterSpacing: 0,
             }}
-          />
+          >{slotIndex}</span>
         )}
-        <span style={{ color: "var(--dim)" }}>{main}</span>
-        {sub && (
-          <span style={{ color: accent || "var(--dim)", letterSpacing: 1 }}>
-            · {sub}
-          </span>
-        )}
+        <span style={{ color: "var(--dim)" }}>{label}</span>
+        <span
+          style={{ color: "var(--mute)", fontSize: 10, letterSpacing: 1,
+                   marginLeft: "auto" }}
+          title="The canvas color (green/blue) is randomized per match for blind voting"
+        >
+          color randomized
+        </span>
       </label>
       <select
         id={selectId}
