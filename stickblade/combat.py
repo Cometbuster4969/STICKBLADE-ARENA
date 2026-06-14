@@ -24,14 +24,25 @@ def classify_zone(sword_body, contact_world, attacker, victim,
             return "arrowhead" if local.y >= ARROW_LEN * 0.6 else "arrow_shaft"
         return "bow_limb"
 
-    # ---- sword (default) ----
+    # ---- single-segment blade (sword / dagger / spear) ----
+    # Read per-weapon geometry off the attacker; falls back to global SWORD_*
+    # for legacy callers (older replays / tests).
+    geo = getattr(attacker, "geo", None) or {
+        "handle": C.SWORD_HANDLE, "pommel": C.SWORD_POMMEL,
+        "tip": C.SWORD_TIP, "tip_frac": C.SWORD_TIP_FRAC,
+    }
     local = sword_body.world_to_local(contact_world)
     y = local.y
-    if y <= C.SWORD_HANDLE + 4:
-        return "pommel"
-    span = C.SWORD_TIP - C.SWORD_HANDLE
-    if y >= C.SWORD_HANDLE + C.SWORD_TIP_FRAC * span:
+    handle, tip = geo["handle"], geo["tip"]
+    span = tip - handle
+    if y <= handle + 4:
+        # Pole weapons call the back-end "butt"; blades call it "pommel".
+        return "butt" if attacker.weapon == "spear" else "pommel"
+    if y >= handle + geo["tip_frac"] * span:
         return "tip"
+    # Mid-shaft on a spear is just "shaft"; on blades it's edge/back_edge.
+    if attacker.weapon == "spear":
+        return "shaft"
     to_victim = victim.pos() - sword_body.position
     ca, sa = math.cos(sword_body.angle), math.sin(sword_body.angle)
     xaxis = pymunk.Vec2d(ca, sa)

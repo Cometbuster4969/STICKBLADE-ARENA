@@ -58,7 +58,7 @@ class Match:
     PH_THINK, PH_SIM, PH_BANNER, PH_OVER = "THINKING", "SIM", "BANNER", "OVER"
 
     def __init__(self, p1_kind, p2_kind, sharp, fx, log_path=None,
-                 mode="macro", weapon="sword"):
+                 mode="macro", weapon="sword", arena="normal"):
         from weapons import WEAPONS, WEAPON_ZONES
         self.weapon = weapon if weapon in WEAPONS else "sword"
         # keep only zones valid for this weapon; default to first zone
@@ -67,10 +67,18 @@ class Match:
         self.fx = fx
         self.log_path = log_path
         self.mode = mode if mode in ("macro", "joint") else "macro"
+        # ---- arena modifier ----
+        self.arena = arena if arena in ("normal", "ice", "low_gravity") else "normal"
         self.space = pymunk.Space()
-        self.space.gravity = C.GRAVITY
+        if self.arena == "low_gravity":
+            self.space.gravity = (C.GRAVITY[0], C.GRAVITY[1] * 0.35)  # moon-ish
+        else:
+            self.space.gravity = C.GRAVITY
         self.space.damping = C.SPACE_DAMPING
-        make_ground(self.space)
+        # Ice floor: pass a friction multiplier into make_ground; also
+        # reduce limb friction a touch so fighters slide on impact.
+        ground_friction_mult = 0.10 if self.arena == "ice" else 1.0
+        make_ground(self.space, friction_mult=ground_friction_mult)
         self.f1 = Fighter(self.space, 430, 1, C.C_P1, C.C_P1_DARK,
                           p1_kind.upper(), 1, weapon=self.weapon)
         self.f2 = Fighter(self.space, C.WIDTH - 430, -1, C.C_P2, C.C_P2_DARK,

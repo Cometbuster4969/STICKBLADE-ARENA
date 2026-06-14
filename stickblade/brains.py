@@ -178,6 +178,15 @@ def _sanitize(d, allowed=None):
     return {"action": a, "footwork": f, "thought": t}
 
 
+def _trim(text, max_words=25):
+    """Clamp model output to <= max_words and strip stray punctuation."""
+    text = re.sub(r"\s+", " ", str(text or "")).strip().strip('"\'`')
+    words = text.split(" ")
+    if len(words) > max_words:
+        text = " ".join(words[:max_words]).rstrip(",;:") + "…"
+    return text[:280]
+
+
 class Brain:
     label = "BASE"
 
@@ -213,6 +222,27 @@ class Brain:
         """Blocking; called from worker thread. Returns sanitized dict."""
         raise NotImplementedError
 
+    # ---------- free-form chat (trash talk / commentary) -----------------
+    def chat(self, system, user, max_tokens=80, temperature=0.95):
+        """Stateless one-shot completion. Override in concrete brains.
+        Default: a small library of canned trash talk so the mocks aren't
+        dead silent. Returns a plain string."""
+        return ""
+
+    def chat_with_timeout(self, system, user, max_tokens=80,
+                          temperature=0.95, fallback=""):
+        out = {}
+        def run():
+            try:
+                out["r"] = self.chat(system, user, max_tokens=max_tokens,
+                                     temperature=temperature)
+            except Exception as e:
+                out["err"] = str(e)[:80]
+        th = threading.Thread(target=run, daemon=True)
+        th.start()
+        th.join(min(C.LLM_TIMEOUT, 15))   # quips shouldn't block long
+        return _trim(out.get("r") or fallback)
+
     def decide_with_timeout(self, state):
         out = {}
         def run():
@@ -241,12 +271,35 @@ PERSONALITIES = {
 }
 
 
+_MOCK_QUIPS = {
+    "berserker": [
+        "I don't fence. I delete.",
+        "Hope your save file is recent.",
+        "Stand still. It'll hurt less.",
+        "Three swings. None of them yours.",
+    ],
+    "duelist": [
+        "Patience always wins. I've already won.",
+        "I read your intent two turns ago.",
+        "Come closer. I dare you.",
+        "Your zone is bad and you should feel bad.",
+    ],
+}
+
+
 class MockBrain(Brain):
     def __init__(self, sharp_zones, personality="duelist", label=None,
                  weapon="sword"):
         super().__init__(sharp_zones, "macro", weapon)
         self.p = personality
         self.label = label or f"Mock-{personality}"
+
+    def chat(self, system, user, max_tokens=80, temperature=0.95):
+        # Mocks don't actually call any model — pick a personality-appropriate
+        # canned line. Works for both pre-fight quips and the commentary
+        # roast (commentator role plays a generic "duelist" pool).
+        pool = _MOCK_QUIPS.get(self.p, _MOCK_QUIPS["duelist"])
+        return random.choice(pool)
 
     def _sharp_attacks(self):
         atk = [a for a in self.actions
@@ -332,6 +385,14 @@ class GPTBrain(Brain):
                          {"role": "assistant", "content": txt}]
         return self._clean(_extract_json(txt))
 
+    def chat(self, system, user, max_tokens=80, temperature=0.95):
+        r = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user",   "content": user}],
+            temperature=temperature, max_tokens=max_tokens)
+        return r.choices[0].message.content or ""
+
 
 class GeminiBrain(Brain):
     label = "GEMINI"
@@ -355,6 +416,17 @@ class GeminiBrain(Brain):
         txt = r.text
         self.convo.append({"role": "model", "parts": [{"text": txt}]})
         return self._clean(_extract_json(txt))
+
+    def chat(self, system, user, max_tokens=80, temperature=0.95):
+        from google.genai import types
+        r = self.client.models.generate_content(
+            model=self.model,
+            contents=[{"role": "user", "parts": [{"text": user}]}],
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                temperature=temperature,
+                max_output_tokens=max_tokens))
+        return r.text or ""
 
 
 class OpenRouterBrain(Brain):
@@ -393,6 +465,65 @@ class OpenRouterBrain(Brain):
         self.history += [{"role": "user", "content": user},
                          {"role": "assistant", "content": txt}]
         return self._clean(_extract_json(txt))
+
+    def chat(self, system, user, max_tokens=80, temperature=0.95):
+        r = self._client.post("/chat/completions", json={
+            "model": self.model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user",   "content": user}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        })
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"] or ""
+
+
+# ============================================================
+# Trash talk + post-fight commentary
+# ============================================================
+QUIP_SYS = (
+    "You are a stickman sword/flail/bow fighter about to enter a physics-based "
+    "duel against another AI model. Reply with ONE line of in-character "
+    "trash talk, maximum 18 words. No emojis. No quotation marks. No 'As an AI'. "
+    "Be cocky, witty, specific to the matchup."
+)
+
+
+def pre_fight_quip(brain, opponent_label, weapon="sword"):
+    """Ask the brain for a single trash-talk line. Falls back to a canned
+    quip if the model is slow or errors out."""
+    user = (f"You are fighting a model called '{opponent_label}'. "
+            f"Your weapon: {weapon}. Give your one line of pre-fight trash "
+            "talk. Just the line, nothing else.")
+    fallback = random.choice(_MOCK_QUIPS["berserker"] + _MOCK_QUIPS["duelist"])
+    return brain.chat_with_timeout(QUIP_SYS, user, max_tokens=60,
+                                   temperature=1.0, fallback=fallback)
+
+
+COMMENTATOR_SYS = (
+    "You are a snarky e-sports commentator for an AI sword-fighting arena. "
+    "Given the result of a duel between two LLMs, write a SHORT post-fight "
+    "summary (2 sentences, max 45 words total). Sentence 1: what happened. "
+    "Sentence 2: a playful roast of the LOSER. Stay in character, do not "
+    "mention being an AI. No emojis. No quotation marks."
+)
+
+
+def commentator_roast(commentator_brain, winner_name, loser_name, method,
+                      turns, weapon, sharp, final_hp,
+                      fallback="A clean kill. Better luck next patch."):
+    """Ask a third brain to write 2-sentence post-fight commentary."""
+    user = (
+        f"Weapon: {weapon}. Sharp zones: {', '.join(sharp)}.\n"
+        f"Winner: {winner_name}. Loser: {loser_name}.\n"
+        f"Method: {method}. Turns: {turns}.\n"
+        f"Final HP — winner: {final_hp.get(winner_name, '?')}, "
+        f"loser: {final_hp.get(loser_name, '?')}.\n"
+        "Write your 2-sentence summary + roast now."
+    )
+    return commentator_brain.chat_with_timeout(
+        COMMENTATOR_SYS, user, max_tokens=120, temperature=1.0,
+        fallback=fallback)
 
 
 def make_brain(kind, sharp_zones, mode="macro", weapon="sword"):

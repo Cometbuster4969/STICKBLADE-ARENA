@@ -247,7 +247,11 @@ class Fighter:
         return self.bodies["torso"].position
 
     def tip_pos(self):
-        return self.bodies["sword"].local_to_world((0, C.SWORD_TIP))
+        # Use the per-weapon geometry stashed by build_blade; bow/flail
+        # fighters don't have a meaningful "tip", fall back to the body pos.
+        geo = getattr(self, "geo", None)
+        tip_y = geo["tip"] if geo else C.SWORD_TIP
+        return self.bodies["sword"].local_to_world((0, tip_y))
 
     def head_pos(self):
         return self.bodies["head"].position
@@ -261,14 +265,17 @@ STANCE = {
 }
 
 
-def make_ground(space):
+def make_ground(space, friction_mult=1.0):
+    """Build the arena floor + walls.
+
+    friction_mult: 1.0 = normal stone; 0.10 = ice (fighters slip on impact)."""
     seg = pymunk.Segment(space.static_body, (-300, C.FLOOR_Y), (C.WIDTH + 300, C.FLOOR_Y), 6)
-    seg.friction = 1.5
+    seg.friction = 1.5 * friction_mult
     seg.elasticity = 0.05
     seg.collision_type = CT_GROUND
     space.add(seg)
     for wx in (60, C.WIDTH - 60):
         w = pymunk.Segment(space.static_body, (wx, 0), (wx, C.HEIGHT), 8)
-        w.friction = 0.4
+        w.friction = 0.4 * friction_mult
         w.collision_type = CT_GROUND
         space.add(w)

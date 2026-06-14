@@ -7,14 +7,23 @@ import { getModels, createMatch, getMatch, getReplay, postVote,
          getLeaderboard } from "@/lib/api";
 
 const WEAPON_ZONES = {
-  sword: ["tip", "edge", "back_edge", "pommel"],
-  flail: ["ball", "spikes", "chain", "handle"],
-  bow:   ["arrowhead", "arrow_shaft", "bow_limb"],
+  sword:  ["tip", "edge", "back_edge", "pommel"],
+  dagger: ["tip", "edge", "back_edge", "pommel"],
+  spear:  ["tip", "shaft", "butt"],
+  flail:  ["ball", "spikes", "chain", "handle"],
+  bow:    ["arrowhead", "arrow_shaft", "bow_limb"],
 };
 const WEAPONS = [
-  ["sword", "🗡 SWORD"],
-  ["flail", "⛓ FLAIL"],
-  ["bow",   "🏹 BOW"],
+  ["sword",  "🗡 SWORD"],
+  ["dagger", "🔪 DAGGER"],
+  ["spear",  "⊥ SPEAR"],
+  ["flail",  "⛓ FLAIL"],
+  ["bow",    "🏹 BOW"],
+];
+const ARENAS = [
+  ["normal",      "🏟 NORMAL"],
+  ["ice",         "❄ ICE"],
+  ["low_gravity", "🌙 LOW G"],
 ];
 
 // ----- predict-streak (localStorage) ----------------------------------------
@@ -43,6 +52,7 @@ export default function FightPage() {
   const [sharp, setSharp] = useState(["tip"]);
   const [mode, setMode] = useState("macro");
   const [weapon, setWeapon] = useState("sword");
+  const [arena, setArena] = useState("normal");
 
   const pickWeapon = (w) => {
     setWeapon(w);
@@ -102,7 +112,7 @@ export default function FightPage() {
       const { match_id } = await createMatch({
         model_a: modelOf(selA, customA),
         model_b: modelOf(selB, customB),
-        sharp, blind: true, mode, weapon,
+        sharp, blind: true, mode, weapon, arena,
       });
       setMatchId(match_id);
       setStatus("🧠 simulating — LLMs are fighting");
@@ -217,6 +227,25 @@ export default function FightPage() {
           </div>
 
           <div>
+            <label className="lbl">Arena</label>
+            <div className="zones">
+              {ARENAS.map(([a, label]) => (
+                <div key={a}
+                  role="button" tabIndex={0}
+                  aria-pressed={arena === a}
+                  className={"zone" + (arena === a ? " on" : "")}
+                  title={a === "ice" ? "Slippery floor — fighters slide on impact"
+                       : a === "low_gravity" ? "Moon-ish gravity — bigger arcs, slower falls"
+                       : "Standard arena"}
+                  onClick={() => setArena(a)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setArena(a); } }}>
+                  {label}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <label className="lbl">Control mode</label>
             <div className="zones">
               <div className={"zone" + (mode === "macro" ? " on" : "")}
@@ -281,6 +310,8 @@ export default function FightPage() {
               >
                 <option value="">all weapons</option>
                 <option value="sword">sword</option>
+                <option value="dagger">dagger</option>
+                <option value="spear">spear</option>
                 <option value="flail">flail</option>
                 <option value="bow">bow</option>
               </select>
@@ -385,6 +416,22 @@ export default function FightPage() {
               {lastResult === "correct"
                 ? `✓ Prediction correct — streak ${streak.cur}`
                 : "✗ Prediction wrong — streak reset"}
+            </div>
+          )}
+          {reveal.commentary && (
+            <div style={{
+              marginTop: 14, paddingTop: 12,
+              borderTop: "1px dashed var(--line)",
+              fontStyle: "italic", fontSize: 15, lineHeight: 1.5,
+              color: "var(--text)",
+              textAlign: "left", maxWidth: 720, margin: "14px auto 0",
+            }}>
+              <div style={{
+                fontStyle: "normal", fontSize: 11, letterSpacing: 2,
+                color: "var(--gold)", textTransform: "uppercase",
+                marginBottom: 6, fontWeight: 700,
+              }}>📣 Commentator's call</div>
+              “{reveal.commentary}”
             </div>
           )}
         </div>
