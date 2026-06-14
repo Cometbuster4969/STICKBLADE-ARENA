@@ -4,10 +4,12 @@ import LeaderboardTable from "@/components/LeaderboardTable";
 import { getLeaderboard } from "@/lib/api";
 
 const ZONE_TABS_BY_WEAPON = {
-  "":      [["", "Overall"], ["tip", "Tip"], ["edge", "Edge"], ["back_edge", "Back edge"], ["pommel", "Pommel"]],
-  sword:   [["", "Overall"], ["tip", "Fencers (tip)"], ["edge", "Sabreurs (edge)"], ["back_edge", "Tricksters (back edge)"], ["pommel", "Brawlers (pommel)"]],
-  flail:   [["", "Overall"], ["ball", "Ball"], ["spikes", "Spikes"], ["chain", "Chain"], ["handle", "Handle"]],
-  bow:     [["", "Overall"], ["arrowhead", "Arrowhead"], ["arrow_shaft", "Shaft"], ["bow_limb", "Stave"]],
+  "":       [["", "Overall"], ["tip", "Tip"], ["edge", "Edge"], ["back_edge", "Back edge"], ["pommel", "Pommel"]],
+  sword:    [["", "Overall"], ["tip", "Fencers (tip)"], ["edge", "Sabreurs (edge)"], ["back_edge", "Tricksters (back edge)"], ["pommel", "Brawlers (pommel)"]],
+  dagger:   [["", "Overall"], ["tip", "Stabbers (tip)"], ["edge", "Slashers (edge)"], ["pommel", "Punchers (pommel)"]],
+  spear:    [["", "Overall"], ["tip", "Pikemen (tip)"], ["shaft", "Polers (shaft)"], ["butt", "Buttwhackers"]],
+  flail:    [["", "Overall"], ["ball", "Ball"], ["spikes", "Spikes"], ["chain", "Chain"], ["handle", "Handle"]],
+  bow:      [["", "Overall"], ["arrowhead", "Arrowhead"], ["arrow_shaft", "Shaft"], ["bow_limb", "Stave"]],
 };
 
 export default function LeaderboardPage() {
@@ -40,7 +42,8 @@ export default function LeaderboardPage() {
 
       <label htmlFor={wId} className="lbl">Weapon</label>
       <div className="zones" style={{ marginBottom: 12 }} id={wId}>
-        {[["", "All"], ["sword", "🗡 Sword"], ["flail", "⛓ Flail"], ["bow", "🏹 Bow"]].map(([w, n]) => (
+        {[["", "All"], ["sword", "🗡 Sword"], ["dagger", "🔪 Dagger"],
+          ["spear", "⊥ Spear"], ["flail", "⛓ Flail"], ["bow", "🏹 Bow"]].map(([w, n]) => (
           <div key={w}
             role="button" tabIndex={0} aria-pressed={weapon === w}
             className={"zone" + (weapon === w ? " on" : "")}

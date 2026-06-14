@@ -53,9 +53,15 @@ class ReplayRecorder:
         self.frames = []
         self.events = []
         self.thoughts = []
+        # Pre-fight trash talk per fighter (canvas-side a/b strings).
+        # Populated by server.py before the simulation starts.
+        self.quips = {"a": "", "b": ""}
         self._n = 0
         self._logged = 0
         self.match = None
+
+    def set_quips(self, quip_a, quip_b):
+        self.quips = {"a": quip_a or "", "b": quip_b or ""}
 
     def attach(self, match):
         self.match = match
@@ -120,11 +126,15 @@ class ReplayRecorder:
                 "width": C.WIDTH, "height": C.HEIGHT, "floor_y": C.FLOOR_Y,
                 "fps": 60 // self.every, "sharp": m.sharp,
                 "weapon": m.weapon,
+                "arena": getattr(m, "arena", "normal"),
                 "winner": winner_txt, "result": result,
                 "p1": {"name": m.f1.name, "color": _css(m.f1.color),
                        "dark": _css(m.f1.dark), "facing": m.f1.facing},
                 "p2": {"name": m.f2.name, "color": _css(m.f2.color),
                        "dark": _css(m.f2.dark), "facing": m.f2.facing},
+                # Pre-fight trash talk (canvas-side). Player.js renders these
+                # as speech bubbles over each fighter at replay start.
+                "quips": self.quips,
             },
             "frames": self.frames,
             "events": self.events,

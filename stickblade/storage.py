@@ -45,7 +45,8 @@ class LocalStorage:
                 error TEXT,
                 blind INTEGER DEFAULT 1,
                 voted INTEGER DEFAULT 0,
-                flip INTEGER DEFAULT 0  -- 1 = model_a was rendered as Fighter B (blue)
+                flip INTEGER DEFAULT 0, -- 1 = model_a was rendered as Fighter B (blue)
+                commentary TEXT         -- post-fight 2-sentence commentary/roast
             );
             CREATE TABLE IF NOT EXISTS votes (
                 id TEXT PRIMARY KEY,
@@ -66,6 +67,7 @@ class LocalStorage:
             for ddl in [
                 "ALTER TABLE matches ADD COLUMN weapon TEXT DEFAULT 'sword'",
                 "ALTER TABLE matches ADD COLUMN flip   INTEGER DEFAULT 0",
+                "ALTER TABLE matches ADD COLUMN commentary TEXT",
                 "ALTER TABLE elo     ADD COLUMN weapon TEXT DEFAULT 'sword'",
             ]:
                 try:
@@ -95,14 +97,16 @@ class LocalStorage:
             c.execute("UPDATE matches SET status=?, error=? WHERE id=?",
                       (status, error, mid))
 
-    def finish_match(self, mid, winner_side, method, turns, replay):
+    def finish_match(self, mid, winner_side, method, turns, replay,
+                     commentary=None):
         path = os.path.join(self.replay_dir, mid + ".json")
         with open(path, "w") as f:
             json.dump(replay, f, separators=(",", ":"))
         with self._lock, self._conn() as c:
             c.execute(
                 "UPDATE matches SET status='done', winner_side=?, method=?,"
-                " turns=? WHERE id=?", (winner_side, method, turns, mid))
+                " turns=?, commentary=? WHERE id=?",
+                (winner_side, method, turns, commentary, mid))
 
     def get_match(self, mid):
         with self._conn() as c:
@@ -201,6 +205,7 @@ class LocalStorage:
             "method": m["method"],
             "flip": flip,
             "weapon": m.get("weapon") or "sword",
+            "commentary": m.get("commentary") or "",
         }
 
     def leaderboard(self, sharp=None, weapon=None):

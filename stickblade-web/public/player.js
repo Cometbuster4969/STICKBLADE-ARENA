@@ -59,7 +59,13 @@ const HALF = {torso:28, uarm:13, farm:12, off_uarm:13, off_farm:12,
 const WIDTHS = {torso:12, uarm:9, farm:8, off_uarm:8, off_farm:7,
                 thigh_f:10, shin_f:9, thigh_b:9, shin_b:8};
 const DARKSET = new Set(["off_uarm","off_farm","thigh_b","shin_b"]);
-const SW = {pommel:-34, handle:-26, tip:52, tipFrac:0.72};
+// Per-weapon blade geometry — must match WEAPON_GEOMETRY in stickblade/weapons.py.
+const WEAPON_GEO = {
+  sword:  {pommel:-34, handle:-26, tip:52, tipFrac:0.72, w:5, hilt:true},
+  dagger: {pommel:-18, handle:-12, tip:22, tipFrac:0.55, w:4, hilt:true},
+  spear:  {pommel:-10, handle: -6, tip:98, tipFrac:0.85, w:4, hilt:false},
+};
+const SW = WEAPON_GEO.sword;   // legacy alias
 const HEAD_R = 12, START_HP = 100;
 
 const W = R.meta.width, H = R.meta.height, FPS = R.meta.fps;
@@ -302,20 +308,39 @@ function drawBow(frame, fi, meta, ox, oy){
 }
 function drawSword(frame, fi, meta, ox, oy){
   const b = bodyAt(frame,fi,10), sharp = R.meta.sharp;
-  const span = SW.tip - SW.handle, tipY = SW.handle + SW.tipFrac*span;
+  const geo = WEAPON_GEO[WEAPON] || WEAPON_GEO.sword;
+  const span = geo.tip - geo.handle, tipY = geo.handle + geo.tipFrac*span;
   const fc = liveFacing(frame, fi, meta);
-  line(local(b,0,0), local(b,0,SW.tip), 5, "#d6dae6", ox, oy);
+  // blade body
+  line(local(b,0,0), local(b,0,geo.tip), geo.w, "#d6dae6", ox, oy);
+
+  if (WEAPON === "spear") {
+    // shaft sharpened? — colour the mid section
+    if (sharp.includes("shaft"))
+      line(local(b,0,6), local(b,0,tipY), 3, "#ff4646", ox, oy);
+    if (sharp.includes("tip"))
+      line(local(b,0,tipY), local(b,0,geo.tip), 6, "#ff4646", ox, oy);
+    // butt cap
+    const pm = local(b,0,geo.pommel);
+    ctx.fillStyle = sharp.includes("butt") ? "#ff4646" : "#a98050";
+    ctx.beginPath(); ctx.arc(sx(pm[0],ox), sy(pm[1],oy), 5, 0, 7); ctx.fill();
+    return;
+  }
+
+  // sword / dagger
   if (sharp.includes("edge"))
     line(local(b, fc*2.4, 2), local(b, fc*2.4, tipY), 2, "#ff4646", ox, oy);
   if (sharp.includes("back_edge"))
     line(local(b,-fc*2.4, 2), local(b,-fc*2.4, tipY), 2, "#ff4646", ox, oy);
   if (sharp.includes("tip"))
-    line(local(b,0,tipY), local(b,0,SW.tip), 5, "#ff4646", ox, oy);
-  line(local(b,-9,-2), local(b,9,-2), 4, "#d4af60", ox, oy);
-  line(local(b,0,-3), local(b,0,SW.handle), 6, "#60462e", ox, oy);
-  const pm = local(b,0,SW.pommel);
-  ctx.fillStyle = sharp.includes("pommel") ? "#ff4646" : "#d4af60";
-  ctx.beginPath(); ctx.arc(sx(pm[0],ox), sy(pm[1],oy), 5, 0, 7); ctx.fill();
+    line(local(b,0,tipY), local(b,0,geo.tip), geo.w, "#ff4646", ox, oy);
+  if (geo.hilt) {
+    line(local(b,-9,-2), local(b,9,-2), 4, "#d4af60", ox, oy);
+    line(local(b,0,-3), local(b,0,geo.handle), 6, "#60462e", ox, oy);
+    const pm = local(b,0,geo.pommel);
+    ctx.fillStyle = sharp.includes("pommel") ? "#ff4646" : "#d4af60";
+    ctx.beginPath(); ctx.arc(sx(pm[0],ox), sy(pm[1],oy), 5, 0, 7); ctx.fill();
+  }
 }
 function shade(hex,f){
   const n=parseInt(hex.slice(1),16);
@@ -354,6 +379,15 @@ function drawHud(frame){
   ctx.font="11px Arial"; ctx.fillStyle="#969aac"; ctx.fillText("TURN", W/2, 64);
   ctx.font="bold 14px Arial"; ctx.fillStyle="#ff4646";
   ctx.fillText(WEAPON.toUpperCase()+" — SHARP: "+R.meta.sharp.map(z=>z.toUpperCase()).join(" + "), W/2, 86);
+  // arena badge (top-right under the HP bar, only when non-default)
+  const arena = R.meta.arena || "normal";
+  if (arena !== "normal") {
+    const txt = arena === "ice" ? "❄ ICE FLOOR" : "🌙 LOW GRAVITY";
+    ctx.font = "bold 12px Arial";
+    ctx.textAlign = "right";
+    ctx.fillStyle = arena === "ice" ? "#88d8ff" : "#c9b8ff";
+    ctx.fillText(txt, W - 40, 86);
+  }
 }
 function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); }
 function wrap(t,max){ const out=[]; let cur="";
@@ -370,6 +404,55 @@ function drawThought(text, meta, side){
   rr(x,y,w,h,8); ctx.stroke(); ctx.globalAlpha=1;
   ctx.fillStyle="#e8eaf4"; ctx.textAlign="left";
   lines.forEach((l,i)=>ctx.fillText(l, x+10, y+18+i*16));
+}
+// Pre-fight trash talk bubble pinned over each fighter's head. Fades in/out.
+function drawQuip(text, frame, fi, meta, alpha){
+  if (!text || alpha <= 0) return;
+  const head = bodyAt(frame, fi, 1);     // body index 1 = head
+  const lines = wrap(text, 28);
+  ctx.font = "italic 14px Arial";
+  const lw = Math.max(...lines.map(l => ctx.measureText(l).width));
+  const w = lw + 22, h = 18 * lines.length + 14;
+  const hx = sx(head[0], 0), hy = sy(head[1], 0);
+  let x = hx - w/2;
+  let y = hy - h - 22;
+  // keep on-screen
+  if (x < 8) x = 8;
+  if (x + w > W - 8) x = W - 8 - w;
+  if (y < 8) y = hy + 30;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  // bubble body
+  ctx.fillStyle = "rgba(8,9,15,0.92)";
+  rr(x, y, w, h, 10); ctx.fill();
+  ctx.strokeStyle = meta.color;
+  ctx.lineWidth = 2;
+  rr(x, y, w, h, 10); ctx.stroke();
+  // tail toward head
+  ctx.beginPath();
+  const tipx = Math.max(x + 14, Math.min(x + w - 14, hx));
+  ctx.moveTo(tipx - 7, y + h);
+  ctx.lineTo(tipx + 7, y + h);
+  ctx.lineTo(hx,       hy - 12);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(8,9,15,0.92)";
+  ctx.fill();
+  ctx.strokeStyle = meta.color;
+  ctx.stroke();
+  // text
+  ctx.fillStyle = "#f5f6fb";
+  ctx.textAlign = "left";
+  lines.forEach((l, i) => ctx.fillText(l, x + 11, y + 20 + i * 18));
+  ctx.restore();
+}
+const QUIP_FADE_IN_END   = 18;     // frames
+const QUIP_HOLD_END      = 110;    // frames (~3.6s @ 30fps)
+const QUIP_FADE_OUT_END  = 140;
+function quipAlpha(cursor) {
+  if (cursor < QUIP_FADE_IN_END)  return cursor / QUIP_FADE_IN_END;
+  if (cursor < QUIP_HOLD_END)     return 1;
+  if (cursor < QUIP_FADE_OUT_END) return 1 - (cursor - QUIP_HOLD_END) / (QUIP_FADE_OUT_END - QUIP_HOLD_END);
+  return 0;
 }
 
 /* ---------- playback loop ---------- */
@@ -464,6 +547,13 @@ function render(){
   drawHud(frame);
   const th = thoughtIdx>=0 ? R.thoughts[thoughtIdx] : null;
   if (th){ drawThought(th.a, R.meta.p1, 0); drawThought(th.b, R.meta.p2, 1); }
+  // pre-fight trash talk bubbles (first ~3.6s of replay)
+  const qa = R.meta.quips && R.meta.quips.a, qb = R.meta.quips && R.meta.quips.b;
+  const qAlpha = quipAlpha(cursor);
+  if (qAlpha > 0) {
+    drawQuip(qa, frame, 0, R.meta.p1, qAlpha);
+    drawQuip(qb, frame, 1, R.meta.p2, qAlpha);
+  }
   if (flash>0){ ctx.fillStyle=`rgba(255,255,255,${0.8*flash})`; ctx.fillRect(0,0,W,H); }
   if (killcamActive){
     // Cinematic letterbox bars
