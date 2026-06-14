@@ -9,9 +9,13 @@ import { getModels, createMatch, getMatch, getReplay, postVote,
 const WEAPON_ZONES = {
   sword: ["tip", "edge", "back_edge", "pommel"],
   flail: ["ball", "spikes", "chain", "handle"],
-  bow: ["arrowhead", "arrow_shaft", "bow_limb"],
+  bow:   ["arrowhead", "arrow_shaft", "bow_limb"],
 };
-const WEAPONS = [["sword", "🗡 SWORD"], ["flail", "⛓ FLAIL"], ["bow", "🏹 BOW"]];
+const WEAPONS = [
+  ["sword", "🗡 SWORD"],
+  ["flail", "⛓ FLAIL"],
+  ["bow",   "🏹 BOW"],
+];
 const ZONES = ["tip", "edge", "back_edge", "pommel"]; // leaderboard tabs (sword legacy)
 
 export default function FightPage() {
@@ -63,7 +67,7 @@ export default function FightPage() {
     setBusy(true);
     setReveal(null);
     setCanVote(false);
-    setStatus("⚙ queuing match…");
+    setStatus("⚙ queuing match");
     try {
       const { match_id } = await createMatch({
         model_a: modelOf(selA, customA),
@@ -71,7 +75,7 @@ export default function FightPage() {
         sharp, blind: true, mode, weapon,
       });
       setMatchId(match_id);
-      setStatus("🧠 simulating — LLMs are fighting…");
+      setStatus("🧠 simulating — LLMs are fighting");
       poll(match_id);
     } catch (e) {
       setStatus("✖ " + e.message);
@@ -116,68 +120,114 @@ export default function FightPage() {
   const shareUrl = matchId && typeof window !== "undefined"
     ? `${window.location.origin}/replay?id=${matchId}` : null;
 
+  // Add a trailing animated ellipsis only while busy and message ends without one.
+  const showDots =
+    busy && status && !status.startsWith("✖") && !status.endsWith(".");
+
   return (
     <>
-      <p style={{ color: "var(--dim)", fontSize: 13, marginBottom: 12 }}>
-        two LLM swordsmen · you set the sharp zone · physics decides · you vote blind
-      </p>
+      {/* ---------- Hero ---------- */}
+      <section className="tagline">
+        <h1>
+          Two LLM Swordsmen.<br />
+          <span className="accent">Physics Decides.</span>
+        </h1>
+        <p>
+          You set the sharp zone
+          <span className="dot">·</span>
+          they fight blind
+          <span className="dot">·</span>
+          you vote without knowing which model is which.
+        </p>
+      </section>
+
+      {/* ---------- Main grid ---------- */}
       <div className="row">
-        <div className="panel" style={{ flex: 1, minWidth: 300,
-             display: "flex", flexDirection: "column", gap: 10 }}>
-          <ModelPicker label="Fighter A (green)" accent="var(--green)"
-            models={models} value={selA} custom={customA}
-            onChange={setSelA} onCustomChange={setCustomA} />
-          <ModelPicker label="Fighter B (blue)" accent="var(--blue)"
-            models={models} value={selB} custom={customB}
-            onChange={setSelB} onCustomChange={setCustomB} />
+        {/* ===== Setup panel ===== */}
+        <div className="panel glow-red">
+          <div className="panel-head">
+            <span className="panel-title"><span className="tick" /> Setup Duel</span>
+          </div>
+
+          <div className="row" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <ModelPicker label="Fighter A (green)" accent="var(--green)"
+              models={models} value={selA} custom={customA}
+              onChange={setSelA} onCustomChange={setCustomA} />
+            <ModelPicker label="Fighter B (blue)" accent="var(--blue)"
+              models={models} value={selB} custom={customB}
+              onChange={setSelB} onCustomChange={setCustomB} />
+          </div>
+
           <div>
             <label className="lbl">Weapon</label>
             <div className="zones">
               {WEAPONS.map(([w, label]) => (
                 <div key={w} className={"zone" + (weapon === w ? " on" : "")}
-                  onClick={() => pickWeapon(w)}>{label}</div>
+                  role="button" tabIndex={0}
+                  aria-pressed={weapon === w}
+                  onClick={() => pickWeapon(w)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickWeapon(w); } }}>
+                  {label}
+                </div>
               ))}
             </div>
           </div>
+
           <div>
             <label className="lbl">Control mode</label>
             <div className="zones">
               <div className={"zone" + (mode === "macro" ? " on" : "")}
+                role="button" tabIndex={0} aria-pressed={mode === "macro"}
                 title="LLM picks tactical moves; engine executes clean swordplay"
-                onClick={() => setMode("macro")}>🎯 MACRO</div>
+                onClick={() => setMode("macro")}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setMode("macro"); } }}>
+                🎯 MACRO
+              </div>
               <div className={"zone" + (mode === "joint" ? " on" : "")}
+                role="button" tabIndex={0} aria-pressed={mode === "joint"}
                 title="LLM drives every joint raw — emergent, chaotic, true Toribash"
-                onClick={() => setMode("joint")}>🧠 JOINT</div>
+                onClick={() => setMode("joint")}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setMode("joint"); } }}>
+                🧠 JOINT
+              </div>
             </div>
           </div>
+
           <div>
             <label className="lbl">Dangerous zones — the twist</label>
             <div className="zones">
               {WEAPON_ZONES[weapon].map((z) => (
                 <div key={z}
+                  role="button" tabIndex={0}
+                  aria-pressed={sharp.includes(z)}
                   className={"zone" + (sharp.includes(z) ? " on" : "")}
-                  onClick={() => toggleZone(z)}>
+                  onClick={() => toggleZone(z)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleZone(z); } }}>
                   {z.replace("_", " ").toUpperCase()}
                 </div>
               ))}
             </div>
           </div>
+
           <button className="fight-btn" onClick={fight} disabled={busy}>
-            ⚔ FIGHT
+            {busy ? "⚙ Simulating" : "⚔ Fight"}
           </button>
-          <div className="status">{status}</div>
+          <div className="status" aria-live="polite">
+            {status}
+            {showDots && <span className="dots" aria-hidden="true" />}
+          </div>
         </div>
 
-        <div className="panel lb-panel" style={{ flex: 1, minWidth: 300 }}>
-          <div style={{ display: "flex", justifyContent: "space-between",
-                        alignItems: "center", marginBottom: 8 }}>
-            <label htmlFor={lbSelectId} className="lbl" style={{ margin: 0 }}>
-              Leaderboard (Elo by vote)
+        {/* ===== Leaderboard panel ===== */}
+        <div className="panel lb-panel glow-blue">
+          <div className="panel-head">
+            <label htmlFor={lbSelectId} className="panel-title gold">
+              <span className="tick" /> Leaderboard · Elo by Vote
             </label>
             <select
               id={lbSelectId}
+              className="lb-select"
               aria-label="Leaderboard sharp-zone filter"
-              style={{ width: "auto", padding: "4px 8px", fontSize: 12 }}
               value={lbSharp}
               onChange={(e) => setLbSharp(e.target.value)}
             >
@@ -189,8 +239,9 @@ export default function FightPage() {
         </div>
       </div>
 
+      {/* ---------- Replay ---------- */}
       {replay && (
-        <div style={{ width: "100%", marginTop: 10 }}>
+        <div className="panel" style={{ padding: 14 }}>
           <ReplayPlayer replay={replay} />
           {shareUrl && (
             <div className="share">
@@ -200,18 +251,20 @@ export default function FightPage() {
         </div>
       )}
 
+      {/* ---------- Vote ---------- */}
       {canVote && (
         <div className="vote-row">
           <button className="vote-a" onClick={() => vote("a")}>
-            🗳 Fighter A fought better
+            🗳 Fighter A
           </button>
           <button className="vote-draw" onClick={() => vote("draw")}>Draw</button>
           <button className="vote-b" onClick={() => vote("b")}>
-            Fighter B fought better 🗳
+            Fighter B 🗳
           </button>
         </div>
       )}
 
+      {/* ---------- Reveal ---------- */}
       {reveal && (
         <div className="panel reveal">
           🎭 Reveal — Fighter A was <b>{reveal.names[reveal.model_a]}</b>
