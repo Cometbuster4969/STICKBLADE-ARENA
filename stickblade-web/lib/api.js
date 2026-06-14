@@ -11,8 +11,19 @@ export async function api(path, opts) {
 }
 
 export const getModels = () => api("/models");
-export const getLeaderboard = (sharp) =>
-  api(`/leaderboard${sharp ? `?sharp=${sharp}` : ""}`);
+
+/**
+ * Leaderboard rows. Either filter is optional; pass both for the most
+ * specific board (per-sharp-zone within a single weapon).
+ */
+export const getLeaderboard = (sharp, weapon) => {
+  const q = new URLSearchParams();
+  if (sharp)  q.set("sharp",  sharp);
+  if (weapon) q.set("weapon", weapon);
+  const qs = q.toString();
+  return api(`/leaderboard${qs ? `?${qs}` : ""}`);
+};
+
 export const getRecent = () => api("/recent");
 export const getMatch = (id) => api(`/match/${id}`);
 export const getReplay = (id) => api(`/replay/${id}`);
