@@ -77,7 +77,8 @@ class SupabaseStorage:
         self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
                    body={"status": status, "error": error})
 
-    def finish_match(self, mid, winner_side, method, turns, replay):
+    def finish_match(self, mid, winner_side, method, turns, replay,
+                     commentary=None):
         data = json.dumps(replay, separators=(",", ":")).encode()
         r = self.http.post(
             f"{self.url}/storage/v1/object/{BUCKET}/{mid}.json",
@@ -85,9 +86,16 @@ class SupabaseStorage:
             headers={"Content-Type": "application/json",
                      "x-upsert": "true"})
         r.raise_for_status()
-        self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
-                   body={"status": "done", "winner_side": winner_side,
-                         "method": method, "turns": turns})
+        body = {"status": "done", "winner_side": winner_side,
+                "method": method, "turns": turns}
+        if commentary:
+            body["commentary"] = commentary
+        try:
+            self._rest("PATCH", "matches", params={"id": f"eq.{mid}"}, body=body)
+        except Exception:
+            # commentary col may not exist on older schemas — retry without it
+            body.pop("commentary", None)
+            self._rest("PATCH", "matches", params={"id": f"eq.{mid}"}, body=body)
 
     def get_match(self, mid):
         rows = self._rest("GET", "matches", params={"id": f"eq.{mid}"})
@@ -194,6 +202,7 @@ class SupabaseStorage:
             "canvas_a_model": canvas_a, "canvas_b_model": canvas_b,
             "engine_winner_side": m["winner_side"], "method": m["method"],
             "flip": flip, "weapon": m.get("weapon") or "sword",
+            "commentary": m.get("commentary") or "",
         }
 
     def leaderboard(self, sharp=None, weapon=None):

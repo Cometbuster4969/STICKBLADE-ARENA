@@ -109,15 +109,33 @@ def run_simulation(mid):
             slot_left, slot_right = m["model_b"], m["model_a"]
         else:
             slot_left, slot_right = m["model_a"], m["model_b"]
+        mm = MATCH_MODES.get(mid, {})
         match = Match(slot_left, slot_right, sharp, fx,
                       log_path=os.path.join(store.root, f"log_{mid}.json"),
-                      mode=MATCH_MODES.get(mid, {}).get("mode", "macro"),
-                      weapon=MATCH_MODES.get(mid, {}).get("weapon", "sword"))
+                      mode=mm.get("mode", "macro"),
+                      weapon=mm.get("weapon", "sword"),
+                      arena=mm.get("arena", "normal"))
         # blind mode: hide model identity in the replay itself
         if m["blind"]:
             match.f1.name = match.b1.label = BLIND_NAMES["a"]
             match.f2.name = match.b2.label = BLIND_NAMES["b"]
         rec.attach(match)
+
+        # ---------- pre-fight trash talk -----------------------------------
+        # Each brain gets to throw one line at the OTHER model's display name.
+        # Mocks return canned lines instantly; real models go through
+        # chat_with_timeout (≤15s budget). Captured server-side, in canvas
+        # coordinates, so the blind/flip stays consistent.
+        try:
+            from brains import pre_fight_quip
+            name_left  = C.ARENA_MODELS.get(slot_left,  slot_left)
+            name_right = C.ARENA_MODELS.get(slot_right, slot_right)
+            weap = MATCH_MODES.get(mid, {}).get("weapon", "sword")
+            quip_a = pre_fight_quip(match.b1, name_right, weapon=weap)
+            quip_b = pre_fight_quip(match.b2, name_left,  weapon=weap)
+            rec.set_quips(quip_a, quip_b)
+        except Exception as e:
+            print(f"[quip] failed: {e}")
         # Budget SIM frames only — LLM thinking time must not eat the match.
         # Hard wall-clock ceiling protects against a hung brain.
         deadline = _t.time() + 45 * 60
@@ -142,7 +160,33 @@ def run_simulation(mid):
             side = "draw"
         else:
             side = "a" if res["winner"] == match.f1.name else "b"
-        store.finish_match(mid, side, res["method"], res["turns"], rec.build())
+
+        # ---------- post-fight commentary / roast --------------------------
+        # We use whichever brain is more available (winner's by default). The
+        # commentator gets the REAL model names; the public reveal only shows
+        # it after the voter has cast their vote (handled by /api/vote/{id}).
+        commentary = ""
+        try:
+            from brains import commentator_roast
+            wname_real = (C.ARENA_MODELS.get(slot_left, slot_left)
+                          if side == "a" else
+                          C.ARENA_MODELS.get(slot_right, slot_right))
+            lname_real = (C.ARENA_MODELS.get(slot_right, slot_right)
+                          if side == "a" else
+                          C.ARENA_MODELS.get(slot_left, slot_left))
+            if side == "draw":
+                wname_real = "Fighter A"; lname_real = "Fighter B"
+            commentator = match.b1 if side != "a" else match.b2  # the loser commentates on themselves losing? -> no, use the winner
+            commentator = match.b1 if side == "a" else match.b2
+            commentary = commentator_roast(
+                commentator, wname_real, lname_real, res["method"],
+                res["turns"], match.weapon, sharp,
+                final_hp=res.get("final_hp", {}))
+        except Exception as e:
+            print(f"[commentary] failed: {e}")
+
+        store.finish_match(mid, side, res["method"], res["turns"],
+                           rec.build(), commentary=commentary)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -172,8 +216,9 @@ class MatchReq(BaseModel):
     model_b: str = Field(min_length=1, max_length=120)
     sharp: list[str] = Field(default=["tip"], max_length=4)
     blind: bool = True
-    mode: str = Field(default="macro", max_length=8)  # macro | joint
-    weapon: str = Field(default="sword", max_length=8)  # sword | flail | bow
+    mode: str = Field(default="macro", max_length=8)    # macro | joint
+    weapon: str = Field(default="sword", max_length=8)  # sword | dagger | spear | flail | bow
+    arena: str = Field(default="normal", max_length=16) # normal | ice | low_gravity
 
 
 class VoteReq(BaseModel):
@@ -224,8 +269,9 @@ def create_match(req: MatchReq, request: Request):
     sharp = [z for z in req.sharp if z in WEAPON_ZONES[weapon]] \
         or [WEAPON_ZONES[weapon][0]]
     mode = req.mode if req.mode in ("macro", "joint") else "macro"
+    arena = req.arena if req.arena in ("normal", "ice", "low_gravity") else "normal"
     mid = store.create_match(req.model_a, req.model_b, sharp, req.blind, weapon)
-    MATCH_MODES[mid] = {"mode": mode, "weapon": weapon}
+    MATCH_MODES[mid] = {"mode": mode, "weapon": weapon, "arena": arena}
     # Lock in the A↔green/B↔blue random assignment at queue time so even
     # the worker that picks up the job can't pre-leak which colored
     # ragdoll the user's picks correspond to.
@@ -233,7 +279,7 @@ def create_match(req: MatchReq, request: Request):
     MATCH_FLIP[mid] = _r.random() < 0.5
     jobs.put(mid)
     return {"match_id": mid, "status": "queued", "mode": mode,
-            "weapon": weapon}
+            "weapon": weapon, "arena": arena}
 
 
 @app.get("/api/match/{mid}")

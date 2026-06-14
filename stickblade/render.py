@@ -203,16 +203,36 @@ class Renderer:
 
     def draw_sword(self, surf, f, sharp_zones, off):
         sw = f.bodies["sword"]
+        weapon = getattr(f, "weapon", "sword")
+        geo = getattr(f, "geo", None) or {
+            "handle": C.SWORD_HANDLE, "pommel": C.SWORD_POMMEL,
+            "tip": C.SWORD_TIP, "tip_frac": C.SWORD_TIP_FRAC,
+        }
+        handle, pommel, tip = geo["handle"], geo["pommel"], geo["tip"]
 
         def P(local):
             w = sw.local_to_world(local)
             return (int(w.x + off[0]), int(C.HEIGHT - w.y + off[1]))
 
-        span = C.SWORD_TIP - C.SWORD_HANDLE
-        tip_y = C.SWORD_HANDLE + C.SWORD_TIP_FRAC * span
+        span = tip - handle
+        tip_y = handle + geo["tip_frac"] * span
+        line_w = 5 if weapon != "dagger" else 4
+
         # blade body
-        pygame.draw.line(surf, C.C_BLADE, P((0, 0)), P((0, C.SWORD_TIP)), 5)
-        # zone highlights
+        pygame.draw.line(surf, C.C_BLADE, P((0, 0)), P((0, tip)), line_w)
+
+        if weapon == "spear":
+            # the shaft + spike: long pole, hot triangle on the tip
+            if "shaft" in sharp_zones:
+                pygame.draw.line(surf, C.C_SHARP, P((0, 6)), P((0, tip_y)), 3)
+            if "tip" in sharp_zones:
+                pygame.draw.line(surf, C.C_SHARP, P((0, tip_y)), P((0, tip)), 6)
+            # butt cap
+            pom_col = C.C_SHARP if "butt" in sharp_zones else C.C_GUARD
+            pygame.draw.circle(surf, pom_col, P((0, pommel)), 5)
+            return
+
+        # ---- sword / dagger ----
         def zone_line(y0, y1, dx, w):
             pygame.draw.line(surf, C.C_SHARP, P((dx, y0)), P((dx, y1)), w)
         if "edge" in sharp_zones:
@@ -220,16 +240,16 @@ class Renderer:
         if "back_edge" in sharp_zones:
             zone_line(2, tip_y, -f.facing * 2.4, 2)
         if "tip" in sharp_zones:
-            pygame.draw.line(surf, C.C_SHARP, P((0, tip_y)), P((0, C.SWORD_TIP)), 5)
+            pygame.draw.line(surf, C.C_SHARP, P((0, tip_y)), P((0, tip)), line_w)
         # guard + grip + pommel
         g1 = sw.local_to_world((-9, -2))
         g2 = sw.local_to_world((9, -2))
         pygame.draw.line(surf, C.C_GUARD,
                          (g1.x + off[0], C.HEIGHT - g1.y + off[1]),
                          (g2.x + off[0], C.HEIGHT - g2.y + off[1]), 4)
-        pygame.draw.line(surf, (96, 70, 46), P((0, -3)), P((0, C.SWORD_HANDLE)), 6)
+        pygame.draw.line(surf, (96, 70, 46), P((0, -3)), P((0, handle)), 6)
         pom_col = C.C_SHARP if "pommel" in sharp_zones else C.C_GUARD
-        pygame.draw.circle(surf, pom_col, P((0, C.SWORD_POMMEL)), 5)
+        pygame.draw.circle(surf, pom_col, P((0, pommel)), 5)
 
     # ---------------- fx ----------------
     def draw_fx(self, surf, fx, off):
