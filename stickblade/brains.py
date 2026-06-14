@@ -23,6 +23,16 @@ Actions: {actions}
 Footwork: {footwork}
   lunge = explosive forward burst | hop_back = jump backward (escape pressure)
 
+SPATIAL AWARENESS: each turn you receive world coordinates of both fighters'
+torso and head (`me`, `enemy`) plus relative geometry under `relative`
+(dx, dy, head_dx, head_dy, enemy_is left/right/in_front, enemy_height_relative
+higher/lower/level, facing_enemy true/false). +x is right, +y is up.
+If `relative.facing_enemy` is false you are looking the WRONG WAY — your
+strike will whiff; use the next turn to reorient (your engine will auto-flip
+if you simply walk past them).
+For ranged shots, `ranged_hint.aim_at_enemy_head` is the world point to aim
+at and `vertical_drop_to_compensate` tells you how much the arrow will fall.
+
 Distance guide: <70 = clinch range, 70-150 = strike range, 150-260 = closing range, >260 = far.
 {range_hint}
 Reply with ONLY a JSON object, no markdown:
@@ -35,22 +45,116 @@ RANGE_HINTS = {
 }
 
 
+def _xy(v):
+    """Round a pymunk Vec2d to ints for a compact JSON payload."""
+    return [int(round(v.x)), int(round(v.y))]
+
+
+def _vel(body):
+    """Round a body velocity to int px/s."""
+    v = body.velocity
+    return [int(round(v.x)), int(round(v.y))]
+
+
 def build_state(me, foe, turn, max_turns, last_events):
-    d = (foe.pos() - me.pos()).length
+    """Game state handed to the LLM each turn.
+
+    Now includes full spatial awareness: torso + head positions (and velocities)
+    for both fighters in world coordinates, weapon-tip / off-hand positions,
+    relative geometry (Δx, Δy, who's above whom, who's facing the enemy), plus
+    a few derived ranged-combat hints (line-of-sight clearance, vertical lead
+    needed for an arrow shot, etc.). All values rounded to ints so the JSON
+    payload stays small.
+    """
+    me_torso = me.pos()
+    foe_torso = foe.pos()
+    me_head = me.head_pos()
+    foe_head = foe.head_pos()
+
+    d = (foe_torso - me_torso).length
+    dx = foe_torso.x - me_torso.x
+    dy = foe_torso.y - me_torso.y
+
+    head_dx = foe_head.x - me_head.x
+    head_dy = foe_head.y - me_head.y
+    head_dist = (foe_head - me_head).length
+
+    # Are we actually pointing the right way? (facing is +1 right, -1 left)
+    facing_enemy = (dx > 0 and me.facing > 0) or (dx < 0 and me.facing < 0)
+
+    # Off-hand (the bow-string hand for bows; the second fist otherwise)
+    off_hand = me.bodies["off_farm"].local_to_world((0, -12))
+
+    # Weapon tip / business end
+    weapon = getattr(me, "weapon", "sword")
+    if weapon == "bow":
+        # bow "tip" not meaningful — give the off-hand draw point instead
+        weapon_tip = off_hand
+    else:
+        weapon_tip = me.tip_pos()
+
+    # Velocities (helpful so the LLM can predict where to aim)
+    me_vel = _vel(me.bodies["torso"])
+    foe_vel = _vel(foe.bodies["torso"])
+
+    # Ranged shot helper: how much arrow flight time at a typical 700 px/s
+    # speed, and the vertical drop that should be compensated for.
+    flight_t = round(d / 700.0, 2)
+    gravity_drop = round(0.5 * abs(C.GRAVITY[1]) * flight_t * flight_t)
+
     rel = []
     for e in last_events:
         rel.append({"by": e["attacker"], "zone": e["zone"], "hit_part": e["part"],
                     "damage": e["damage"], "was_sharp": e["sharp"]})
+
     return {
+        # core combat
         "turn": turn, "turns_left": max_turns - turn,
         "my_hp": round(me.hp, 1), "enemy_hp": round(foe.hp, 1),
         "distance": round(d),
-        "my_height": "knocked_down" if me.pos().y < me.stand_torso_y - 30 else "standing",
-        "enemy_height": "knocked_down" if foe.pos().y < foe.stand_torso_y - 30 else "standing",
+        "my_height": "knocked_down" if me_torso.y < me.stand_torso_y - 30 else "standing",
+        "enemy_height": "knocked_down" if foe_torso.y < foe.stand_torso_y - 30 else "standing",
         "enemy_last_action": foe.last_action,
         "my_last_action": me.last_action,
-        "enemy_sword_tip_distance_to_me": round((foe.tip_pos() - me.pos()).length),
+        "enemy_sword_tip_distance_to_me": round((foe.tip_pos() - me_torso).length),
         "last_turn_hits": rel,
+
+        # ---------- NEW: spatial awareness ----------
+        # All positions are absolute world coordinates: +x = right, +y = up.
+        "me": {
+            "torso": _xy(me_torso),
+            "head":  _xy(me_head),
+            "weapon_tip": _xy(weapon_tip),
+            "off_hand":   _xy(off_hand),
+            "facing": me.facing,         # +1 right, -1 left
+            "velocity": me_vel,           # px/s
+        },
+        "enemy": {
+            "torso": _xy(foe_torso),
+            "head":  _xy(foe_head),
+            "facing": foe.facing,
+            "velocity": foe_vel,
+        },
+        # Relative geometry (enemy minus me, signed in world coords).
+        "relative": {
+            "dx": int(round(dx)),
+            "dy": int(round(dy)),
+            "head_dx": int(round(head_dx)),
+            "head_dy": int(round(head_dy)),
+            "head_to_head_distance": int(round(head_dist)),
+            # quick categorical hints so even tiny models can use this:
+            "enemy_is": ("right" if dx > 8 else "left" if dx < -8 else "in_front"),
+            "enemy_height_relative": (
+                "higher" if dy > 18 else "lower" if dy < -18 else "level"),
+            "facing_enemy": bool(facing_enemy),
+        },
+        # Ranged combat helpers (mostly useful for bow / flail leads).
+        "ranged_hint": {
+            "arrow_flight_time_s": flight_t,
+            "vertical_drop_to_compensate": gravity_drop,
+            # aim point if you want to hit the enemy HEAD with a flat arrow
+            "aim_at_enemy_head": _xy(foe_head),
+        },
     }
 
 
@@ -85,7 +189,7 @@ class Brain:
         self.actions = WEAPON_ACTIONS.get(weapon, ACTIONS)
         if mode == "joint":
             from joint_mode import build_joint_system_prompt
-            self.sys = build_joint_system_prompt(sharp_zones)
+            self.sys = build_joint_system_prompt(sharp_zones, weapon)
         else:
             zmap = " | ".join(f"{a}->{z}" for a, z in
                               WEAPON_ACTION_ZONE.get(weapon, {}).items())
@@ -123,7 +227,7 @@ class Brain:
             return out["r"]
         if self.mode == "joint":
             from joint_mode import MockJointBrain
-            fb = MockJointBrain(self.sharp).decide(state)
+            fb = MockJointBrain(self.sharp, weapon=self.weapon).decide(state)
         else:
             fb = MockBrain(self.sharp, "duelist").decide(state)
         fb["thought"] = f"[{self.label} fallback: {out.get('err','timeout')[:60]}] " + fb["thought"]
@@ -297,7 +401,7 @@ def make_brain(kind, sharp_zones, mode="macro", weapon="sword"):
     def _mock(personality="duelist", label=None):
         if mode == "joint":
             from joint_mode import MockJointBrain
-            return MockJointBrain(sharp_zones, label=label)
+            return MockJointBrain(sharp_zones, label=label, weapon=weapon)
         return MockBrain(sharp_zones, personality, label=label, weapon=weapon)
 
     # explicit mock personality: "mock:duelist" / "mock:berserker"
