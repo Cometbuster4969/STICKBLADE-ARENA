@@ -58,6 +58,16 @@ main {
   font-size: 12px;
   padding: 14px;
   border-top: 1px solid var(--line);
+  /* Reserve height so async-loaded content above doesn't shift the footer (CLS). */
+  min-height: 48px;
+  contain: layout paint;
+}
+
+/* Reserve vertical space for the leaderboard panel so rows loading in
+   async don't push the footer down (which was the CLS culprit). */
+.lb-panel { min-height: 420px; }
+@media (max-width: 720px) {
+  .lb-panel { min-height: 360px; }
 }
 
 .row { width: 100%; display: flex; gap: 10px; flex-wrap: wrap; }

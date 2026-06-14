@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import ModelPicker, { CUSTOM } from "@/components/ModelPicker";
 import ReplayPlayer from "@/components/ReplayPlayer";
 import LeaderboardTable from "@/components/LeaderboardTable";
@@ -37,6 +37,7 @@ export default function FightPage() {
   const [lb, setLb] = useState([]);
   const [lbSharp, setLbSharp] = useState("");
   const pollRef = useRef(null);
+  const lbSelectId = useId();
 
   useEffect(() => {
     getModels().then((ms) => {
@@ -167,14 +168,19 @@ export default function FightPage() {
           <div className="status">{status}</div>
         </div>
 
-        <div className="panel" style={{ flex: 1, minWidth: 300 }}>
+        <div className="panel lb-panel" style={{ flex: 1, minWidth: 300 }}>
           <div style={{ display: "flex", justifyContent: "space-between",
                         alignItems: "center", marginBottom: 8 }}>
-            <label className="lbl" style={{ margin: 0 }}>
+            <label htmlFor={lbSelectId} className="lbl" style={{ margin: 0 }}>
               Leaderboard (Elo by vote)
             </label>
-            <select style={{ width: "auto", padding: "4px 8px", fontSize: 12 }}
-              value={lbSharp} onChange={(e) => setLbSharp(e.target.value)}>
+            <select
+              id={lbSelectId}
+              aria-label="Leaderboard sharp-zone filter"
+              style={{ width: "auto", padding: "4px 8px", fontSize: 12 }}
+              value={lbSharp}
+              onChange={(e) => setLbSharp(e.target.value)}
+            >
               <option value="">overall</option>
               {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
             </select>

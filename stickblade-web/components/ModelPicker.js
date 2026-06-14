@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 const CUSTOM = "__custom__";
 
@@ -7,12 +7,23 @@ const CUSTOM = "__custom__";
 export default function ModelPicker({ label, models, value, custom,
                                       onChange, onCustomChange, accent }) {
   const isCustom = value === CUSTOM;
+  const selectId = useId();
+  const inputId = useId();
   return (
     <div>
-      <label className="lbl" style={accent ? { color: accent } : undefined}>
+      <label
+        htmlFor={selectId}
+        className="lbl"
+        style={accent ? { color: accent } : undefined}
+      >
         {label}
       </label>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <select
+        id={selectId}
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
         {models.map((m) => (
           <option key={m.id} value={m.id}>{m.name}</option>
         ))}
@@ -20,6 +31,8 @@ export default function ModelPicker({ label, models, value, custom,
       </select>
       {isCustom && (
         <input
+          id={inputId}
+          aria-label={`${label} custom model id`}
           type="text"
           placeholder="OpenRouter id, e.g. qwen/qwen3-coder:free"
           value={custom}
