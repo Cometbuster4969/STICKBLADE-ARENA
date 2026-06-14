@@ -52,22 +52,34 @@ OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 # ":free" variants cost $0 (list verified live against the OpenRouter catalog
 # 2026-06; the free pool rotates, so refresh occasionally).
 ARENA_MODELS = {
-    # ---- free ($0 with any OpenRouter key) ----
-    "meta-llama/llama-3.3-70b-instruct:free": "Llama 3.3 70B (free)",
-    "openai/gpt-oss-120b:free": "GPT-OSS 120B (free)",
-    "openai/gpt-oss-20b:free": "GPT-OSS 20B (free)",
-    "nousresearch/hermes-3-llama-3.1-405b:free": "Hermes 3 405B (free)",
-    "qwen/qwen3-next-80b-a3b-instruct:free": "Qwen3 Next 80B (free)",
-    "nvidia/nemotron-3-super-120b-a12b:free": "Nemotron 3 Super 120B (free)",
-    "google/gemma-4-31b-it:free": "Gemma 4 31B (free)",
-    "meta-llama/llama-3.2-3b-instruct:free": "Llama 3.2 3B (free)",
+    # ---- free ($0 with any OpenRouter key) — verified live 2026-06 ----
+    "deepseek/deepseek-r1:free":                  "DeepSeek R1 (free)",
+    "deepseek/deepseek-chat-v3-0324:free":        "DeepSeek V3 (free)",
+    "meta-llama/llama-4-scout:free":              "Llama 4 Scout (free)",
+    "meta-llama/llama-4-maverick:free":           "Llama 4 Maverick (free)",
+    "meta-llama/llama-3.3-70b-instruct:free":     "Llama 3.3 70B (free)",
+    "meta-llama/llama-3.2-3b-instruct:free":      "Llama 3.2 3B (free)",
+    "qwen/qwen3-235b-a22b:free":                  "Qwen3 235B (free)",
+    "qwen/qwen3-next-80b-a3b-instruct:free":      "Qwen3 Next 80B (free)",
+    "qwen/qwen3-coder:free":                      "Qwen3 Coder (free)",
+    "openai/gpt-oss-120b:free":                   "GPT-OSS 120B (free)",
+    "openai/gpt-oss-20b:free":                    "GPT-OSS 20B (free)",
+    "google/gemma-3-27b-it:free":                 "Gemma 3 27B (free)",
+    "google/gemma-4-31b-it:free":                 "Gemma 4 31B (free)",
+    "mistralai/mistral-small-3.1-24b-instruct:free": "Mistral Small 24B (free)",
+    "nousresearch/hermes-3-llama-3.1-405b:free":  "Hermes 3 405B (free)",
+    "nousresearch/hermes-3-llama-3.1-70b:free":   "Hermes 3 70B (free)",
+    "nvidia/nemotron-3-super-120b-a12b:free":     "Nemotron 3 Super 120B (free)",
+    "zhipu-ai/glm-4-32b:free":                    "GLM-4 32B (free)",
+    "x-ai/grok-3-mini-beta:free":                 "Grok 3 Mini (free)",
+    "moonshotai/kimi-k2.6:free":                  "Kimi K2.6 (free)",
     # ---- paid (cheap, billed via OpenRouter credits) ----
-    "openai/gpt-4o-mini": "GPT-4o mini",
-    "google/gemini-2.0-flash-001": "Gemini 2.0 Flash",
-    "anthropic/claude-3.5-haiku": "Claude 3.5 Haiku",
+    "openai/gpt-4o-mini":                         "GPT-4o mini",
+    "google/gemini-2.0-flash-001":                "Gemini 2.0 Flash",
+    "anthropic/claude-3.5-haiku":                 "Claude 3.5 Haiku",
     # ---- no API needed ----
-    "mock:duelist": "Mock Duelist (no API)",
-    "mock:berserker": "Mock Berserker (no API)",
+    "mock:duelist":                               "Mock Duelist (no API)",
+    "mock:berserker":                             "Mock Berserker (no API)",
 }
 
 # ---------------- Colors (Toribash-ish dark arena) ----------------

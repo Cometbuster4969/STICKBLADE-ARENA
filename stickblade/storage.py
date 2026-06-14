@@ -62,6 +62,32 @@ class LocalStorage:
                 draws INTEGER DEFAULT 0,
                 PRIMARY KEY (model, sharp, weapon)
             );
+            CREATE TABLE IF NOT EXISTS tournaments (
+                id            TEXT PRIMARY KEY,
+                created       REAL,
+                name          TEXT,
+                size          INTEGER,            -- 4 | 8
+                weapon        TEXT DEFAULT 'sword',
+                sharp         TEXT,               -- comma-joined zones
+                arena         TEXT DEFAULT 'normal',
+                mode          TEXT DEFAULT 'macro',
+                status        TEXT,               -- queued | running | done | error
+                current_round INTEGER DEFAULT 0,
+                winner_model  TEXT,
+                models        TEXT,               -- JSON array of model ids in seed order
+                error         TEXT
+            );
+            CREATE TABLE IF NOT EXISTS tournament_matches (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                tournament_id TEXT,
+                round         INTEGER,
+                slot          INTEGER,            -- position within the round (0..n-1)
+                match_id      TEXT,               -- FK -> matches.id (NULL while pending)
+                model_a       TEXT,
+                model_b       TEXT,
+                winner_model  TEXT,               -- model id of winner (NULL while pending)
+                UNIQUE (tournament_id, round, slot)
+            );
             """)
             # ------ idempotent migrations (so existing DBs pick up new cols)
             for ddl in [
@@ -207,6 +233,77 @@ class LocalStorage:
             "weapon": m.get("weapon") or "sword",
             "commentary": m.get("commentary") or "",
         }
+
+    # ============================================================
+    # Tournaments
+    # ============================================================
+    def create_tournament(self, name, models, weapon, sharp, arena, mode):
+        tid = uuid.uuid4().hex[:12]
+        with self._lock, self._conn() as c:
+            c.execute(
+                "INSERT INTO tournaments (id, created, name, size, weapon,"
+                " sharp, arena, mode, status, current_round, models)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (tid, time.time(), name, len(models), weapon,
+                 ",".join(sharp), arena, mode, "queued", 0,
+                 json.dumps(models)))
+        return tid
+
+    def set_tournament_status(self, tid, status, error=None):
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE tournaments SET status=?, error=? WHERE id=?",
+                      (status, error, tid))
+
+    def set_tournament_round(self, tid, round_n):
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE tournaments SET current_round=? WHERE id=?",
+                      (round_n, tid))
+
+    def finish_tournament(self, tid, winner_model):
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE tournaments SET status='done', winner_model=?"
+                      " WHERE id=?", (winner_model, tid))
+
+    def get_tournament(self, tid):
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM tournaments WHERE id=?",
+                          (tid,)).fetchone()
+            if not r:
+                return None
+            t = dict(r)
+            t["models"] = json.loads(t["models"]) if t.get("models") else []
+            matches = c.execute(
+                "SELECT * FROM tournament_matches WHERE tournament_id=?"
+                " ORDER BY round, slot", (tid,)).fetchall()
+            t["matches"] = [dict(m) for m in matches]
+        return t
+
+    def recent_tournaments(self, limit=20):
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, name, status, winner_model, size, weapon,"
+                " current_round, created FROM tournaments"
+                " ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_tournament_match(self, tid, round_n, slot, model_a, model_b):
+        with self._lock, self._conn() as c:
+            c.execute("INSERT INTO tournament_matches"
+                      " (tournament_id, round, slot, model_a, model_b)"
+                      " VALUES (?,?,?,?,?)",
+                      (tid, round_n, slot, model_a, model_b))
+
+    def bind_tournament_match(self, tid, round_n, slot, match_id):
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE tournament_matches SET match_id=?"
+                      " WHERE tournament_id=? AND round=? AND slot=?",
+                      (match_id, tid, round_n, slot))
+
+    def set_tournament_match_winner(self, tid, round_n, slot, winner_model):
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE tournament_matches SET winner_model=?"
+                      " WHERE tournament_id=? AND round=? AND slot=?",
+                      (winner_model, tid, round_n, slot))
 
     def leaderboard(self, sharp=None, weapon=None):
         with self._conn() as c:

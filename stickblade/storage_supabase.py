@@ -226,3 +226,69 @@ class SupabaseStorage:
             out.append(a)
         out.sort(key=lambda x: -x["rating"])
         return out
+
+    # ============================================================
+    # Tournaments (mirrors LocalStorage; Postgres tables in Supabase)
+    # ============================================================
+    def create_tournament(self, name, models, weapon, sharp, arena, mode):
+        tid = uuid.uuid4().hex[:12]
+        body = {
+            "id": tid, "created": time.time(), "name": name,
+            "size": len(models), "weapon": weapon,
+            "sharp": ",".join(sharp), "arena": arena, "mode": mode,
+            "status": "queued", "current_round": 0,
+            "models": json.dumps(models),
+        }
+        self._rest("POST", "tournaments", body=body)
+        return tid
+
+    def set_tournament_status(self, tid, status, error=None):
+        self._rest("PATCH", "tournaments", params={"id": f"eq.{tid}"},
+                   body={"status": status, "error": error})
+
+    def set_tournament_round(self, tid, round_n):
+        self._rest("PATCH", "tournaments", params={"id": f"eq.{tid}"},
+                   body={"current_round": round_n})
+
+    def finish_tournament(self, tid, winner_model):
+        self._rest("PATCH", "tournaments", params={"id": f"eq.{tid}"},
+                   body={"status": "done", "winner_model": winner_model})
+
+    def get_tournament(self, tid):
+        rows = self._rest("GET", "tournaments", params={"id": f"eq.{tid}"})
+        if not rows:
+            return None
+        t = dict(rows[0])
+        try:
+            t["models"] = json.loads(t["models"]) if t.get("models") else []
+        except Exception:
+            t["models"] = []
+        ms = self._rest("GET", "tournament_matches", params={
+            "tournament_id": f"eq.{tid}",
+            "order": "round.asc,slot.asc"})
+        t["matches"] = [dict(m) for m in (ms or [])]
+        return t
+
+    def recent_tournaments(self, limit=20):
+        rows = self._rest("GET", "tournaments", params={
+            "order": "created.desc", "limit": str(limit)})
+        return [dict(r) for r in (rows or [])]
+
+    def add_tournament_match(self, tid, round_n, slot, model_a, model_b):
+        self._rest("POST", "tournament_matches", body={
+            "tournament_id": tid, "round": round_n, "slot": slot,
+            "model_a": model_a, "model_b": model_b})
+
+    def bind_tournament_match(self, tid, round_n, slot, match_id):
+        self._rest("PATCH", "tournament_matches",
+                   params={"tournament_id": f"eq.{tid}",
+                           "round": f"eq.{round_n}",
+                           "slot":  f"eq.{slot}"},
+                   body={"match_id": match_id})
+
+    def set_tournament_match_winner(self, tid, round_n, slot, winner_model):
+        self._rest("PATCH", "tournament_matches",
+                   params={"tournament_id": f"eq.{tid}",
+                           "round": f"eq.{round_n}",
+                           "slot":  f"eq.{slot}"},
+                   body={"winner_model": winner_model})

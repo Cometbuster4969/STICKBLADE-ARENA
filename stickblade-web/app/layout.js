@@ -55,6 +55,7 @@ export default function RootLayout({ children }) {
           </a>
           <nav aria-label="Primary">
             <a href="/" className="active">Fight</a>
+            <a href="/tournament">🏆 Tournament</a>
             <a href="/leaderboard">Leaderboard</a>
             <a href="/history">History</a>
           </nav>
