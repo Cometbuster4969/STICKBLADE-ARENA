@@ -68,6 +68,11 @@ MATCH_MODES: dict = {}   # match_id -> "macro" | "joint" (in-memory; default mac
 BLIND_NAMES = {"a": "Fighter A", "b": "Fighter B"}
 BLIND_COLORS = {"a": ("#56dc82", 1), "b": ("#5aa0ff", 2)}
 
+# Per-match A↔green / B↔blue assignment, picked at queue time and consumed
+# by the worker when the simulation kicks off. Keeps the user from knowing
+# which colored ragdoll is the model they personally picked.
+MATCH_FLIP = {}     # mid -> bool   True = (model_a -> Fighter B, model_b -> Fighter A)
+
 
 # ------------------------------------------------------------- simulation
 def run_simulation(mid):
@@ -88,7 +93,23 @@ def run_simulation(mid):
         sharp = m["sharp"].split(",")
         rec = ReplayRecorder(every=2)
         fx = RecordingFX(rec)
-        match = Match(m["model_a"], m["model_b"], sharp, fx,
+
+        # Random A↔green/B↔blue assignment for true blind voting. If the
+        # caller didn't pre-pick (legacy match rows), pick now.
+        import random as _r
+        flip = MATCH_FLIP.pop(mid, None)
+        if flip is None:
+            flip = _r.random() < 0.5
+        # Persist so the worker, reveal endpoint and replay all agree.
+        store.set_flip(mid, flip)
+
+        # If flipped, swap which model the engine assigns to fighter1 vs fighter2
+        # (fighter1 is rendered GREEN on the left, fighter2 BLUE on the right).
+        if flip:
+            slot_left, slot_right = m["model_b"], m["model_a"]
+        else:
+            slot_left, slot_right = m["model_a"], m["model_b"]
+        match = Match(slot_left, slot_right, sharp, fx,
                       log_path=os.path.join(store.root, f"log_{mid}.json"),
                       mode=MATCH_MODES.get(mid, {}).get("mode", "macro"),
                       weapon=MATCH_MODES.get(mid, {}).get("weapon", "sword"))
@@ -203,8 +224,13 @@ def create_match(req: MatchReq, request: Request):
     sharp = [z for z in req.sharp if z in WEAPON_ZONES[weapon]] \
         or [WEAPON_ZONES[weapon][0]]
     mode = req.mode if req.mode in ("macro", "joint") else "macro"
-    mid = store.create_match(req.model_a, req.model_b, sharp, req.blind)
+    mid = store.create_match(req.model_a, req.model_b, sharp, req.blind, weapon)
     MATCH_MODES[mid] = {"mode": mode, "weapon": weapon}
+    # Lock in the A↔green/B↔blue random assignment at queue time so even
+    # the worker that picks up the job can't pre-leak which colored
+    # ragdoll the user's picks correspond to.
+    import random as _r
+    MATCH_FLIP[mid] = _r.random() < 0.5
     jobs.put(mid)
     return {"match_id": mid, "status": "queued", "mode": mode,
             "weapon": weapon}
@@ -241,15 +267,17 @@ def vote(mid: str, req: VoteReq, request: Request):
     res = store.record_vote(mid, req.choice)
     if res is None:
         raise HTTPException(400, "match not finished or not found")
-    # add display names
-    res["names"] = {m: C.ARENA_MODELS.get(m, m)
-                    for m in (res["model_a"], res["model_b"])}
+    # add display names — for both the user's original pick axis AND the
+    # canvas (green/blue) axis so the UI can say "Fighter A (green) was X".
+    all_models = {res["model_a"], res["model_b"],
+                  res.get("canvas_a_model"), res.get("canvas_b_model")}
+    res["names"] = {m: C.ARENA_MODELS.get(m, m) for m in all_models if m}
     return res
 
 
 @app.get("/api/leaderboard")
-def leaderboard(sharp: str | None = None):
-    rows = store.leaderboard(sharp)
+def leaderboard(sharp: str | None = None, weapon: str | None = None):
+    rows = store.leaderboard(sharp, weapon)
     for r in rows:
         r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
         r["rating"] = round(r["rating"], 1)

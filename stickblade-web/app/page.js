@@ -16,7 +16,23 @@ const WEAPONS = [
   ["flail", "⛓ FLAIL"],
   ["bow",   "🏹 BOW"],
 ];
-const ZONES = ["tip", "edge", "back_edge", "pommel"]; // leaderboard tabs (sword legacy)
+
+// ----- predict-streak (localStorage) ----------------------------------------
+const STREAK_KEY = "sba.predictStreak";
+const STREAK_BEST_KEY = "sba.predictBest";
+function readStreak() {
+  if (typeof window === "undefined") return { cur: 0, best: 0 };
+  return {
+    cur:  parseInt(localStorage.getItem(STREAK_KEY) || "0", 10) || 0,
+    best: parseInt(localStorage.getItem(STREAK_BEST_KEY) || "0", 10) || 0,
+  };
+}
+function writeStreak({ cur, best }) {
+  try {
+    localStorage.setItem(STREAK_KEY, String(cur));
+    localStorage.setItem(STREAK_BEST_KEY, String(best));
+  } catch (_) { /* private mode */ }
+}
 
 export default function FightPage() {
   const [models, setModels] = useState([]);
@@ -32,16 +48,25 @@ export default function FightPage() {
     setWeapon(w);
     setSharp([WEAPON_ZONES[w][0]]);
   };
+
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [matchId, setMatchId] = useState(null);
   const [replay, setReplay] = useState(null);
   const [canVote, setCanVote] = useState(false);
   const [reveal, setReveal] = useState(null);
+  const [prediction, setPrediction] = useState(null);   // "a" | "b" | "draw" | null
+  const [streak, setStreak] = useState({ cur: 0, best: 0 });
+  const [lastResult, setLastResult] = useState(null);   // "correct" | "wrong" | null
+
   const [lb, setLb] = useState([]);
   const [lbSharp, setLbSharp] = useState("");
+  const [lbWeapon, setLbWeapon] = useState("");          // "" = all weapons
   const pollRef = useRef(null);
-  const lbSelectId = useId();
+  const lbSharpId = useId();
+  const lbWeaponId = useId();
+
+  useEffect(() => { setStreak(readStreak()); }, []);
 
   useEffect(() => {
     getModels().then((ms) => {
@@ -50,9 +75,12 @@ export default function FightPage() {
       setSelB(ms[1]?.id || ms[0]?.id || "");
     }).catch((e) => setStatus("✖ backend unreachable: " + e.message));
   }, []);
+
   useEffect(() => {
-    getLeaderboard(lbSharp || undefined).then(setLb).catch(() => {});
-  }, [lbSharp, reveal]);
+    getLeaderboard(lbSharp || undefined, lbWeapon || undefined)
+      .then(setLb).catch(() => {});
+  }, [lbSharp, lbWeapon, reveal]);
+
   useEffect(() => () => clearTimeout(pollRef.current), []);
 
   const toggleZone = (z) =>
@@ -67,6 +95,8 @@ export default function FightPage() {
     setBusy(true);
     setReveal(null);
     setCanVote(false);
+    setPrediction(null);
+    setLastResult(null);
     setStatus("⚙ queuing match");
     try {
       const { match_id } = await createMatch({
@@ -107,11 +137,25 @@ export default function FightPage() {
       }
     }, 1500);
   }
+
   async function vote(choice) {
     setCanVote(false);
     try {
       const r = await postVote(matchId, choice);
       setReveal(r);
+      // Update predict-streak if the user predicted before the match.
+      if (prediction) {
+        // The "engine_winner_side" is canvas-side ("a"=green, "b"=blue),
+        // matching what the user predicted before the fight.
+        const engineWinner = r.engine_winner_side;
+        const correct = prediction === engineWinner;
+        const next = correct
+          ? { cur: streak.cur + 1, best: Math.max(streak.best, streak.cur + 1) }
+          : { cur: 0, best: streak.best };
+        setStreak(next);
+        writeStreak(next);
+        setLastResult(correct ? "correct" : "wrong");
+      }
     } catch (e) {
       setStatus("✖ " + e.message);
     }
@@ -120,7 +164,6 @@ export default function FightPage() {
   const shareUrl = matchId && typeof window !== "undefined"
     ? `${window.location.origin}/replay?id=${matchId}` : null;
 
-  // Add a trailing animated ellipsis only while busy and message ends without one.
   const showDots =
     busy && status && !status.startsWith("✖") && !status.endsWith(".");
 
@@ -150,10 +193,10 @@ export default function FightPage() {
           </div>
 
           <div className="row" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <ModelPicker label="Fighter A (green)" accent="var(--green)"
+            <ModelPicker label="Slot 1" slotIndex={1}
               models={models} value={selA} custom={customA}
               onChange={setSelA} onCustomChange={setCustomA} />
-            <ModelPicker label="Fighter B (blue)" accent="var(--blue)"
+            <ModelPicker label="Slot 2" slotIndex={2}
               models={models} value={selB} custom={customB}
               onChange={setSelB} onCustomChange={setCustomB} />
           </div>
@@ -221,19 +264,43 @@ export default function FightPage() {
         {/* ===== Leaderboard panel ===== */}
         <div className="panel lb-panel glow-blue">
           <div className="panel-head">
-            <label htmlFor={lbSelectId} className="panel-title gold">
+            <span className="panel-title gold">
               <span className="tick" /> Leaderboard · Elo by Vote
-            </label>
-            <select
-              id={lbSelectId}
-              className="lb-select"
-              aria-label="Leaderboard sharp-zone filter"
-              value={lbSharp}
-              onChange={(e) => setLbSharp(e.target.value)}
-            >
-              <option value="">overall</option>
-              {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
-            </select>
+            </span>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <label htmlFor={lbWeaponId} className="visually-hidden"
+                     style={{ position: "absolute", left: -9999 }}>
+                Leaderboard weapon filter
+              </label>
+              <select
+                id={lbWeaponId}
+                className="lb-select"
+                aria-label="Leaderboard weapon filter"
+                value={lbWeapon}
+                onChange={(e) => setLbWeapon(e.target.value)}
+              >
+                <option value="">all weapons</option>
+                <option value="sword">sword</option>
+                <option value="flail">flail</option>
+                <option value="bow">bow</option>
+              </select>
+              <label htmlFor={lbSharpId} className="visually-hidden"
+                     style={{ position: "absolute", left: -9999 }}>
+                Leaderboard sharp-zone filter
+              </label>
+              <select
+                id={lbSharpId}
+                className="lb-select"
+                aria-label="Leaderboard sharp-zone filter"
+                value={lbSharp}
+                onChange={(e) => setLbSharp(e.target.value)}
+              >
+                <option value="">overall</option>
+                {(WEAPON_ZONES[lbWeapon] || ["tip","edge","back_edge","pommel"]).map((z) => (
+                  <option key={z} value={z}>{z}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <LeaderboardTable rows={lb} compact />
         </div>
@@ -251,15 +318,48 @@ export default function FightPage() {
         </div>
       )}
 
+      {/* ---------- Predict-then-watch ----------
+          Shown once the replay is loaded and the user hasn't predicted yet.
+          Disappears as soon as they click — they then vote normally below. */}
+      {replay && canVote && !prediction && (
+        <div className="panel" style={{ padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between",
+                        alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 10 }}>
+            <span className="panel-title">
+              <span className="tick" /> Predict the Winner (before voting)
+            </span>
+            <span style={{ color: "var(--dim)", fontSize: 12, letterSpacing: 1 }}>
+              streak <b style={{ color: "var(--gold)" }}>{streak.cur}</b>
+              <span style={{ margin: "0 6px", color: "var(--mute)" }}>·</span>
+              best <b style={{ color: "var(--text)" }}>{streak.best}</b>
+            </span>
+          </div>
+          <p style={{ color: "var(--dim)", fontSize: 13, marginBottom: 10 }}>
+            Watched the fight? Lock in your prediction first — you'll see if you were right after you vote.
+          </p>
+          <div className="vote-row">
+            <button className="vote-a" onClick={() => setPrediction("a")}>
+              🔮 Fighter A wins
+            </button>
+            <button className="vote-draw" onClick={() => setPrediction("draw")}>
+              Draw
+            </button>
+            <button className="vote-b" onClick={() => setPrediction("b")}>
+              Fighter B wins 🔮
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ---------- Vote ---------- */}
       {canVote && (
         <div className="vote-row">
           <button className="vote-a" onClick={() => vote("a")}>
-            🗳 Fighter A
+            🗳 Fighter A fought better
           </button>
           <button className="vote-draw" onClick={() => vote("draw")}>Draw</button>
           <button className="vote-b" onClick={() => vote("b")}>
-            Fighter B 🗳
+            Fighter B fought better 🗳
           </button>
         </div>
       )}
@@ -267,14 +367,26 @@ export default function FightPage() {
       {/* ---------- Reveal ---------- */}
       {reveal && (
         <div className="panel reveal">
-          🎭 Reveal — Fighter A was <b>{reveal.names[reveal.model_a]}</b>
-          {" "}({fmtElo(reveal.elo_change?.[reveal.model_a])}) ·
-          Fighter B was <b>{reveal.names[reveal.model_b]}</b>
-          {" "}({fmtElo(reveal.elo_change?.[reveal.model_b])}) ·
+          🎭 Reveal — Fighter A was{" "}
+          <b>{reveal.names[reveal.canvas_a_model || reveal.model_a]}</b>{" "}
+          ({fmtElo(reveal.elo_change?.[reveal.canvas_a_model || reveal.model_a])})
+          {" · "}
+          Fighter B was <b>{reveal.names[reveal.canvas_b_model || reveal.model_b]}</b>{" "}
+          ({fmtElo(reveal.elo_change?.[reveal.canvas_b_model || reveal.model_b])})
+          {" · "}
           engine result: {reveal.engine_winner_side === "draw"
             ? "draw"
             : `Fighter ${reveal.engine_winner_side.toUpperCase()} won`}{" "}
           by {reveal.method}
+          {lastResult && (
+            <div style={{ marginTop: 10, fontSize: 14, fontWeight: 700,
+                          color: lastResult === "correct" ? "var(--green)" : "var(--red-2)",
+                          letterSpacing: 1, textTransform: "uppercase" }}>
+              {lastResult === "correct"
+                ? `✓ Prediction correct — streak ${streak.cur}`
+                : "✗ Prediction wrong — streak reset"}
+            </div>
+          )}
         </div>
       )}
     </>

@@ -108,13 +108,77 @@ const eventsByFrame = {};
 for (const e of R.events) (eventsByFrame[e.f] ||= []).push(e);
 let thoughtIdx = -1;
 
+/* ---------- audio (synthesized; CSP-clean, no external assets) ---------- */
+let ac = null, muted = false;
+function audio(){
+  if (muted) return null;
+  if (!ac) {
+    try { ac = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (_) { muted = true; return null; }
+  }
+  // Browsers suspend the context until a user gesture; resume on first call.
+  if (ac.state === "suspended") { try { ac.resume(); } catch(_){} }
+  return ac;
+}
+function tone(freq, dur, type="sine", vol=0.18, sweepTo=null){
+  const c = audio(); if (!c) return;
+  const t0 = c.currentTime;
+  const osc = c.createOscillator();
+  const g   = c.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (sweepTo != null) osc.frequency.exponentialRampToValueAtTime(
+    Math.max(20, sweepTo), t0 + dur);
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g).connect(c.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.02);
+}
+function noiseBurst(dur=0.07, vol=0.12, lp=2400){
+  const c = audio(); if (!c) return;
+  const buf = c.createBuffer(1, Math.ceil(c.sampleRate*dur), c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i=0;i<d.length;i++) d[i] = (Math.random()*2-1)*(1-i/d.length);
+  const src = c.createBufferSource(); src.buffer = buf;
+  const g = c.createGain(); g.gain.value = vol;
+  const f = c.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = lp;
+  src.connect(f).connect(g).connect(c.destination);
+  src.start();
+}
+function sfxClash(){ tone(1850, 0.10, "square", 0.10, 600); noiseBurst(0.06, 0.10, 5000); }
+function sfxHit(d, sharp){
+  if (sharp){
+    // wet sword strike
+    tone(420, 0.16, "sawtooth", 0.16, 110);
+    noiseBurst(0.10, 0.18, 1600);
+  } else {
+    // blunt thud
+    tone(110, 0.18, "sine", 0.20, 55);
+    noiseBurst(0.05, 0.10, 700);
+  }
+}
+function sfxLethal(){
+  // hit-stop chime + low boom
+  tone(880, 0.18, "triangle", 0.18, 440);
+  tone(1320, 0.30, "triangle", 0.10, 660);
+  tone(55,  0.45, "sine",     0.22, 30);
+}
+function sfxArrow(){ noiseBurst(0.18, 0.08, 4000); tone(1400, 0.18, "sine", 0.04, 700); }
+function sfxWin(){
+  const c = audio(); if (!c) return;
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) =>
+    setTimeout(() => tone(f, 0.22, "triangle", 0.14), i*110));
+}
+
 /* ---------- fx state (client-side particles) ---------- */
 let blood=[], stains=[], sparks=[], numbers=[], shake=0, slowmo=0, flash=0;
 function spawnEvent(e){
   if (e.k === "clash") {
     for (let i=0;i<10;i++){ const a=Math.random()*6.283, s=60+Math.random()*180;
       sparks.push([e.x,e.y,Math.cos(a)*s,Math.sin(a)*s,0.15+Math.random()*0.25]); }
-    shake = Math.max(shake,3); return;
+    shake = Math.max(shake,3);
+    sfxClash();
+    return;
   }
   const n = e.s ? Math.min(46, 6+e.d*1.6) : 3;
   for (let i=0;i<n;i++){ const a=Math.random()*6.283, s=40+Math.random()*(90+e.d*9);
@@ -123,7 +187,8 @@ function spawnEvent(e){
                            e.l?"#ffdc3c":"#ff5a5a", 1.4]);
              shake = Math.max(shake, Math.min(14, 3+e.d*0.35)); }
   else numbers.push([e.x,e.y+18,"blunt","#aaaebe",0.9]);
-  if (e.l) { slowmo = 2.2; flash = 0.35; shake = 16; }
+  if (e.l) { slowmo = 2.2; flash = 0.35; shake = 16; sfxLethal(); }
+  else      sfxHit(e.d, e.s);
 }
 function stepFx(dt){
   for (const arr of [blood,sparks]){
@@ -314,8 +379,25 @@ if (!R || !R.frames || !R.frames.length || !R.meta) {
 }
 const total = R.frames.length;
 let cursor = 0, playing = true, lastT = performance.now(), acc = 0;
+let killcamPlayed = false, killcamActive = false;
+// Find the lethal event frame (if any) for the auto killcam.
+const lethalFrame = (() => {
+  for (let i = R.events.length - 1; i >= 0; i--) if (R.events[i].l) return R.events[i].f;
+  return -1;
+})();
+const KILLCAM_PREROLL = 90;   // frames to rewind = ~1.5 s at 60 fps
 const bPlay=document.getElementById("bPlay"), scrub=document.getElementById("scrub"),
       timeEl=document.getElementById("time"), speedEl=document.getElementById("speed");
+
+// Optional mute toggle (gracefully no-op if the button doesn't exist).
+const bMute = document.getElementById("bMute");
+if (bMute) {
+  bMute.onclick = () => {
+    muted = !muted;
+    bMute.textContent = muted ? "🔇 Sound" : "🔊 Sound";
+    bMute.setAttribute("aria-pressed", String(muted));
+  };
+}
 scrub.max = total-1;
 document.getElementById("subtitle").textContent =
   `${R.meta.p1.name}  vs  ${R.meta.p2.name}  ·  sharp: ${R.meta.sharp.join("+")}`;
@@ -337,10 +419,36 @@ function gotoFrame(i, hard){
 }
 function advance(){
   const next = cursor+1;
-  if (next>=total){ playing=false; bPlay.textContent="▶ Play"; return; }
+  if (next>=total){
+    playing = false;
+    bPlay.textContent = "▶ Play";
+    if (!killcamPlayed && lethalFrame > KILLCAM_PREROLL) {
+      // Auto KILLCAM: rewind ~1.5 s before the lethal blow and replay
+      // in slowmo. Triggered exactly once per replay load.
+      killcamPlayed = true;
+      killcamActive = true;
+      slowmo = Math.max(slowmo, 3.0);
+      setTimeout(() => {
+        gotoFrame(lethalFrame - KILLCAM_PREROLL, true);
+        playing = true;
+        bPlay.textContent = "⏸ Pause";
+        sfxWin();
+      }, 650);
+    } else {
+      // Normal end-of-replay chime.
+      if (!killcamPlayed) sfxWin();
+      killcamPlayed = true;
+    }
+    return;
+  }
   cursor = next;
   for (const e of (eventsByFrame[cursor]||[])) spawnEvent(e);
   while (thoughtIdx+1 < R.thoughts.length && R.thoughts[thoughtIdx+1].f<=cursor) thoughtIdx++;
+  // End killcam mode a couple frames after the lethal hit so the slow-mo
+  // covers the actual kill but doesn't drag on forever.
+  if (killcamActive && lethalFrame >= 0 && cursor > lethalFrame + 24) {
+    killcamActive = false;
+  }
 }
 function render(){
   const frame = R.frames[cursor];
@@ -357,6 +465,19 @@ function render(){
   const th = thoughtIdx>=0 ? R.thoughts[thoughtIdx] : null;
   if (th){ drawThought(th.a, R.meta.p1, 0); drawThought(th.b, R.meta.p2, 1); }
   if (flash>0){ ctx.fillStyle=`rgba(255,255,255,${0.8*flash})`; ctx.fillRect(0,0,W,H); }
+  if (killcamActive){
+    // Cinematic letterbox bars
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 0, W, 48);
+    ctx.fillRect(0, H-48, W, 48);
+    ctx.fillStyle = "#ff3d5c";
+    ctx.font = "bold 18px Arial";
+    ctx.textAlign = "left";
+    ctx.fillText("● KILLCAM", 22, 32);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#ffd65a";
+    ctx.fillText("0.25× SLOW-MO", W-22, 32);
+  }
   if (over || cursor>=total-1){
     ctx.textAlign="center"; ctx.font="bold 44px Arial"; ctx.fillStyle="#ffdc5a";
     ctx.fillText(R.meta.winner, W/2, H/2-40);
@@ -368,15 +489,26 @@ function loop(now){
   if (!alive) return;
   try {
   const dt = Math.min(0.1,(now-lastT)/1000); lastT = now;
-  const sp = parseFloat(speedEl.value) * (slowmo>0?0.22:1);
+  const slowFactor = killcamActive ? 0.25 : (slowmo>0 ? 0.22 : 1);
+  const sp = parseFloat(speedEl.value) * slowFactor;
   if (playing){ acc += dt*FPS*sp; while (acc>=1){ acc--; advance(); } }
-  stepFx(dt*(slowmo>0?0.4:1));
+  stepFx(dt*(killcamActive ? 0.5 : (slowmo>0 ? 0.4 : 1)));
   render();
   } catch (e) { alive = false; showError(e); return; }
   requestAnimationFrame(loop);
 }
-bPlay.onclick = ()=>{ playing=!playing;
-  if (playing && cursor>=total-1) gotoFrame(0,true);
+// First user gesture unlocks the AudioContext on all browsers.
+const _unlockAudio = () => { audio(); document.removeEventListener("pointerdown", _unlockAudio); };
+document.addEventListener("pointerdown", _unlockAudio);
+
+bPlay.onclick = ()=>{
+  audio();   // ensure context is active on play toggles
+  playing=!playing;
+  if (playing && cursor>=total-1){
+    // Manual replay restart resets the killcam-once flag.
+    killcamPlayed = false; killcamActive = false;
+    gotoFrame(0,true);
+  }
   bPlay.textContent = playing?"⏸ Pause":"▶ Play"; };
 document.getElementById("bRestart").onclick = ()=>{ gotoFrame(0,true); playing=true; bPlay.textContent="⏸ Pause"; };
 scrub.oninput = ()=>{ gotoFrame(parseInt(scrub.value), true); };

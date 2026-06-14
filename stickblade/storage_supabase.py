@@ -48,15 +48,30 @@ class SupabaseStorage:
         return r.json() if r.content else None
 
     # ------------------------------------------------------------ matches
-    def create_match(self, model_a, model_b, sharp, blind=True):
+    def create_match(self, model_a, model_b, sharp, blind=True, weapon="sword"):
         mid = uuid.uuid4().hex[:12]
-        self._rest("POST", "matches", body={
+        body = {
             "id": mid, "created": time.time(),
             "model_a": model_a, "model_b": model_b,
-            "sharp": ",".join(sharp), "status": "queued",
-            "blind": bool(blind), "voted": False,
-        })
+            "sharp": ",".join(sharp), "weapon": weapon,
+            "status": "queued",
+            "blind": bool(blind), "voted": False, "flip": False,
+        }
+        try:
+            self._rest("POST", "matches", body=body)
+        except Exception:
+            # Older Supabase schema without weapon/flip columns: try again
+            # without them so the deploy doesn't break before the migration.
+            body.pop("weapon", None); body.pop("flip", None)
+            self._rest("POST", "matches", body=body)
         return mid
+
+    def set_flip(self, mid, flip: bool):
+        try:
+            self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
+                       body={"flip": bool(flip)})
+        except Exception:
+            pass   # column not present yet
 
     def set_status(self, mid, status, error=None):
         self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
@@ -101,22 +116,38 @@ class SupabaseStorage:
         return out
 
     # ------------------------------------------------------------ votes/elo
-    def _get_elo_row(self, model, sharp):
-        rows = self._rest("GET", "elo", params={
-            "model": f"eq.{model}", "sharp": f"eq.{sharp}"})
+    def _get_elo_row(self, model, sharp, weapon):
+        params = {"model": f"eq.{model}", "sharp": f"eq.{sharp}",
+                  "weapon": f"eq.{weapon}"}
+        rows = self._rest("GET", "elo", params=params)
         if rows:
             return dict(rows[0])
-        row = {"model": model, "sharp": sharp, "rating": START_ELO,
-               "wins": 0, "losses": 0, "draws": 0}
-        self._rest("POST", "elo", body=row,
-                   prefer="resolution=merge-duplicates")
+        row = {"model": model, "sharp": sharp, "weapon": weapon,
+               "rating": START_ELO, "wins": 0, "losses": 0, "draws": 0}
+        try:
+            self._rest("POST", "elo", body=row,
+                       prefer="resolution=merge-duplicates")
+        except Exception:
+            row.pop("weapon", None)
+            self._rest("POST", "elo", body=row,
+                       prefer="resolution=merge-duplicates")
         return row
 
     def _set_elo_row(self, row):
-        self._rest("PATCH", "elo", params={
-            "model": f"eq.{row['model']}", "sharp": f"eq.{row['sharp']}"},
+        params = {"model": f"eq.{row['model']}", "sharp": f"eq.{row['sharp']}"}
+        if row.get("weapon"):
+            params["weapon"] = f"eq.{row['weapon']}"
+        self._rest("PATCH", "elo", params=params,
             body={"rating": row["rating"], "wins": row["wins"],
                   "losses": row["losses"], "draws": row["draws"]})
+
+    @staticmethod
+    def _unflip_choice(choice, flip):
+        if choice == "draw":
+            return "draw"
+        if not flip:
+            return choice
+        return "a" if choice == "b" else "b"
 
     def record_vote(self, mid, choice):
         m = self.get_match(mid)
@@ -125,26 +156,27 @@ class SupabaseStorage:
         if m["voted"]:
             return {"already_voted": True, **self.reveal(mid)}
         sharp = m["sharp"]
+        weapon = m.get("weapon") or "sword"
+        flip = bool(m.get("flip"))
         a, b = m["model_a"], m["model_b"]
+        choice_model = self._unflip_choice(choice, flip)
         self._rest("POST", "votes", body={
             "id": uuid.uuid4().hex[:12], "match_id": mid,
             "created": time.time(), "choice": choice})
-        ra, rb = self._get_elo_row(a, sharp), self._get_elo_row(b, sharp)
+        ra, rb = (self._get_elo_row(a, sharp, weapon),
+                  self._get_elo_row(b, sharp, weapon))
         ea = 1.0 / (1.0 + 10 ** ((rb["rating"] - ra["rating"]) / 400.0))
-        sa = {"a": 1.0, "b": 0.0, "draw": 0.5}[choice]
+        sa = {"a": 1.0, "b": 0.0, "draw": 0.5}[choice_model]
         d_a = K_FACTOR * (sa - ea)
         d_b = K_FACTOR * ((1.0 - sa) - (1.0 - ea))
         ra["rating"] += d_a
         rb["rating"] += d_b
-        if choice == "a":
-            ra["wins"] += 1
-            rb["losses"] += 1
-        elif choice == "b":
-            ra["losses"] += 1
-            rb["wins"] += 1
+        if choice_model == "a":
+            ra["wins"] += 1; rb["losses"] += 1
+        elif choice_model == "b":
+            ra["losses"] += 1; rb["wins"] += 1
         else:
-            ra["draws"] += 1
-            rb["draws"] += 1
+            ra["draws"] += 1; rb["draws"] += 1
         self._set_elo_row(ra)
         self._set_elo_row(rb)
         self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
@@ -154,24 +186,31 @@ class SupabaseStorage:
 
     def reveal(self, mid):
         m = self.get_match(mid)
-        return {"model_a": m["model_a"], "model_b": m["model_b"],
-                "engine_winner_side": m["winner_side"], "method": m["method"]}
+        flip = bool(m.get("flip"))
+        canvas_a = m["model_b"] if flip else m["model_a"]
+        canvas_b = m["model_a"] if flip else m["model_b"]
+        return {
+            "model_a": m["model_a"], "model_b": m["model_b"],
+            "canvas_a_model": canvas_a, "canvas_b_model": canvas_b,
+            "engine_winner_side": m["winner_side"], "method": m["method"],
+            "flip": flip, "weapon": m.get("weapon") or "sword",
+        }
 
-    def leaderboard(self, sharp=None):
-        if sharp:
-            rows = self._rest("GET", "elo", params={
-                "sharp": f"eq.{sharp}", "order": "rating.desc"})
+    def leaderboard(self, sharp=None, weapon=None):
+        params = {"order": "rating.desc"}
+        if sharp:  params["sharp"] = f"eq.{sharp}"
+        if weapon: params["weapon"] = f"eq.{weapon}"
+        if sharp or weapon:
+            rows = self._rest("GET", "elo", params=params)
             return [dict(r) for r in rows]
-        rows = self._rest("GET", "elo", params={"order": "rating.desc"})
+        rows = self._rest("GET", "elo", params=params)
         agg = {}
         for r in rows:
             a = agg.setdefault(r["model"], {
-                "model": r["model"], "sharp": "ALL", "rating": [],
-                "wins": 0, "losses": 0, "draws": 0})
+                "model": r["model"], "sharp": "ALL", "weapon": "ALL",
+                "rating": [], "wins": 0, "losses": 0, "draws": 0})
             a["rating"].append(r["rating"])
-            a["wins"] += r["wins"]
-            a["losses"] += r["losses"]
-            a["draws"] += r["draws"]
+            a["wins"] += r["wins"]; a["losses"] += r["losses"]; a["draws"] += r["draws"]
         out = []
         for a in agg.values():
             a["rating"] = sum(a["rating"]) / len(a["rating"])
