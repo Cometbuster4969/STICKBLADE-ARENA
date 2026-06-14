@@ -210,6 +210,123 @@ def worker_loop():
 threading.Thread(target=worker_loop, daemon=True).start()
 
 
+# ===========================================================================
+# Tournaments — single-elim brackets of 4 or 8 models.
+# Each round runs every match SYNCHRONOUSLY through run_simulation so the
+# bracket state machine is dead simple. Tournaments live in their own queue
+# / worker so they don't starve the single-match queue.
+# ===========================================================================
+tournament_jobs: "queue.Queue[str]" = queue.Queue()
+
+
+def _adjust_round_seeding(round_models):
+    """Standard tournament bracket order so 1 vs N, 2 vs N-1, etc.
+    For an 8-tournament: [s1,s2,s3,s4,s5,s6,s7,s8] -> [s1,s8,s4,s5,s3,s6,s2,s7].
+    For a 4-tournament:  [s1,s2,s3,s4]            -> [s1,s4,s2,s3]."""
+    n = len(round_models)
+    if n == 8:
+        order = [0, 7, 3, 4, 2, 5, 1, 6]
+    elif n == 4:
+        order = [0, 3, 1, 2]
+    else:                                         # arbitrary even N
+        order = []
+        for i in range(n // 2):
+            order += [i, n - 1 - i]
+    return [round_models[i] for i in order]
+
+
+def _run_one_tournament_match(t, round_n, slot, model_a, model_b):
+    """Queue a single tournament fight via the normal storage/sim path,
+    wait for it, then return the WINNER MODEL ID (or model_a on draw — by
+    seed order)."""
+    sharp = t["sharp"].split(",") if isinstance(t["sharp"], str) else list(t["sharp"])
+    weapon = t.get("weapon") or "sword"
+    mid = store.create_match(model_a, model_b, sharp, blind=True, weapon=weapon)
+    # Same arena / mode for the whole tournament
+    MATCH_MODES[mid] = {"mode": t.get("mode", "macro"),
+                        "weapon": weapon,
+                        "arena":  t.get("arena", "normal")}
+    # Tournaments are not user-voted, so we always use flip=False — the
+    # bracket viewer cares about model identity, not blind canvas slots.
+    MATCH_FLIP[mid] = False
+    store.bind_tournament_match(t["id"], round_n, slot, mid)
+    # Run the simulation INLINE in this worker thread (not via the single-
+    # match queue) so we don't deadlock if the queue is busy.
+    run_simulation(mid)
+    m = store.get_match(mid)
+    if m["status"] != "done":
+        # error / timeout — seed-1 (higher seed) advances by default
+        return model_a
+    winner_side = m["winner_side"]
+    if winner_side == "a":  return model_a
+    if winner_side == "b":  return model_b
+    return model_a   # draw → higher seed advances
+
+
+def run_tournament(tid):
+    """Play out a single-elim bracket. Updates progress after every match."""
+    t = store.get_tournament(tid)
+    if not t:
+        return
+    store.set_tournament_status(tid, "running")
+    try:
+        round_models = _adjust_round_seeding(t["models"])
+        round_n = 1
+        max_rounds = (t["size"]).bit_length() - 1  # 4 -> 2, 8 -> 3
+
+        # Seed all R1 matches into the bracket table up-front so the UI can
+        # render the empty bracket immediately.
+        for slot in range(len(round_models) // 2):
+            a = round_models[slot * 2]
+            b = round_models[slot * 2 + 1]
+            store.add_tournament_match(tid, round_n, slot, a, b)
+        store.set_tournament_round(tid, round_n)
+
+        while round_n <= max_rounds:
+            winners = []
+            for slot in range(len(round_models) // 2):
+                a = round_models[slot * 2]
+                b = round_models[slot * 2 + 1]
+                print(f"[tournament {tid}] R{round_n} slot {slot}: {a} vs {b}")
+                w = _run_one_tournament_match(t, round_n, slot, a, b)
+                store.set_tournament_match_winner(tid, round_n, slot, w)
+                winners.append(w)
+            round_n += 1
+            round_models = winners
+            if round_n <= max_rounds:
+                store.set_tournament_round(tid, round_n)
+                # Seed the next round's pending matches into the table.
+                for slot in range(len(round_models) // 2):
+                    a = round_models[slot * 2]
+                    b = round_models[slot * 2 + 1]
+                    store.add_tournament_match(tid, round_n, slot, a, b)
+        # round_models now has 1 entry — the champion
+        champion = round_models[0]
+        store.finish_tournament(tid, champion)
+        print(f"[tournament {tid}] CHAMPION: {champion}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        store.set_tournament_status(tid, "error", str(e)[:300])
+
+
+def tournament_worker_loop():
+    while True:
+        tid = tournament_jobs.get()
+        try:
+            run_tournament(tid)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                store.set_tournament_status(tid, "error", str(e)[:300])
+            except Exception:
+                pass
+
+
+threading.Thread(target=tournament_worker_loop, daemon=True).start()
+
+
 # ------------------------------------------------------------- API
 class MatchReq(BaseModel):
     model_a: str = Field(min_length=1, max_length=120)
@@ -327,6 +444,67 @@ def leaderboard(sharp: str | None = None, weapon: str | None = None):
     for r in rows:
         r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
         r["rating"] = round(r["rating"], 1)
+    return rows
+
+
+# ============================================================
+# Tournaments API
+# ============================================================
+class TournamentReq(BaseModel):
+    name:   str = Field(default="Untitled Bracket", min_length=1, max_length=80)
+    models: list[str] = Field(min_length=4, max_length=8)
+    weapon: str = Field(default="sword", max_length=8)
+    sharp:  list[str] = Field(default=["tip"], max_length=4)
+    arena:  str = Field(default="normal", max_length=16)
+    mode:   str = Field(default="macro", max_length=8)
+
+
+@app.post("/api/tournament")
+def create_tournament(req: TournamentReq, request: Request):
+    # validate inputs (same gates as single-match)
+    for mdl in req.models:
+        if not _valid_model(mdl):
+            raise HTTPException(400, f"unknown model: {mdl}")
+        security.check_model_spend_policy(mdl, C.ARENA_MODELS)
+    security.check_match_allowed(request, jobs.qsize())
+
+    # only 4- or 8-model brackets supported (clean single-elim)
+    if len(req.models) not in (4, 8):
+        raise HTTPException(400, "tournament size must be 4 or 8 models")
+    if len(set(req.models)) != len(req.models):
+        raise HTTPException(400, "duplicate model entries not allowed")
+
+    from weapons import WEAPONS, WEAPON_ZONES
+    weapon = req.weapon if req.weapon in WEAPONS else "sword"
+    sharp  = [z for z in req.sharp if z in WEAPON_ZONES[weapon]] \
+             or [WEAPON_ZONES[weapon][0]]
+    arena  = req.arena if req.arena in ("normal", "ice", "low_gravity") else "normal"
+    mode   = req.mode  if req.mode  in ("macro", "joint")               else "macro"
+
+    tid = store.create_tournament(req.name, req.models, weapon, sharp,
+                                  arena, mode)
+    tournament_jobs.put(tid)
+    return {"tournament_id": tid, "status": "queued",
+            "size": len(req.models), "weapon": weapon, "arena": arena}
+
+
+@app.get("/api/tournament/{tid}")
+def tournament_status(tid: str):
+    t = store.get_tournament(tid)
+    if not t:
+        raise HTTPException(404, "no such tournament")
+    # decorate with display names
+    t["model_names"] = {m: C.ARENA_MODELS.get(m, m) for m in t["models"]}
+    return t
+
+
+@app.get("/api/tournaments")
+def list_tournaments():
+    rows = store.recent_tournaments()
+    for r in rows:
+        if r.get("winner_model"):
+            r["winner_name"] = C.ARENA_MODELS.get(r["winner_model"],
+                                                  r["winner_model"])
     return rows
 
 
