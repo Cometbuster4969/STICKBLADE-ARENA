@@ -66,7 +66,11 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* ---------- Background arena: radial spotlight + animated grid ---------- */
+/* ---------- Background arena: radial spotlight + static grid ----------
+   Cheap composite: a single linear gradient + a non-animated CSS grid that
+   fades out to the edges via a radial-gradient mask. We used to animate
+   the grid and stack 3 large radial spotlights — that pinned the GPU at
+   100% on phones. */
 body::before,
 body::after {
   content: "";
@@ -74,27 +78,26 @@ body::after {
   inset: 0;
   pointer-events: none;
   z-index: -1;
+  will-change: auto;     /* explicit: do NOT promote — these are static */
 }
 body::before {
   background:
-    radial-gradient(1100px 600px at 20% -10%, rgba(255, 61, 92, 0.18), transparent 60%),
-    radial-gradient(900px 600px at 90% 10%, rgba(79, 168, 255, 0.14), transparent 65%),
-    radial-gradient(800px 500px at 50% 100%, rgba(52, 245, 160, 0.10), transparent 65%),
+    radial-gradient(900px 540px at 20% 0%, rgba(255, 61, 92, 0.12), transparent 60%),
     var(--bg-0);
 }
 body::after {
   background-image:
-    linear-gradient(rgba(120, 130, 160, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(120, 130, 160, 0.06) 1px, transparent 1px);
+    linear-gradient(rgba(120, 130, 160, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 130, 160, 0.05) 1px, transparent 1px);
   background-size: 44px 44px, 44px 44px;
+  /* Static fade — no animation. Keeps the visual without the compositor cost. */
   mask-image: radial-gradient(ellipse 90% 70% at 50% 30%, #000 50%, transparent 100%);
   -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 30%, #000 50%, transparent 100%);
-  opacity: 0.55;
-  animation: gridDrift 60s linear infinite;
+  opacity: 0.45;
 }
-@keyframes gridDrift {
-  from { background-position: 0 0, 0 0; }
-  to   { background-position: 44px 44px, 44px 44px; }
+/* Strip even the grid on phones — saves an entire fullscreen mask layer. */
+@media (max-width: 720px) {
+  body::after { display: none; }
 }
 
 /* ---------- Layout shell ---------- */
@@ -153,11 +156,10 @@ main {
   display: flex;
   gap: 4px;
   padding: 4px;
-  background: rgba(18, 20, 32, 0.6);
+  background: rgba(18, 20, 32, 0.88);
   border: 1px solid var(--line);
   border-radius: 999px;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* backdrop-filter removed — was ~6 ms/frame on mobile compositor */
 }
 .site-head nav a {
   color: var(--text-2);
@@ -237,21 +239,24 @@ main {
   .row { grid-template-columns: 1fr; }
 }
 
-/* ---------- Panel (glassmorphism) ---------- */
+/* ---------- Panel (glass-ish, GPU-cheap) ---------- */
 .panel {
   position: relative;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)) ,
-    var(--bg-2);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    var(--bg-2-solid);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 18px;
   box-shadow: var(--shadow-card);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  /* backdrop-filter removed — was the single biggest mobile-paint cost.
+     The bg-2-solid background gives a near-identical look without
+     compositing the entire viewport behind every panel each frame. */
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* Hint the browser these are independent paint roots */
+  contain: layout paint style;
 }
 .panel.glow-red::before,
 .panel.glow-green::before,
@@ -385,12 +390,16 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     inset 0 0 0 1px rgba(255, 61, 92, 0.45),
     0 6px 22px rgba(255, 61, 92, 0.22);
 }
-.zone.on::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.07) 50%, transparent 70%);
-  animation: shine 2.6s linear infinite;
+/* The shine sweep is gorgeous but with 6-8 active zones simultaneously
+   it's a per-frame composite for each. Desktop keeps it; phones skip it. */
+@media (min-width: 721px) {
+  .zone.on::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.07) 50%, transparent 70%);
+    animation: shine 2.6s linear infinite;
+  }
 }
 @keyframes shine {
   from { transform: translateX(-100%); }
@@ -511,6 +520,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 /* ---------- Canvas / replay ---------- */
 canvas.arena {
   width: 100%;
+  aspect-ratio: 16 / 9;     /* avoids height jumps until JS sets intrinsic size */
+  height: auto;
   display: block;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -521,7 +532,7 @@ canvas.arena {
 }
 .controls {
   width: 100%;
-  background: var(--bg-2);
+  background: var(--bg-2-solid);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   margin-top: 10px;
@@ -530,7 +541,7 @@ canvas.arena {
   gap: 12px;
   align-items: center;
   flex-wrap: wrap;
-  backdrop-filter: blur(10px);
+  /* backdrop-filter removed for perf */
 }
 .controls button, .controls select { width: auto; }
 .controls input[type="range"] {
@@ -566,8 +577,8 @@ table.lb { width: 100%; border-collapse: collapse; font-size: 14px; }
   letter-spacing: 1.5px;
   position: sticky;
   top: 0;
-  background: rgba(20, 22, 35, 0.85);
-  backdrop-filter: blur(6px);
+  background: var(--bg-2-solid);
+  /* backdrop-filter removed for perf */
 }
 .lb td.r, .lb th.r { text-align: right; font-variant-numeric: tabular-nums; }
 .lb tr { transition: background 120ms ease; }
