@@ -125,13 +125,19 @@ class Match:
 
     def _begin_sim(self, r1, r2):
         self.thoughts = [r1["thought"], r2["thought"]]
+        am1 = self.arrows[1] if self.arrows else None
+        am2 = self.arrows[2] if self.arrows else None
         if self.mode == "joint":
             from joint_mode import JointController
-            self.ctrl = (JointController(self.f1, r1["joints"], r1["footwork"]),
-                         JointController(self.f2, r2["joints"], r2["footwork"]))
+            self.ctrl = (
+                JointController(self.f1, r1["joints"], r1["footwork"],
+                                fire=r1.get("fire", False),
+                                arrow_mgr=am1, enemy=self.f2),
+                JointController(self.f2, r2["joints"], r2["footwork"],
+                                fire=r2.get("fire", False),
+                                arrow_mgr=am2, enemy=self.f1),
+            )
         else:
-            am1 = self.arrows[1] if self.arrows else None
-            am2 = self.arrows[2] if self.arrows else None
             self.ctrl = (MoveController(self.f1, r1["action"], r1["footwork"],
                                         arrow_mgr=am1, enemy=self.f2),
                          MoveController(self.f2, r2["action"], r2["footwork"],
