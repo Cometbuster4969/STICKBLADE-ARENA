@@ -32,10 +32,19 @@ VERSION = "1.3.0"   # weapons + joint mode + player polyfill + admin bypass
 app = FastAPI(title="Stickblade Arena", docs_url=None, redoc_url=None,
               openapi_url=None)
 # Allow the standalone Next.js frontend (Vercel) to call this API.
+# Default to the production frontend + localhost dev; override with the
+# CORS_ORIGINS env var (comma-separated). '*' is no longer the fallback so
+# security scanners (and zealous redditors) don't ding us for it.
+_DEFAULT_CORS = (
+    "https://stickblade-arena.vercel.app,"
+    "http://localhost:3000,"
+    "http://127.0.0.1:3000"
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"], allow_headers=["*"],
+    allow_origins=os.environ.get("CORS_ORIGINS", _DEFAULT_CORS).split(","),
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Admin-Token"],
 )
 
 
@@ -365,12 +374,24 @@ import re
 
 _MODEL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._:-]*$", re.I)
 
+# Match / tournament ids are uuid.uuid4().hex[:12] — exactly 12 hex chars.
+# Strictly validating the URL path param prevents path-traversal attacks
+# (e.g. /api/replay/..%2F..%2Fetc%2Fpasswd) from ever reaching the storage
+# layer that builds filesystem paths from the id.
+_ID_RE = re.compile(r"^[a-f0-9]{12}$")
+
 
 def _valid_model(mdl: str) -> bool:
     """Roster models, mock:* personalities, or a well-formed OpenRouter id."""
     if mdl in C.ARENA_MODELS or mdl in ("mock:duelist", "mock:berserker"):
         return True
     return bool(_MODEL_ID_RE.match(mdl)) and len(mdl) < 120
+
+
+def _validate_id(id_: str) -> None:
+    """Guard URL path params before they touch storage / filesystem."""
+    if not _ID_RE.match(id_ or ""):
+        raise HTTPException(400, "invalid id")
 
 
 @app.post("/api/match")
@@ -401,6 +422,7 @@ def create_match(req: MatchReq, request: Request):
 
 @app.get("/api/match/{mid}")
 def match_status(mid: str):
+    _validate_id(mid)
     m = store.get_match(mid)
     if not m:
         raise HTTPException(404, "no such match")
@@ -416,6 +438,7 @@ def match_status(mid: str):
 
 @app.get("/api/replay/{mid}")
 def replay(mid: str):
+    _validate_id(mid)
     r = store.get_replay(mid)
     if not r:
         raise HTTPException(404, "replay not ready")
@@ -424,6 +447,7 @@ def replay(mid: str):
 
 @app.post("/api/vote/{mid}")
 def vote(mid: str, req: VoteReq, request: Request):
+    _validate_id(mid)
     security.check_vote_allowed(request)
     if req.choice not in ("a", "b", "draw"):
         raise HTTPException(400, "choice must be a|b|draw")
@@ -490,6 +514,7 @@ def create_tournament(req: TournamentReq, request: Request):
 
 @app.get("/api/tournament/{tid}")
 def tournament_status(tid: str):
+    _validate_id(tid)
     t = store.get_tournament(tid)
     if not t:
         raise HTTPException(404, "no such tournament")

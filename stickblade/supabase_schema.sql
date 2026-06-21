@@ -1,14 +1,18 @@
 -- STICKBLADE ARENA — Supabase schema
--- Run this once in: Supabase Dashboard -> SQL Editor -> New query -> Run
--- Then create a Storage bucket named: replays   (private is fine)
+-- Run this in: Supabase Dashboard -> SQL Editor -> New query -> Run
+-- Safe to run on a FRESH project AND on an existing populated database.
+-- Then create a Storage bucket named: replays (private is fine).
 
+-- ============================================================================
+-- 1. CREATE TABLES (no-op on existing tables, full schema on fresh installs)
+-- ============================================================================
 create table if not exists matches (
     id          text primary key,
     created     double precision,
     model_a     text,
     model_b     text,
     sharp       text,
-    weapon      text default 'sword',     -- sword | flail | bow
+    weapon      text default 'sword',     -- sword | dagger | spear | flail | bow
     status      text,                     -- queued | running | done | error
     winner_side text,                     -- a | b | draw (CANVAS side: a=green, b=blue)
     method      text,
@@ -42,27 +46,6 @@ create table if not exists elo (
     primary key (model, sharp, weapon)
 );
 
-create index if not exists idx_matches_created on matches (created desc);
-create index if not exists idx_elo_sharp on elo (sharp, rating desc);
-create index if not exists idx_elo_weapon on elo (weapon, rating desc);
-
--- The backend uses the service_role key (bypasses RLS), so RLS can stay
--- enabled with no public policies = tables are NOT readable by anonymous users.
-alter table matches enable row level security;
-alter table votes   enable row level security;
-alter table elo     enable row level security;
-
--- ============================================================
--- IDEMPOTENT MIGRATION (safe to run on an existing deployment)
--- ============================================================
-alter table matches add column if not exists weapon     text default 'sword';
-alter table matches add column if not exists flip       boolean default false;
-alter table matches add column if not exists commentary text;
-alter table elo     add column if not exists weapon     text default 'sword';
-
--- ============================================================
--- Tournaments (single-elim brackets)
--- ============================================================
 create table if not exists tournaments (
     id            text primary key,
     created       double precision,
@@ -91,18 +74,57 @@ create table if not exists tournament_matches (
     unique (tournament_id, round, slot)
 );
 
-create index if not exists idx_tournament_matches_tid on tournament_matches (tournament_id, round, slot);
-alter table tournaments        enable row level security;
-alter table tournament_matches enable row level security;
--- Promote the elo PK to include weapon (only if it doesn't already):
+-- ============================================================================
+-- 2. IDEMPOTENT MIGRATIONS for older deployments
+--    Must run BEFORE any CREATE INDEX or PK change that references new columns.
+-- ============================================================================
+alter table matches add column if not exists weapon     text default 'sword';
+alter table matches add column if not exists flip       boolean default false;
+alter table matches add column if not exists commentary text;
+alter table elo     add column if not exists weapon     text default 'sword';
+
+-- Backfill any rows that pre-date the weapon column so the new PK won't
+-- complain about NULLs. (default 'sword' only applies to NEW rows.)
+update elo     set weapon = 'sword' where weapon is null;
+update matches set weapon = 'sword' where weapon is null;
+
+-- Promote the elo PK to include `weapon` — only if it hasn't been promoted yet.
 do $$
+declare
+  has_weapon_pk boolean;
 begin
-  if not exists (
-    select 1 from information_schema.table_constraints
-    where  table_name = 'elo' and constraint_type = 'PRIMARY KEY'
-    and    constraint_name like '%weapon%'
-  ) then
+  select exists (
+    select 1
+    from   pg_index i
+    join   pg_attribute a
+           on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
+    where  i.indrelid = 'public.elo'::regclass
+    and    i.indisprimary
+    and    a.attname  = 'weapon'
+  ) into has_weapon_pk;
+
+  if not has_weapon_pk then
+    -- drop whatever the old PK was (likely (model, sharp))
     alter table elo drop constraint if exists elo_pkey;
     alter table elo add primary key (model, sharp, weapon);
   end if;
 end$$;
+
+-- ============================================================================
+-- 3. INDEXES (safe now that all columns exist)
+-- ============================================================================
+create index if not exists idx_matches_created          on matches            (created desc);
+create index if not exists idx_elo_sharp                on elo                (sharp,  rating desc);
+create index if not exists idx_elo_weapon               on elo                (weapon, rating desc);
+create index if not exists idx_tournament_matches_tid   on tournament_matches (tournament_id, round, slot);
+
+-- ============================================================================
+-- 4. ROW LEVEL SECURITY
+--    Backend uses the service_role key (bypasses RLS), so RLS enabled with
+--    no public policies = tables are NOT readable by anonymous users.
+-- ============================================================================
+alter table matches            enable row level security;
+alter table votes              enable row level security;
+alter table elo                enable row level security;
+alter table tournaments        enable row level security;
+alter table tournament_matches enable row level security;
