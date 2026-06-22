@@ -11,6 +11,21 @@ export async function api(path, opts) {
 }
 
 export const getModels = () => api("/models");
+export const getHealth = () => api("/health");
+
+/**
+ * Keepalive ping — fires every 5 minutes while a tab is open so the HF
+ * Space backend doesn't go to sleep mid-session (cold-starts take 30-60s
+ * and were the #1 cause of "LLM timeout" fallbacks in real user matches).
+ * Returns a cleanup function. Use in a useEffect.
+ */
+export function startKeepalive() {
+  if (typeof window === "undefined") return () => {};
+  const tick = () => { getHealth().catch(() => {}); };
+  tick();                                // immediate first ping
+  const id = setInterval(tick, 5 * 60 * 1000);
+  return () => clearInterval(id);
+}
 
 /**
  * Leaderboard rows. Either filter is optional; pass both for the most

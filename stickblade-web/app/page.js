@@ -4,7 +4,7 @@ import ModelPicker, { CUSTOM } from "@/components/ModelPicker";
 import ReplayPlayer from "@/components/ReplayPlayer";
 import LeaderboardTable from "@/components/LeaderboardTable";
 import { getModels, createMatch, getMatch, getReplay, postVote,
-         getLeaderboard } from "@/lib/api";
+         getLeaderboard, startKeepalive } from "@/lib/api";
 
 const WEAPON_ZONES = {
   sword:  ["tip", "edge", "back_edge", "pommel"],
@@ -77,6 +77,13 @@ export default function FightPage() {
   const lbWeaponId = useId();
 
   useEffect(() => { setStreak(readStreak()); }, []);
+
+  // Keep the HF Space backend warm while a user is on the page.
+  // Without this, the Space sleeps after ~10 min of no traffic and the
+  // next match takes 30-60s to wake the container — which the brain
+  // layer reads as a timeout and falls back to a mock. Five-minute
+  // health pings keep it hot for free.
+  useEffect(() => startKeepalive(), []);
 
   useEffect(() => {
     getModels().then((ms) => {
