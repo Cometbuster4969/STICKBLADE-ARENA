@@ -56,6 +56,10 @@ class ReplayRecorder:
         # Pre-fight trash talk per fighter (canvas-side a/b strings).
         # Populated by server.py before the simulation starts.
         self.quips = {"a": "", "b": ""}
+        # How many turns in this match used a scripted fallback brain
+        # (LLM timed out, errored, or returned bad JSON). Frontend uses
+        # this to decide whether to show the "scripted fallback" banner.
+        self.fallback_turns = 0
         self._n = 0
         self._logged = 0
         self.match = None
@@ -85,9 +89,16 @@ class ReplayRecorder:
         if len(m.log) > self._logged:
             self._logged = len(m.log)
             t = m.log[-1]
+            # Track whether either fighter fell back this turn (used by the
+            # frontend to surface a small "scripted fallback in use" banner
+            # so users know they're watching mock brains, not real LLMs).
+            a_reply = t[m.f1.name]
+            b_reply = t[m.f2.name]
+            if a_reply.get("_fallback") or b_reply.get("_fallback"):
+                self.fallback_turns += 1
             self.thoughts.append({"f": len(self.frames), "turn": t["turn"],
-                                  "a": t[m.f1.name]["thought"],
-                                  "b": t[m.f2.name]["thought"]})
+                                  "a": a_reply["thought"],
+                                  "b": b_reply["thought"]})
         row = [round(m.f1.hp, 1), round(m.f2.hp, 1), m.turn,
                1 if m.phase == m.PH_OVER else 0]
         extra = FLAIL_EXTRA if m.weapon == "flail" else []
@@ -135,6 +146,9 @@ class ReplayRecorder:
                 # Pre-fight trash talk (canvas-side). Player.js renders these
                 # as speech bubbles over each fighter at replay start.
                 "quips": self.quips,
+                # how many turns used a scripted fallback brain (LLM error/timeout)
+                "fallback_turns": self.fallback_turns,
+                "total_turns": m.turn,
             },
             "frames": self.frames,
             "events": self.events,

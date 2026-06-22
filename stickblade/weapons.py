@@ -86,11 +86,20 @@ WEAPON_HINTS = {
     "flail":  ("ball=the head at ANY speed | spikes=the ball at HIGH speed (a slow ball "
                "is just 'ball') | chain=the links | handle=the stick. The flail builds "
                "momentum: spin_up first, then smash/swing hits MUCH harder."),
-    "bow":    ("arrowhead=front of a FIRED arrow | arrow_shaft=side of a fired arrow | "
-               "bow_limb=the bow itself as a melee club. draw_shot=power shot (slow, "
-               "strong), quick_shot=snap shot (fast, weak), high_arc_shot=lobbed. "
-               "You have unlimited arrows but each shot takes the whole turn. "
-               "Arrows fly straight at the enemy's current position — they do NOT track."),
+    "bow":    ("YOU ARE AN ARCHER — your damage comes from SHOOTING ARROWS, not "
+               "from melee. draw_shot/quick_shot/high_arc_shot all FIRE an arrow "
+               "at the enemy; bow_bash is a last-resort emergency melee strike "
+               "with the bow stave and should ONLY be used when the enemy is "
+               "literally touching you (distance < 50). At every other distance, "
+               "PICK A SHOT ACTION. Zone meanings: arrowhead=front of a FIRED "
+               "arrow (sharp tip damage), arrow_shaft=side of a fired arrow, "
+               "bow_limb=the bow stave when used as a club. draw_shot=power "
+               "shot (slow wind-up, hits hard), quick_shot=snap shot (fast, "
+               "weaker), high_arc_shot=lobbed shot to clear obstacles or guards. "
+               "You have unlimited arrows. Each shot consumes the whole turn. "
+               "Arrows fly straight at the enemy's CURRENT position — they do "
+               "NOT track, so if the enemy is moving, lead the shot or pick "
+               "quick_shot for less flight time."),
 }
 
 # flail: ball must move at least this fast for "spikes" zone to apply
