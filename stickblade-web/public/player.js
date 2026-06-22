@@ -414,6 +414,20 @@ function drawHud(frame){
     ctx.fillStyle = arena === "ice" ? "#88d8ff" : "#c9b8ff";
     ctx.fillText(txt, W - 40, 86);
   }
+  // Fallback banner — shown when one or both LLMs errored / timed out and
+  // a scripted brain stepped in. Honesty about the brain quality > pretending.
+  const fb  = R.meta.fallback_turns || 0;
+  const tot = R.meta.total_turns || 0;
+  if (fb > 0 && tot > 0) {
+    const allFb = fb >= tot;
+    const txt = allFb
+      ? "⚠ SCRIPTED FIGHT — both LLMs errored; mock fighters played this match"
+      : `⚠ SCRIPTED FALLBACK USED ON ${fb}/${tot} TURNS`;
+    ctx.font = "bold 11px Arial";
+    ctx.textAlign = "left";
+    ctx.fillStyle = allFb ? "#ffa040" : "#ffd07a";
+    ctx.fillText(txt, 40, 108);
+  }
 }
 function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); }
 function wrap(t,max){ const out=[]; let cur="";

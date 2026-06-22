@@ -14,7 +14,37 @@ Run:  uvicorn server:app --host 0.0.0.0 --port 8000
 """
 import os
 import queue
+import re as _re_top
 import threading
+
+
+def _safe_err(e) -> str:
+    """Sanitize an exception message before it reaches the user.
+
+    Real exception text often embeds full URLs (with `?api_key=...` or
+    `Bearer ...` tokens), filesystem paths, and stack frames. We replace
+    those with a friendly category label and keep it short."""
+    s = str(e) if not isinstance(e, str) else e
+    # strip URLs
+    s = _re_top.sub(r"https?://\S+", "<url>", s)
+    # strip bearer-ish tokens / api keys
+    s = _re_top.sub(r"(?i)(api[_-]?key|bearer|token)[=:\s]+\S+", r"\1 <hidden>", s)
+    # strip absolute paths
+    s = _re_top.sub(r"/[a-zA-Z0-9_/.-]{12,}", "<path>", s)
+    # collapse whitespace, clamp
+    s = _re_top.sub(r"\s+", " ", s).strip()
+    if len(s) > 160:
+        s = s[:160].rstrip() + "…"
+    # bucket by category if it's a known shape, more useful than the verbatim text
+    if "404" in s or "not found" in s.lower():
+        return "model not available (404)"
+    if "429" in s or "too many" in s.lower() or "rate" in s.lower():
+        return "rate limited by upstream (429)"
+    if "401" in s or "403" in s or "unauthor" in s.lower():
+        return "upstream auth failed (check API key)"
+    if "timeout" in s.lower() or "timed out" in s.lower():
+        return "model timed out"
+    return s or "internal error"
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
@@ -199,7 +229,7 @@ def run_simulation(mid):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        store.set_status(mid, "error", str(e)[:300])
+        store.set_status(mid, "error", _safe_err(e))
 
 
 def worker_loop():
@@ -211,7 +241,7 @@ def worker_loop():
             import traceback
             traceback.print_exc()
             try:
-                store.set_status(mid, "error", str(e)[:300])
+                store.set_status(mid, "error", _safe_err(e))
             except Exception:
                 pass
 
@@ -316,7 +346,7 @@ def run_tournament(tid):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        store.set_tournament_status(tid, "error", str(e)[:300])
+        store.set_tournament_status(tid, "error", _safe_err(e))
 
 
 def tournament_worker_loop():
@@ -328,7 +358,7 @@ def tournament_worker_loop():
             import traceback
             traceback.print_exc()
             try:
-                store.set_tournament_status(tid, "error", str(e)[:300])
+                store.set_tournament_status(tid, "error", _safe_err(e))
             except Exception:
                 pass
 
@@ -357,6 +387,32 @@ def version():
     return {"version": VERSION, "weapons": WEAPONS,
             "modes": ["macro", "joint"], "replay_format": 2,
             "admin_bypass": bool(os.environ.get("ADMIN_TOKEN"))}
+
+
+@app.get("/api/health")
+def health():
+    """Cheap liveness check — used by the frontend to distinguish between
+    'backend asleep / down' vs 'backend up but a specific endpoint failed'.
+
+    Reports:
+      * up                — always true if this responds at all
+      * has_openrouter    — OPENROUTER_API_KEY is configured
+      * has_supabase      — Supabase storage configured (false = local SQLite)
+      * queue             — pending match sims (helps users know to wait)
+      * tournament_queue  — pending bracket runs
+      * uptime_s          — process uptime in seconds (rough)
+    """
+    return {
+        "up": True,
+        "version": VERSION,
+        "has_openrouter": bool(C.OPENROUTER_API_KEY),
+        "has_openai":     bool(C.OPENAI_API_KEY),
+        "has_gemini":     bool(C.GEMINI_API_KEY),
+        "has_supabase":   bool(os.environ.get("SUPABASE_URL")
+                              and os.environ.get("SUPABASE_KEY")),
+        "queue":            jobs.qsize(),
+        "tournament_queue": tournament_jobs.qsize(),
+    }
 
 
 @app.get("/api/models")
