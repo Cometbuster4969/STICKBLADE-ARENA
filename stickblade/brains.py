@@ -159,11 +159,24 @@ def build_state(me, foe, turn, max_turns, last_events):
 
 
 def _extract_json(text):
+    # Defensive against None/empty (some providers return empty body on a
+    # silent rate-limit; we want a clean ValueError that decide_with_timeout's
+    # retry loop catches, not a TypeError from re.sub(None)).
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("empty response")
     text = re.sub(r"```(json)?", "", text).strip()
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
-        raise ValueError("no json")
-    return json.loads(m.group(0))
+        raise ValueError("no json in response")
+    try:
+        return json.loads(m.group(0))
+    except json.JSONDecodeError as e:
+        # Most JSON parse failures are trailing commas / unescaped quotes
+        # from small models. Try one cleanup pass before giving up so the
+        # retry loop only sees genuinely-broken responses.
+        cleaned = re.sub(r",(\s*[}\]])", r"\1", m.group(0))   # trailing commas
+        return json.loads(cleaned)
 
 
 def _sanitize(d, allowed=None):
@@ -185,6 +198,90 @@ def _trim(text, max_words=25):
     if len(words) > max_words:
         text = " ".join(words[:max_words]).rstrip(",;:") + "…"
     return text[:280]
+
+
+# ============================================================
+# Resilience: buddy-model pools + adaptive timeouts
+# ============================================================
+# When the LLM originally chosen for a turn fails, decide_with_timeout()
+# tries 1-2 BUDDY models from the same capability tier before giving up
+# and using a scripted mock. Goal: keep the match feeling real even when
+# the OpenRouter free pool has a hiccup or one provider is down.
+#
+# Buddies are SAME-TIER alternates. We don't downgrade a 405B model to a
+# 3B model — that would tank match quality silently. Pools below are
+# grouped by rough capability + speed so the swap is invisible to the user.
+#
+# Refresh against `https://openrouter.ai/api/v1/models` if the free pool
+# rotates (see tools/verify_models.py).
+
+_BUDDY_POOLS = {
+    # Large / slow / strong-reasoning
+    "large": [
+        "openai/gpt-oss-120b:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "nousresearch/hermes-3-llama-3.1-405b:free",
+        "qwen/qwen3-coder:free",
+    ],
+    # Mid / balanced (fast enough for 15s budget)
+    "mid": [
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen3-next-80b-a3b-instruct:free",
+        "openai/gpt-oss-20b:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+    ],
+    # Small / fast (good for snap-shot scenarios where speed matters)
+    "small": [
+        "meta-llama/llama-3.2-3b-instruct:free",
+        "nvidia/nemotron-nano-9b-v2:free",
+        "liquid/lfm-2.5-1.2b-instruct:free",
+    ],
+}
+
+# Map each model to its tier so buddies come from the right pool.
+_MODEL_TIER = {}
+for tier, ids in _BUDDY_POOLS.items():
+    for mid in ids:
+        _MODEL_TIER[mid] = tier
+# Paid models map to "mid" as a reasonable buddy tier (we don't burn paid
+# budget on retries of free-tier failures; if a paid model fails we fall
+# back to free mid-tier).
+_MODEL_TIER.update({
+    "openai/gpt-4o-mini":         "mid",
+    "anthropic/claude-3.5-haiku": "mid",
+})
+
+
+def _buddies_for(brain, k=2):
+    """Return up to k buddy model ids from the same tier as `brain.model`,
+    excluding the original. Returns [] for non-OpenRouter brains."""
+    model_id = getattr(brain, "model", None)
+    if not model_id or "/" not in model_id:
+        return []
+    if not C.OPENROUTER_API_KEY:
+        return []                           # no key, can't construct buddies
+    tier = _MODEL_TIER.get(model_id, "mid") # unknown ids default to mid tier
+    pool = [m for m in _BUDDY_POOLS.get(tier, []) if m != model_id]
+    return pool[:k]
+
+
+def _timeout_for(model_id):
+    """Adaptive per-model timeout. Tiny models that take >10s are stuck
+    (their inference is fast), while reasoning models genuinely need 25-30s
+    on a complex prompt. Flat 30s was killing reasoning chains too early
+    AND waiting too long on tiny stuck models."""
+    if not model_id:
+        return C.LLM_TIMEOUT
+    mid = model_id.lower()
+    # Small fast models
+    if any(t in mid for t in ("3b", "1.2b", "9b", "nano", "lfm", "small")):
+        return 10.0
+    # Large reasoning models
+    if any(t in mid for t in ("120b", "405b", "550b", "deepseek-r1", "thinking", "reasoning")):
+        return min(C.LLM_TIMEOUT, 25.0)
+    # Default mid-tier
+    return min(C.LLM_TIMEOUT, 18.0)
 
 
 class Brain:
@@ -244,23 +341,86 @@ class Brain:
         return _trim(out.get("r") or fallback)
 
     def decide_with_timeout(self, state):
-        out = {}
-        def run():
+        """Resilient decide() with retry, buddy-model fallback, and adaptive
+        timeout — only resorts to the scripted mock as a true last resort.
+
+        Failure ladder (each step takes <2s extra wall clock):
+          1. Original model, 1st attempt, adaptive timeout for its size
+          2. Original model, 2nd attempt with +50% timeout (handles transient
+             rate-limits, empty responses, JSON parse errors, network blips)
+          3. Buddy model #1 (similar capability tier, different provider)
+          4. Buddy model #2 (further-removed alternate)
+          5. Scripted mock (last resort, banner shown to user)
+        """
+        import time as _t
+
+        # Step 1+2: retry the originally-chosen model first.
+        attempts = [
+            (self, _timeout_for(getattr(self, "model", ""))),
+            (self, _timeout_for(getattr(self, "model", "")) * 1.5),
+        ]
+
+        # Steps 3+4: try up to 2 buddy models if the original keeps failing.
+        # Buddies only apply to OpenRouter brains (same client, same key, just
+        # a different model id). GPT/Gemini brains use different clients and
+        # don't have an equivalent — they get the same model retried twice.
+        for buddy_id in _buddies_for(self):
             try:
-                out["r"] = self.decide(state)
-            except Exception as e:
-                out["err"] = str(e)
-        th = threading.Thread(target=run, daemon=True)
-        th.start()
-        th.join(C.LLM_TIMEOUT)
-        if "r" in out:
-            return out["r"]
+                buddy = OpenRouterBrain(self.sharp, buddy_id,
+                                        label=self.label + "→buddy",
+                                        mode=self.mode, weapon=self.weapon)
+                attempts.append((buddy, _timeout_for(buddy_id)))
+            except Exception:
+                # OpenRouter not configured / brain init failed — skip silently
+                pass
+
+        last_err = "no attempts"
+        for idx, (brain, timeout_s) in enumerate(attempts):
+            out = {}
+            def _run():
+                try:
+                    out["r"] = brain.decide(state)
+                except Exception as e:
+                    out["err"] = str(e)[:200]
+            th = threading.Thread(target=_run, daemon=True)
+            th.start()
+            th.join(timeout_s)
+
+            if "r" in out and out["r"]:
+                if idx > 0:
+                    print(f"[brain] {self.label} recovered on attempt {idx+1} "
+                          f"using {getattr(brain,'model',brain.label)}")
+                return out["r"]
+
+            last_err = out.get("err") or f"timeout({timeout_s:.0f}s)"
+            print(f"[brain] {self.label} attempt {idx+1}/{len(attempts)} "
+                  f"failed: {last_err[:80]}")
+
+            # Tiny backoff between attempts so we don't immediately re-hit a
+            # rate-limit window. Capped at 2s so total recovery stays under
+            # ~10s extra wall clock in the worst case.
+            if idx < len(attempts) - 1:
+                _t.sleep(min(0.5 * (idx + 1), 2.0))
+
+        # ---------------- All attempts exhausted → scripted fallback --------
+        # Pick a personality based on the brain's label so when BOTH fighters
+        # fall back in the same match they don't produce identical sequences.
+        personality = "berserker" if (hash(self.label) & 1) else "duelist"
         if self.mode == "joint":
             from joint_mode import MockJointBrain
             fb = MockJointBrain(self.sharp, weapon=self.weapon).decide(state)
         else:
-            fb = MockBrain(self.sharp, "duelist").decide(state)
-        fb["thought"] = f"[{self.label} fallback: {out.get('err','timeout')[:60]}] " + fb["thought"]
+            # CRITICAL: pass weapon=self.weapon so the mock fallback picks
+            # weapon-appropriate actions. Without this it defaults to 'sword'
+            # and a bow fighter ends up swinging the bow like a sword instead
+            # of shooting arrows (and a flail fighter ignores spin_up etc.).
+            fb = MockBrain(self.sharp, personality,
+                           weapon=self.weapon).decide(state)
+
+        print(f"[brain] {self.label} ALL {len(attempts)} attempts failed, "
+              f"using mock {personality}: {last_err[:80]}")
+        fb["thought"] = "[fallback] " + fb["thought"]
+        fb["_fallback"] = True
         return fb
 
 
@@ -316,17 +476,25 @@ class MockBrain(Brain):
             return _sanitize({"action": "guard_high", "footwork": "hop_back",
                               "thought": "I'm down — cover up and create space."})
         if self.weapon == "bow":
-            if d > 300:
+            # Always prefer SHOOTING over melee with a bow. The previous logic
+            # had bow_bash as a 50% pick at clinch range which looked weird —
+            # archers don't beat people with their bow when an arrow at 0 ft
+            # still works. Only bash if literally on top of the enemy.
+            if d > 280:
                 mv = {"action": random.choice(["draw_shot", "high_arc_shot"]),
                       "footwork": "hold",
                       "thought": "Long range — full draw, loose."}
-            elif d > 150:
+            elif d > 120:
                 mv = {"action": "quick_shot", "footwork": "retreat",
                       "thought": "He's closing — snap shot and give ground."}
+            elif d > 50:
+                # close but not clinched — still shoot, just hop back first
+                mv = {"action": "quick_shot", "footwork": "hop_back",
+                      "thought": "Point-blank shot, then create distance."}
             else:
-                mv = {"action": random.choice(["bow_bash", "quick_shot"]),
-                      "footwork": "hop_back",
-                      "thought": "Too close! Bash and jump away."}
+                # in actual physical contact — only NOW use the bow as a club
+                mv = {"action": "bow_bash", "footwork": "hop_back",
+                      "thought": "He's on top of me — bash and jump away."}
             return _sanitize(mv, self.actions)
         if self.p == "berserker":
             if d > 200:
