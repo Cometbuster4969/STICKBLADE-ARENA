@@ -223,31 +223,30 @@ def _trim(text, max_words=25):
 # rotates (see tools/verify_models.py).
 
 _BUDDY_POOLS = {
-    # Large / slow / strong. ORDER MATTERS: non-reasoning models come FIRST
-    # because the most common failure for a reasoning model (gpt-oss,
-    # nemotron-super) is "burned entire token budget on hidden CoT", and
-    # falling back to another reasoning model has the same problem. Hermes
-    # and qwen3-coder are vanilla completion models — way more reliable as
-    # rescue buddies.
+    # Large / slow / strong. Order = preference: vanilla-first because they
+    # emit shorter, faster, and are more likely to JSON cleanly on the first
+    # try. Reasoning models (gpt-oss, nemotron-super) still work since we
+    # now always send reasoning:{exclude:true}, but they're slightly more
+    # latency-variable, so try them after.
     "large": [
-        "nousresearch/hermes-3-llama-3.1-405b:free",   # vanilla, reliable
-        "qwen/qwen3-coder:free",                       # vanilla
-        "openai/gpt-oss-120b:free",                    # reasoning (risky)
-        "nvidia/nemotron-3-super-120b-a12b:free",      # reasoning (risky)
+        "nousresearch/hermes-3-llama-3.1-405b:free",
+        "qwen/qwen3-coder:free",
+        "openai/gpt-oss-120b:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
     ],
-    # Mid / balanced (fast enough for 15s budget). Same ordering rule.
+    # Mid / balanced (fast enough for 15s budget).
     "mid": [
-        "meta-llama/llama-3.3-70b-instruct:free",       # vanilla, rock-solid
-        "qwen/qwen3-next-80b-a3b-instruct:free",        # vanilla
-        "google/gemma-4-31b-it:free",                   # vanilla
-        "google/gemma-4-26b-a4b-it:free",               # vanilla
-        "openai/gpt-oss-20b:free",                      # reasoning (risky)
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen3-next-80b-a3b-instruct:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "openai/gpt-oss-20b:free",
     ],
     # Small / fast (good for snap-shot scenarios where speed matters)
     "small": [
         "meta-llama/llama-3.2-3b-instruct:free",
         "liquid/lfm-2.5-1.2b-instruct:free",
-        "nvidia/nemotron-nano-9b-v2:free",              # reasoning, last
+        "nvidia/nemotron-nano-9b-v2:free",
     ],
 }
 
@@ -643,29 +642,20 @@ class OpenRouterBrain(Brain):
         msgs = [{"role": "system", "content": self.sys}]
         msgs += self.history[-6:]
         msgs.append({"role": "user", "content": user})
-        # Reasoning models (gpt-oss, nemotron, deepseek-r1, qwen-thinking,
-        # glm-thinking) default reasoning=ON on OpenRouter and will burn the
-        # entire max_tokens budget on hidden chain-of-thought, returning
-        # content=null with finish_reason='length'. Two-pronged defense:
-        #   1) ask the provider to skip reasoning via the unified param
-        #      (silently ignored by non-reasoning models)
-        #   2) give max_tokens enough headroom that if a model insists on
-        #      thinking anyway, there's still room for the JSON answer.
-        is_reasoning = any(t in self.model.lower() for t in
-                           ("gpt-oss", "nemotron", "deepseek-r1",
-                            "thinking", "reasoning", "o1", "o3"))
-        max_tok = (1200 if self.mode == "joint" else 800) if is_reasoning \
-                  else (450 if self.mode == "joint" else 200)
+        # The substring detector that lived here used to miss reasoning
+        # models like gemma-4, poolside-laguna, cohere-north-mini-code,
+        # qwen3-coder etc. (none have "thinking"/"reasoning" in their id
+        # but OpenRouter exposes a reasoning param, meaning default-on CoT).
+        # Cheaper, more reliable rule: ALWAYS request reasoning excluded
+        # and ALWAYS use the bigger token cap. Non-reasoning providers
+        # ignore the unknown param; vanilla models stop at the JSON close
+        # brace so the larger cap costs nothing in real tokens billed.
         payload = {
             "model": self.model, "messages": msgs,
             "temperature": 0.8,
-            "max_tokens": max_tok,
+            "max_tokens": 1200 if self.mode == "joint" else 800,
+            "reasoning": {"effort": "low", "exclude": True},
         }
-        if is_reasoning:
-            # Unified OpenRouter param: turn off chain-of-thought for the
-            # models that respect it (gpt-oss honours effort=low, deepseek
-            # honours exclude=true, etc.). Both forms together are accepted.
-            payload["reasoning"] = {"effort": "low", "exclude": True}
         r = self._client.post("/chat/completions", json=payload)
         r.raise_for_status()
         data = r.json()
@@ -687,22 +677,18 @@ class OpenRouterBrain(Brain):
         return self._clean(_extract_json(txt))
 
     def chat(self, system, user, max_tokens=80, temperature=0.95):
-        # Same reasoning-burnout guard as decide(): on reasoning models, the
-        # 60-120 token budget for quips is nowhere near enough to survive
-        # hidden CoT. Disable reasoning explicitly + give a softer cap so
-        # short trash-talk lines actually come out.
-        is_reasoning = any(t in self.model.lower() for t in
-                           ("gpt-oss", "nemotron", "deepseek-r1",
-                            "thinking", "reasoning", "o1", "o3"))
+        # Always-on reasoning-burnout guard (matches decide()): we don't
+        # know which providers default reasoning ON, so request exclude
+        # universally and floor max_tokens at 400 so a reasoning model
+        # has room for CoT + the short trash-talk line.
         payload = {
             "model": self.model,
             "messages": [{"role": "system", "content": system},
                          {"role": "user",   "content": user}],
             "temperature": temperature,
-            "max_tokens": max_tokens if not is_reasoning else max(max_tokens, 400),
+            "max_tokens": max(max_tokens, 400),
+            "reasoning": {"effort": "low", "exclude": True},
         }
-        if is_reasoning:
-            payload["reasoning"] = {"effort": "low", "exclude": True}
         r = self._client.post("/chat/completions", json=payload)
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"] or ""
