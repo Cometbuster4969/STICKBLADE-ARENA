@@ -263,6 +263,83 @@ _MODEL_TIER.update({
 })
 
 
+# ----------------------------------------------------------------------
+# Per-model reasoning policy
+# ----------------------------------------------------------------------
+# Hand-curated from OpenRouter's GET /api/v1/models catalog (the 'reasoning'
+# block on each model entry). Three categories:
+#
+#   None       → omit the `reasoning` param entirely. Either the model has
+#                no reasoning capability at all, OR it's mandatory-reasoning
+#                and rejects any attempt to disable (sending `enabled:false`
+#                makes gpt-oss-* 400 the request).
+#   {disable}  → safe to disable; we send `enabled: false, exclude: true`.
+#                Non-reasoning models silently ignore, reasoning models that
+#                allow disable actually turn off CoT.
+#
+# This map is verified against the live catalog on 2026-06-30. Any model id
+# not listed defaults to "try to disable, fall back gracefully if rejected"
+# — see _reasoning_policy().
+#
+# Rationale: previous attempts used substring matching on the model id
+# ("gpt-oss", "nemotron", "thinking", etc.) which silently missed gemma-4,
+# poolside-laguna, cohere-north and a bunch of others, AND mis-handled
+# gpt-oss (mandatory-reasoning — disabling it errors). Catalog-driven is
+# the only correct approach.
+_REASONING_DISABLE = {"enabled": False, "exclude": True}
+
+# Models where sending the reasoning param at all is wrong:
+#   - mandatory-reasoning (will 400 if we ask to disable)
+#   - vanilla non-reasoning (no-op, just cleaner to omit)
+_REASONING_OMIT = {
+    # vanilla non-reasoning (no reasoning block in catalog)
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "qwen/qwen3-coder:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+    "liquid/lfm-2.5-1.2b-instruct:free",
+    "openai/gpt-4o-mini",
+}
+
+# Mandatory-reasoning models. These reject `enabled: false` (400) and will
+# ALWAYS do hidden CoT no matter what we send. Best we can do is use the
+# lowest supported effort and exclude reasoning from response. Listed
+# separately so callers can also know to grant more max_tokens headroom.
+_REASONING_MANDATORY = {
+    "openai/gpt-oss-120b:free":  {"effort": "low", "exclude": True},
+    "openai/gpt-oss-20b:free":   {"effort": "low", "exclude": True},
+}
+
+
+def _reasoning_policy(model_id: str):
+    """Return the `reasoning` request block for a given model, or None
+    if the param should be omitted entirely. Catalog-driven; see comment
+    above for the curation rules.
+    """
+    if not model_id:
+        return None
+    if model_id in _REASONING_OMIT:
+        return None
+    if model_id in _REASONING_MANDATORY:
+        return dict(_REASONING_MANDATORY[model_id])
+    # Default: try to disable. Covers the catalog-listed reasoning models
+    # that DO allow disable (gemma-4-*, nemotron-3-*, laguna-*, cohere-north,
+    # nemotron-nano-*) plus any future model not yet in our curated set.
+    return dict(_REASONING_DISABLE)
+
+
+def _max_tokens_for(model_id: str, joint_mode: bool) -> int:
+    """Adaptive output token cap. Mandatory-reasoning models need ~3x the
+    headroom because they always do CoT; we can only ask for `effort: low`
+    which still uses ~20%% of the cap on thinking."""
+    base = 1200 if joint_mode else 800
+    if model_id in _REASONING_MANDATORY:
+        return base * 3  # 2400 macro / 3600 joint
+    return base
+
+
 def _buddies_for(brain, k=2):
     """Return up to k buddy model ids from the same tier as `brain.model`,
     excluding the original. Returns [] for non-OpenRouter brains."""
@@ -642,22 +719,30 @@ class OpenRouterBrain(Brain):
         msgs = [{"role": "system", "content": self.sys}]
         msgs += self.history[-6:]
         msgs.append({"role": "user", "content": user})
-        # The substring detector that lived here used to miss reasoning
-        # models like gemma-4, poolside-laguna, cohere-north-mini-code,
-        # qwen3-coder etc. (none have "thinking"/"reasoning" in their id
-        # but OpenRouter exposes a reasoning param, meaning default-on CoT).
-        # Cheaper, more reliable rule: ALWAYS request reasoning excluded
-        # and ALWAYS use the bigger token cap. Non-reasoning providers
-        # ignore the unknown param; vanilla models stop at the JSON close
-        # brace so the larger cap costs nothing in real tokens billed.
         payload = {
             "model": self.model, "messages": msgs,
             "temperature": 0.8,
-            "max_tokens": 1200 if self.mode == "joint" else 800,
-            "reasoning": {"effort": "low", "exclude": True},
+            "max_tokens": _max_tokens_for(self.model, self.mode == "joint"),
         }
+        # Per-model reasoning policy (see _reasoning_policy / catalog notes
+        # above). Only attach the `reasoning` block when the policy returns
+        # one — sending `enabled: false` to a mandatory-reasoning model
+        # (gpt-oss-*) makes it 400 the request; sending it to a
+        # no-reasoning model is a silent no-op but cleaner to just omit.
+        rp = _reasoning_policy(self.model)
+        if rp:
+            payload["reasoning"] = rp
         r = self._client.post("/chat/completions", json=payload)
-        r.raise_for_status()
+        # Surface OpenRouter's actual error text instead of httpx's generic
+        # 'Client error N for url ...'. OR returns {"error": {"message":...}}
+        # on 4xx/5xx; we want that message bubbling into [brain] log lines
+        # so we know *why* a retry/buddy is firing.
+        if r.status_code >= 400:
+            try:
+                err = (r.json().get("error") or {}).get("message", "")[:200]
+            except Exception:
+                err = r.text[:200] if r.text else ""
+            raise ValueError(f"http_{r.status_code}: {err or r.reason_phrase}")
         data = r.json()
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
@@ -677,20 +762,26 @@ class OpenRouterBrain(Brain):
         return self._clean(_extract_json(txt))
 
     def chat(self, system, user, max_tokens=80, temperature=0.95):
-        # Always-on reasoning-burnout guard (matches decide()): we don't
-        # know which providers default reasoning ON, so request exclude
-        # universally and floor max_tokens at 400 so a reasoning model
-        # has room for CoT + the short trash-talk line.
+        # Same per-model reasoning policy as decide(). Floor max_tokens at
+        # 400 so any model that still does CoT (mandatory-reasoning) has
+        # room for it + the short trash-talk line.
         payload = {
             "model": self.model,
             "messages": [{"role": "system", "content": system},
                          {"role": "user",   "content": user}],
             "temperature": temperature,
             "max_tokens": max(max_tokens, 400),
-            "reasoning": {"effort": "low", "exclude": True},
         }
+        rp = _reasoning_policy(self.model)
+        if rp:
+            payload["reasoning"] = rp
         r = self._client.post("/chat/completions", json=payload)
-        r.raise_for_status()
+        if r.status_code >= 400:
+            try:
+                err = (r.json().get("error") or {}).get("message", "")[:200]
+            except Exception:
+                err = r.text[:200] if r.text else ""
+            raise ValueError(f"http_{r.status_code}: {err or r.reason_phrase}")
         return r.json()["choices"][0]["message"]["content"] or ""
 
 
