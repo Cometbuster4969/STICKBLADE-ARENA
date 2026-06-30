@@ -35,6 +35,12 @@ at and `vertical_drop_to_compensate` tells you how much the arrow will fall.
 
 Distance guide: <70 = clinch range, 70-150 = strike range, 150-260 = closing range, >260 = far.
 {range_hint}
+ARENA MODIFIER (state.arena): `normal` = standard stone floor; `ice` = ~3x
+less foot friction AND much lower air drag — lunges overshoot, recoveries
+keep sliding, and a missed swing can carry you past the enemy (prefer
+`advance`/`hold` over `lunge`, and `hop_back` slides further than usual);
+`low_gravity` = gravity is ~35% normal — jumps float, arrows drop less so
+aim flatter, knockdowns take longer to recover from.
 Reply with ONLY a JSON object, no markdown:
 {{"thought": "<your tactical reasoning, max 30 words>", "action": "...", "footwork": "..."}}"""
 
@@ -56,7 +62,7 @@ def _vel(body):
     return [int(round(v.x)), int(round(v.y))]
 
 
-def build_state(me, foe, turn, max_turns, last_events):
+def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
     """Game state handed to the LLM each turn.
 
     Now includes full spatial awareness: torso + head positions (and velocities)
@@ -110,6 +116,7 @@ def build_state(me, foe, turn, max_turns, last_events):
     return {
         # core combat
         "turn": turn, "turns_left": max_turns - turn,
+        "arena": arena,                       # normal | ice | low_gravity
         "my_hp": round(me.hp, 1), "enemy_hp": round(foe.hp, 1),
         "distance": round(d),
         "my_height": "knocked_down" if me_torso.y < me.stand_torso_y - 30 else "standing",
@@ -216,26 +223,31 @@ def _trim(text, max_words=25):
 # rotates (see tools/verify_models.py).
 
 _BUDDY_POOLS = {
-    # Large / slow / strong-reasoning
+    # Large / slow / strong. ORDER MATTERS: non-reasoning models come FIRST
+    # because the most common failure for a reasoning model (gpt-oss,
+    # nemotron-super) is "burned entire token budget on hidden CoT", and
+    # falling back to another reasoning model has the same problem. Hermes
+    # and qwen3-coder are vanilla completion models — way more reliable as
+    # rescue buddies.
     "large": [
-        "openai/gpt-oss-120b:free",
-        "nvidia/nemotron-3-super-120b-a12b:free",
-        "nousresearch/hermes-3-llama-3.1-405b:free",
-        "qwen/qwen3-coder:free",
+        "nousresearch/hermes-3-llama-3.1-405b:free",   # vanilla, reliable
+        "qwen/qwen3-coder:free",                       # vanilla
+        "openai/gpt-oss-120b:free",                    # reasoning (risky)
+        "nvidia/nemotron-3-super-120b-a12b:free",      # reasoning (risky)
     ],
-    # Mid / balanced (fast enough for 15s budget)
+    # Mid / balanced (fast enough for 15s budget). Same ordering rule.
     "mid": [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "qwen/qwen3-next-80b-a3b-instruct:free",
-        "openai/gpt-oss-20b:free",
-        "google/gemma-4-31b-it:free",
-        "google/gemma-4-26b-a4b-it:free",
+        "meta-llama/llama-3.3-70b-instruct:free",       # vanilla, rock-solid
+        "qwen/qwen3-next-80b-a3b-instruct:free",        # vanilla
+        "google/gemma-4-31b-it:free",                   # vanilla
+        "google/gemma-4-26b-a4b-it:free",               # vanilla
+        "openai/gpt-oss-20b:free",                      # reasoning (risky)
     ],
     # Small / fast (good for snap-shot scenarios where speed matters)
     "small": [
         "meta-llama/llama-3.2-3b-instruct:free",
-        "nvidia/nemotron-nano-9b-v2:free",
         "liquid/lfm-2.5-1.2b-instruct:free",
+        "nvidia/nemotron-nano-9b-v2:free",              # reasoning, last
     ],
 }
 
@@ -249,7 +261,6 @@ for tier, ids in _BUDDY_POOLS.items():
 # back to free mid-tier).
 _MODEL_TIER.update({
     "openai/gpt-4o-mini":         "mid",
-    "anthropic/claude-3.5-haiku": "mid",
 })
 
 
@@ -395,6 +406,15 @@ class Brain:
             last_err = out.get("err") or f"timeout({timeout_s:.0f}s)"
             print(f"[brain] {self.label} attempt {idx+1}/{len(attempts)} "
                   f"failed: {last_err[:80]}")
+
+            # FAST-FAIL on reasoning_burnout: the model just spent its entire
+            # token budget on hidden CoT. Retrying with +50% budget might
+            # work but usually doesn't — and a buddy from a different family
+            # almost always does. Skip the redundant 2nd attempt on the same
+            # model and jump to the first buddy (idx 2) immediately.
+            if idx == 0 and "reasoning_burnout" in last_err and len(attempts) > 2:
+                # Drop attempt #2 (same-model retry); buddies stay queued.
+                attempts.pop(1)
 
             # Tiny backoff between attempts so we don't immediately re-hit a
             # rate-limit window. Capped at 2s so total recovery stays under
@@ -623,25 +643,67 @@ class OpenRouterBrain(Brain):
         msgs = [{"role": "system", "content": self.sys}]
         msgs += self.history[-6:]
         msgs.append({"role": "user", "content": user})
-        r = self._client.post("/chat/completions", json={
+        # Reasoning models (gpt-oss, nemotron, deepseek-r1, qwen-thinking,
+        # glm-thinking) default reasoning=ON on OpenRouter and will burn the
+        # entire max_tokens budget on hidden chain-of-thought, returning
+        # content=null with finish_reason='length'. Two-pronged defense:
+        #   1) ask the provider to skip reasoning via the unified param
+        #      (silently ignored by non-reasoning models)
+        #   2) give max_tokens enough headroom that if a model insists on
+        #      thinking anyway, there's still room for the JSON answer.
+        is_reasoning = any(t in self.model.lower() for t in
+                           ("gpt-oss", "nemotron", "deepseek-r1",
+                            "thinking", "reasoning", "o1", "o3"))
+        max_tok = (1200 if self.mode == "joint" else 800) if is_reasoning \
+                  else (450 if self.mode == "joint" else 200)
+        payload = {
             "model": self.model, "messages": msgs,
             "temperature": 0.8,
-            "max_tokens": 450 if self.mode == "joint" else 200,
-        })
+            "max_tokens": max_tok,
+        }
+        if is_reasoning:
+            # Unified OpenRouter param: turn off chain-of-thought for the
+            # models that respect it (gpt-oss honours effort=low, deepseek
+            # honours exclude=true, etc.). Both forms together are accepted.
+            payload["reasoning"] = {"effort": "low", "exclude": True}
+        r = self._client.post("/chat/completions", json=payload)
         r.raise_for_status()
-        txt = r.json()["choices"][0]["message"]["content"]
+        data = r.json()
+        choice = (data.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        txt = msg.get("content")
+        finish = choice.get("finish_reason", "")
+        # Reasoning-burnout signature: content is null/empty AND finish_reason
+        # is 'length' (model hit the cap mid-think). Raise a distinct error
+        # so decide_with_timeout's retry ladder skips to a buddy fast instead
+        # of pointlessly re-querying the same model.
+        if (not txt) and finish == "length":
+            raise ValueError(f"reasoning_burnout: {self.model} spent entire "
+                             f"budget on hidden CoT (finish=length, content=null)")
+        if not txt:
+            raise ValueError(f"empty response (finish={finish or 'unknown'})")
         self.history += [{"role": "user", "content": user},
                          {"role": "assistant", "content": txt}]
         return self._clean(_extract_json(txt))
 
     def chat(self, system, user, max_tokens=80, temperature=0.95):
-        r = self._client.post("/chat/completions", json={
+        # Same reasoning-burnout guard as decide(): on reasoning models, the
+        # 60-120 token budget for quips is nowhere near enough to survive
+        # hidden CoT. Disable reasoning explicitly + give a softer cap so
+        # short trash-talk lines actually come out.
+        is_reasoning = any(t in self.model.lower() for t in
+                           ("gpt-oss", "nemotron", "deepseek-r1",
+                            "thinking", "reasoning", "o1", "o3"))
+        payload = {
             "model": self.model,
             "messages": [{"role": "system", "content": system},
                          {"role": "user",   "content": user}],
             "temperature": temperature,
-            "max_tokens": max_tokens,
-        })
+            "max_tokens": max_tokens if not is_reasoning else max(max_tokens, 400),
+        }
+        if is_reasoning:
+            payload["reasoning"] = {"effort": "low", "exclude": True}
+        r = self._client.post("/chat/completions", json=payload)
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"] or ""
 
