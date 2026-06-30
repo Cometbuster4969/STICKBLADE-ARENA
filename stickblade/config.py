@@ -69,7 +69,7 @@ ARENA_MODELS = {
     "nvidia/nemotron-3-ultra-550b-a55b:free":     "Nemotron 3 Ultra 550B (free)",
     "nvidia/nemotron-3-nano-30b-a3b:free":        "Nemotron 3 Nano 30B (free)",
     "nvidia/nemotron-nano-9b-v2:free":            "Nemotron Nano 9B (free)",
-    "nex-agi/nex-n2-pro:free":                    "Nex-N2-Pro 397B (free)",
+    # nex-agi/nex-n2-pro:free — pulled by OpenRouter (404 as of 2026-06-30)
     "poolside/laguna-m.1:free":                   "Poolside Laguna M.1 (free)",
     "poolside/laguna-xs.2:free":                  "Poolside Laguna XS.2 (free)",
     "cohere/north-mini-code:free":                "Cohere North Mini Code (free)",
@@ -77,7 +77,7 @@ ARENA_MODELS = {
     "liquid/lfm-2.5-1.2b-instruct:free":          "LiquidAI LFM2.5 1.2B (free)",
     # ---- paid (cheap, billed via OpenRouter credits) ----
     "openai/gpt-4o-mini":                         "GPT-4o mini",
-    "anthropic/claude-3.5-haiku":                 "Claude 3.5 Haiku",
+    # anthropic/claude-3.5-haiku — pulled by OpenRouter (404 as of 2026-06-30)
     # ---- no API needed ----
     "mock:duelist":                               "Mock Duelist (no API)",
     "mock:berserker":                             "Mock Berserker (no API)",
