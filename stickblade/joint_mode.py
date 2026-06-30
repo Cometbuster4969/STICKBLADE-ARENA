@@ -172,6 +172,11 @@ Footwork (movement is separate from joints): {footwork}
 
 Distance guide: <70 clinch, 70-150 strike range, 150-260 closing, >260 far.
 
+ARENA MODIFIER (state.arena): `normal` = stone floor; `ice` = ~3x less foot
+friction + low air drag, so any momentum (lunges, swings) carries you
+further than expected — plant your stance early and avoid wild lunges;
+`low_gravity` = gravity ~35% normal, jumps float and arrows drop less.
+
 Reply with ONLY a JSON object, no markdown:
 {{"thought": "<max 30 words>", "joints": {{"neck": "...", "shoulder": "...", "elbow": "...", "grip": "...", "off_shoulder": "...", "off_elbow": "...", "hip_f": "...", "knee_f": "...", "hip_b": "...", "knee_b": "..."}}, "footwork": "...", "fire": false}}"""
 

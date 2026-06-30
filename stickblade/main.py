@@ -76,13 +76,26 @@ class Match:
             self.space.gravity = C.GRAVITY
         self.space.damping = C.SPACE_DAMPING
         # Ice floor: pass a friction multiplier into make_ground; also
-        # reduce limb friction a touch so fighters slide on impact.
+        # reduce limb friction so fighters actually slide on impact, AND
+        # raise space damping toward 1.0 so the slide isn't instantly
+        # killed by the global air-drag (was 0.99 → ~45% horizontal vel
+        # loss per second, which made ice and stone feel identical).
         ground_friction_mult = 0.10 if self.arena == "ice" else 1.0
         make_ground(self.space, friction_mult=ground_friction_mult)
+        if self.arena == "ice":
+            self.space.damping = 0.996   # slides last ~2x longer than normal
+            # (0.99 → ~45% horizontal-vel loss/s; 0.996 → ~21%/s)
         self.f1 = Fighter(self.space, 430, 1, C.C_P1, C.C_P1_DARK,
                           p1_kind.upper(), 1, weapon=self.weapon)
         self.f2 = Fighter(self.space, C.WIDTH - 430, -1, C.C_P2, C.C_P2_DARK,
                           p2_kind.upper(), 2, weapon=self.weapon)
+        if self.arena == "ice":
+            # shins are pinned at 1.6 in ragdoll._build — override here so
+            # contact friction (sqrt(a.f * b.f)) actually drops on ice.
+            # 1.6 * 0.15 → 0.49; 0.2 * 0.15 → 0.17 (≈3x more slippery).
+            for f in (self.f1, self.f2):
+                for nm in ("shin_f", "shin_b"):
+                    f.shapes[nm].friction = 0.2
         self.f1.enemy, self.f2.enemy = self.f2, self.f1
         self.combat = CombatSystem(self.space, {1: self.f1, 2: self.f2},
                                    self.sharp, fx)
@@ -120,8 +133,8 @@ class Match:
             if abs(dx) > 2 and (1 if dx > 0 else -1) != f.facing:
                 f.turn_around()
         self.turn += 1
-        s1 = build_state(self.f1, self.f2, self.turn, C.MAX_TURNS, self.last_events)
-        s2 = build_state(self.f2, self.f1, self.turn, C.MAX_TURNS, self.last_events)
+        s1 = build_state(self.f1, self.f2, self.turn, C.MAX_TURNS, self.last_events, arena=self.arena)
+        s2 = build_state(self.f2, self.f1, self.turn, C.MAX_TURNS, self.last_events, arena=self.arena)
         self.pending = {}
 
         def work():
