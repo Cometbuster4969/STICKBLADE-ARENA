@@ -250,7 +250,8 @@ def main():
                     help="repeatable; comma-combo of tip,edge,back_edge,pommel")
     ap.add_argument("--visual", action="store_true",
                     help="render every match in a window")
-    ap.add_argument("--weapon", default="sword", choices=["sword", "flail", "bow"])
+    ap.add_argument("--weapon", default="sword",
+                    choices=["sword", "dagger", "spear", "flail", "bow"])
     args = ap.parse_args()
 
     # mirror tournament: keep stats separate per slot

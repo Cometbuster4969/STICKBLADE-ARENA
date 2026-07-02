@@ -161,11 +161,30 @@ class ReplayRecorder:
         return path
 
     def save_html(self, path, template_path=None):
+        """Bake a self-contained HTML replay (data + player inlined).
+
+        Player source: prefers stickblade-web/public/player.js (the same
+        battle-tested copy the Next.js frontend uses). Falls back to
+        stickblade/player.js only if the frontend tree isn't present —
+        which mirrors what server.py's /static/player.js route does.
+        Prevents the drift bug where the two copies got out of sync.
+        """
         here = os.path.dirname(os.path.abspath(__file__))
         template_path = template_path or os.path.join(here, "viewer_template.html")
         with open(template_path) as f:
             html = f.read()
-        with open(os.path.join(here, "player.js")) as f:
+        player_candidates = [
+            os.path.normpath(os.path.join(here, "..", "stickblade-web",
+                                          "public", "player.js")),
+            os.path.join(here, "player.js"),
+        ]
+        player_path = next((p for p in player_candidates if os.path.exists(p)),
+                           None)
+        if player_path is None:
+            raise FileNotFoundError(
+                "player.js not found in stickblade-web/public/ or "
+                "stickblade/. Cannot bake standalone HTML replay.")
+        with open(player_path) as f:
             player_js = f.read()
         data = json.dumps(self.build(), separators=(",", ":"))
         html = html.replace("/*__PLAYER_JS__*/", player_js)

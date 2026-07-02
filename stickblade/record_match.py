@@ -62,7 +62,8 @@ def main():
     ap.add_argument("--sharp", default="tip")
     ap.add_argument("--out", default=None, help="output file basename")
     ap.add_argument("--mode", default="macro", choices=["macro", "joint"])
-    ap.add_argument("--weapon", default="sword", choices=["sword", "flail", "bow"])
+    ap.add_argument("--weapon", default="sword",
+                    choices=["sword", "dagger", "spear", "flail", "bow"])
     args = ap.parse_args()
     from weapons import WEAPON_ZONES
     allowed = WEAPON_ZONES.get(args.weapon, C.ALL_ZONES)

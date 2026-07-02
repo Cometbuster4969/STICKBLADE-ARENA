@@ -34,7 +34,7 @@ def parse_args():
                     help="macro = tactician picks moves; joint = raw "
                          "Toribash-style joint control")
     ap.add_argument("--weapon", default="sword",
-                    choices=["sword", "flail", "bow"])
+                    choices=["sword", "dagger", "spear", "flail", "bow"])
     return ap.parse_args()
 
 
