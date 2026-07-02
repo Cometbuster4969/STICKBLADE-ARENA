@@ -41,15 +41,25 @@ function ReplayInner() {
           </button>
         </div>
       )}
-      {(reveal || (match?.voted && match.model_a)) && (
-        <div className="panel reveal">
-          🎭 {reveal
-            ? <>Fighter A was <b>{reveal.names[reveal.model_a]}</b> · Fighter B
-                was <b>{reveal.names[reveal.model_b]}</b></>
-            : <>Fighter A was <b>{match.model_a}</b> · Fighter B was{" "}
-                <b>{match.model_b}</b></>}
-        </div>
-      )}
+      {(reveal || (match?.voted && match.model_a)) && (() => {
+        // Prefer the fresh /api/vote reveal payload; fall back to
+        // /api/match on refresh-of-already-voted-link.
+        const src = reveal || match;
+        // CRITICAL: canvas_a/b_model reflects who actually rendered as
+        // Fighter A (green) vs Fighter B (blue) after the random flip.
+        // model_a/model_b is only the user's original Slot 1/2 pick order
+        // and can silently swap identities. Always prefer canvas_*.
+        const aModel = src.canvas_a_model || src.model_a;
+        const bModel = src.canvas_b_model || src.model_b;
+        const names = src.names || {};
+        const name = (m) => names[m] || m;
+        return (
+          <div className="panel reveal">
+            🎭 Fighter A was <b>{name(aModel)}</b>
+            {" · "}Fighter B was <b>{name(bModel)}</b>
+          </div>
+        );
+      })()}
     </div>
   );
 }

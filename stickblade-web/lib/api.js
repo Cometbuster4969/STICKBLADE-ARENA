@@ -41,6 +41,16 @@ export const getLeaderboard = (sharp, weapon) => {
 
 export const getRecent = () => api("/recent");
 export const getMatch = (id) => api(`/match/${id}`);
+/**
+ * Head-to-head record for two model ids (order-insensitive).
+ * Used by the wait-screen H2H card. Returns
+ * { total, a_wins, b_wins, draws, avg_turns, recent[], a_name, b_name }.
+ * The card should just hide itself when total === 0 (no prior duels).
+ */
+export const getHeadToHead = (a, b) => {
+  const q = new URLSearchParams({ a, b });
+  return api(`/head_to_head?${q.toString()}`);
+};
 export const getReplay = (id) => api(`/replay/${id}`);
 export const createMatch = (body) =>
   api("/match", {
