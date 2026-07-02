@@ -30,6 +30,7 @@ Two large language models step into a 2D physics arena. You decide what part of 
 - [Arena modifiers](#-arena-modifiers)
 - [Tournaments](#-tournaments)
 - [Architecture](#-architecture)
+- [REST API (quick reference)](#-rest-api-quick-reference)
 - [Running locally](#-running-locally)
 - [Adding new models](#-adding-new-models)
 - [Tech stack](#-tech-stack)
@@ -142,14 +143,22 @@ If a model is bad at this, it tells you something MMLU never could — that it c
 - **Two control modes:** MACRO (named tactical actions) and JOINT (raw per-joint flex/extend/relax, Toribash-style)
 - **Five weapons:** 🗡 sword · 🔪 dagger · ⊥ spear · ⛓ flail · 🏹 bow (with real arrow ballistics + lead compensation)
 - **Sharp zones — the twist:** you choose what part of the weapon damages. Same weapon, completely different fight when only the *back edge* is sharp.
-- **Arena modifiers:** ❄ ice floor (low friction) · 🌙 low gravity (moon-ish)
+- **Arena modifiers:** ❄ ice floor (low friction + reduced air-drag, LLMs told about it) · 🌙 low gravity (moon-ish)
 - **Blind voting:** A/B labels with server-side green↔blue randomization, so identity never leaks from the picker
 - **Per-weapon, per-zone Elo leaderboards:** track who's a fencer vs a brawler vs a bowman
 - **Pre-fight trash talk + post-fight roast:** each model throws a one-liner before the fight; a third commentator LLM roasts the loser afterward (only revealed after voting)
+- **Live wait screen** (no more staring at spinner dots):
+  - Trash-talk quips surface **within ~5-15s** of hitting Fight
+  - **Queue position** — "3 fights ahead of you"
+  - **Spoiler-safe combat ticker** — `turn 05 · A:draw_shot vs B:high_arc_shot ◆ B→torso 20.8dmg SHARP` scrolls in as each turn finalizes server-side
+  - **Head-to-head card** — "Llama is 2-1 in previous duels vs Qwen"
+  - Recent-duels feed clickable to any other user's match
 - **Predict-then-watch streaks:** call the winner before voting, track your prediction streak in localStorage
 - **Killcam:** auto-slow-motion replay of the lethal blow at match end, with cinematic letterbox bars
 - **Synthesized sound FX:** WebAudio sword clangs, blunt thuds, lethal hit-stop chime — zero asset hosting, CSP-clean
 - **Tournaments:** 4- or 8-model single-elim brackets with live bracket viewer, auto-advance, champion card
+- **Resilient LLM layer** — per-model 429 circuit breaker, provider-diverse buddy failover, per-model reasoning policy (`gpt-oss` handled as mandatory-reasoning, `gemma-4`/`nemotron` disabled via `enabled: false`, vanilla models get no reasoning param), and a scripted-fallback banner if the LLMs error out mid-match
+- **Debug endpoints** (`/api/debug/brain_errors`, `/api/debug/cooldowns`, `/api/debug/openrouter_ping`) so you can see exactly why a match fell back without hunting through Space logs
 - **Spectator-friendly replay system:** every match saved as a tiny JSON; share-link plays back deterministically in-browser
 - **21+ free OpenRouter models** in the picker out of the box — bring your own `OPENROUTER_API_KEY` and you're done
 
@@ -172,29 +181,48 @@ USER          ──pick──►     │  /api/match { model_a, model_b,    │
                             │  2. spawn 2 fighters with chosen   │
                             │     weapon + arena                 │
                             │  3. pre_fight_quip() for each      │
+                            │     → published to LIVE_STATE      │
+                            │       instantly (visible ~5-15s)   │
                             │  4. loop turns:                    │
                             │     a. build_state(...)            │
+                            │        (includes arena modifier)   │
                             │     b. both brains decide(state)   │
+                            │        - retry ladder w/ 429       │
+                            │          circuit breaker + buddy   │
+                            │          failover on throttle      │
                             │     c. JointController/Move        │
                             │        Controller for 3 s of phys  │
                             │     d. CombatSystem resolves hits, │
                             │        records events              │
                             │     e. recorder.tick()             │
+                            │     f. publish blind tick to       │
+                            │        LIVE_STATE (ticker feed)    │
                             │  5. commentator_roast()            │
                             │  6. finish_match() → SQLite/Postgres│
+                            │     (Elo via atomic Postgres RPC)  │
                             └──────────────┬─────────────────────┘
                                            │
-USER         ◄──poll────────  /api/match/{mid}  ◄────── replay JSON
-   /api/replay/{mid}           (1.5 s poll until done)
-                                           │
+USER         ◄──poll────────  /api/match/{mid}  ◄──── .live { quips,
+   1.5s poll while running    (.live populated while       queue_pos,
+   → WaitPanel renders         status ∈ queued|running)     log[],
+   quips + queue + ticker                                   turn }
+   + H2H card + recents                    │
                                            ▼
                        canvas <player.js>  replay + sound + killcam
                                            │
 USER  ──vote──►        /api/vote/{mid}     → reveal + Elo deltas
    predict streak                          + commentator's roast
+                                           │
+                                           ▼
+                                     canvas_a_model /
+                                     canvas_b_model +
+                                     names[] map
+                                     (used by main page
+                                      AND /replay?id=…
+                                      after this fix)
 ```
 
-A match takes ~20-60 seconds of wall-clock time for a typical 6-turn fight, dominated by the LLMs' thinking time (the physics runs at simulated 60 fps and produces ~3000-5000 frames of replay JSON, gzipped to a few kilobytes).
+A match takes ~20-60 seconds of wall-clock time for a typical 6-turn fight, dominated by the LLMs' thinking time (the physics runs at simulated 60 fps and produces ~3000-5000 frames of replay JSON, gzipped to a few kilobytes). While it's running, the wait screen streams pre-fight quips, queue position, and a spoiler-safe combat ticker — so the user is watching the fight unfold as text before the animated replay is ready.
 
 ---
 
@@ -253,9 +281,9 @@ A model that's great at "sword + sharp tip" (a fencer's game) may be terrible at
 
 ## 🏟 Arena modifiers
 
-- **Normal** — standard physics, stone floor (friction = 1.5).
-- **❄ Ice** — floor friction × 0.10 — fighters slide on impact, lunges over-shoot, hop-backs go further than expected. Tests how well a model accounts for momentum it can't control.
-- **🌙 Low gravity** — y-gravity × 0.35 — bigger arcs, slower falls. Brutal for spear thrusts and bow arcs (which now drop less). Models that assume Earth-normal ballistics suddenly miss every shot.
+- **Normal** — standard physics, stone floor (friction = 1.5, damping = 0.99).
+- **❄ Ice** — floor friction × 0.10, shin friction knocked down to 0.2 (so contact friction actually drops ~9×), AND global space damping bumped to 0.996 so slides last ~2× longer than normal. Lunges over-shoot, hop-backs slide further, and — critically — **the LLMs are told about it** via a state.arena field and a system-prompt paragraph, so a well-tuned model will prefer `advance`/`hold` over `lunge` on ice.
+- **🌙 Low gravity** — y-gravity × 0.35 — bigger arcs, slower falls. Brutal for spear thrusts and bow arcs (which now drop less). Models that assume Earth-normal ballistics suddenly miss every shot. Also surfaced in the state payload + system prompt.
 
 ---
 
@@ -272,31 +300,49 @@ This is the best way to compare *many* models head-to-head quickly, and to disco
 ```
 ┌─────────────────────────── stickblade/ (Python backend) ──────────────────────────┐
 │  server.py        FastAPI: REST + worker queues (matches + tournaments)            │
+│                   + LIVE_STATE for the wait-screen ticker (quips/queue/log)        │
+│                   + /api/debug/* (brain_errors, cooldowns, openrouter_ping)        │
+│                   + /api/head_to_head?a=X&b=Y                                      │
 │  main.py          Match: orchestrates 24-turn fight (think → sim → resolve)        │
+│                   arena-aware physics (ice damping + shin friction override)       │
 │  brains.py        Brain hierarchy: Mock, GPT, Gemini, OpenRouter + chat() shim     │
+│                   + 429 circuit breaker (_COOLDOWN dict, Retry-After respected)    │
+│                   + _PROVIDER_HOST map (provider-diverse buddy failover)           │
+│                   + _reasoning_policy (catalog-driven per-model reasoning)         │
+│                   + _RECENT_ERRORS ring buffer (exposed via /api/debug)            │
 │  joint_mode.py    JointController + per-joint flex/extend/relax + bow fire         │
 │  weapons.py       WEAPON_GEOMETRY + builders for sword/dagger/spear/flail/bow      │
 │  ragdoll.py       pymunk Fighter (16 limbs + 10 servo-driven joints)               │
 │  combat.py        zone classifier + damage model + sharp-vs-blunt resolution       │
 │  moves.py         macro action keyframe library (per-weapon)                       │
-│  recorder.py      compact replay JSON capture (~5 kB / second of fight)            │
-│  storage.py       SQLite backend (local dev / HF Space)                            │
-│  storage_supabase.py  Supabase Postgres + Storage backend (production)             │
-│  config.py        21+ free OpenRouter models registry + tuning constants           │
-│  supabase_schema.sql  idempotent DDL for matches / votes / elo / tournaments       │
+│  recorder.py      compact replay JSON capture (~5 kB / second of fight);           │
+│                   bakes standalone HTML from stickblade-web/public/player.js       │
+│  storage.py       SQLite backend (local dev / HF Space) — with self-play guard     │
+│  storage_supabase.py  Postgres backend — uses apply_elo_vote RPC for atomic votes  │
+│                   + head_to_head via PostgREST OR filter                           │
+│  security.py      rate limits + spend caps + spoof-resistant client_ip()           │
+│                   (x-real-ip > cf-connecting-ip > XFF opt-in via TRUST_XFF=1)      │
+│  config.py        21 verified OpenRouter models + tuning constants                 │
+│  supabase_schema.sql  idempotent DDL + apply_elo_vote() RPC (atomic Elo update)    │
 └────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────── stickblade-web/ (Next.js 15 frontend) ─────────────────┐
 │  app/page.js                fight setup + leaderboard + reveal + vote              │
+│                             (polling now owned by <WaitPanel>)                     │
 │  app/tournament/page.js     bracket creator + live bracket viewer                  │
 │  app/leaderboard/page.js    per-weapon / per-zone leaderboards                     │
-│  app/replay/page.js         standalone /replay?id=… page for share links           │
+│  app/replay/page.js         standalone /replay?id=… — now uses canvas_a/b_model    │
+│                             so shared links show the CORRECT winner (was 50/50)    │
 │  app/history/page.js        recent matches list                                    │
 │  public/player.js           canvas replay engine + WebAudio FX + killcam           │
+│                             (single source of truth; server.py serves this too    │
+│                              from /static/player.js — no drift-hazard duplicate)   │
+│  components/WaitPanel.js    live wait screen: quips + queue + combat ticker +      │
+│                             head-to-head card + recent-duels feed                  │
 │  components/ModelPicker.js  neutral Slot 1/2 picker (no color leak)                │
-│  components/LeaderboardTable.js   medals + per-row Elo styling                     │
+│  components/LeaderboardTable.js  medals + per-row Elo, honors `compact` prop      │
 │  components/ReplayPlayer.js  React wrapper around vanilla player.js                │
-│  lib/api.js                 fetch client (BASE = NEXT_PUBLIC_API_BASE)             │
+│  lib/api.js                 fetch client + startKeepalive() + getHeadToHead()      │
 │  next.config.mjs            strict CSP + COOP + COEP-aware security headers        │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -305,9 +351,37 @@ The frontend and backend are independent and stateless across each other — the
 
 ---
 
+## 🌐 REST API (quick reference)
+
+Every endpoint is documented in `server.py`; this is the abridged tour. Base URL = your HF Space or `http://localhost:8000`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/health` | Liveness + feature flags (`has_openrouter`, `has_supabase`, queue depths) |
+| `GET`  | `/api/version` | Semver + list of supported weapons/modes/replay-format |
+| `GET`  | `/api/models` | Roster (id + display name) |
+| `GET`  | `/api/weapons` | Weapon ids + valid sharp-zone lists |
+| `POST` | `/api/match` | Queue a match. Body: `{model_a, model_b, sharp[], weapon, arena, mode, blind}` |
+| `GET`  | `/api/match/{mid}` | Match status. While `queued`/`running` returns `.live = {quips, queue_pos, turn, log[]}` (blind-safe, canvas-side keys only). While `done` + voted/non-blind returns `model_a`, `model_b`, `canvas_a_model`, `canvas_b_model`, `names[]`, `flip` |
+| `GET`  | `/api/replay/{mid}` | Compact replay JSON (frames, events, thoughts, quips, meta.fallback_turns) |
+| `POST` | `/api/vote/{mid}` | Body: `{choice: "a"\|"b"\|"draw"}`. Returns reveal + Elo deltas + commentator's roast |
+| `GET`  | `/api/leaderboard?sharp=&weapon=` | Elo leaderboard, per-(model, sharp, weapon) or aggregated |
+| `GET`  | `/api/recent` | Last 20 finished matches (models hidden until voted on blind fights) |
+| `GET`  | `/api/head_to_head?a=X&b=Y` | Order-insensitive H2H record between two models (used by wait screen) |
+| `POST` | `/api/tournament` | Queue a single-elim bracket (4 or 8 models) |
+| `GET`  | `/api/tournament/{tid}` | Live bracket state, round-by-round |
+| `GET`  | `/api/tournaments` | Recent brackets |
+| `GET`  | `/api/debug/brain_errors` | Last ~80 brain failures (model, attempt, error message) — bounded in-memory |
+| `GET`  | `/api/debug/cooldowns` | Which models are currently in 429 cooldown, seconds remaining |
+| `GET`  | `/api/debug/openrouter_ping?model=X` | One-shot minimal OR call — isolates "key valid?" from "our payload broken?" |
+
+All path params like `{mid}` are validated with `^[a-f0-9]{12}$` before touching storage (path-traversal safe). Rate limits + spend caps live in `security.py` and are per-IP with a spoof-resistant client_ip lookup.
+
+---
+
 ## 🚀 Running locally
 
-### Backend (Python)
+### Backend (Python 3.13+)
 
 ```bash
 cd stickblade
@@ -320,17 +394,32 @@ export OPENAI_API_KEY=sk-...               # optional, for GPT brains
 export GEMINI_API_KEY=...                  # optional, for Gemini brains
 
 # Or: skip keys and use mocks — the mock brains play decent crude duels
-# and exercise every code path (great for development)
+# and exercise every code path (great for development). Also spear/flail/
+# dagger mocks now use weapon-appropriate actions (bug fixed 2026-07).
 
 # Either: use Supabase
 export SUPABASE_URL=https://xxx.supabase.co
 export SUPABASE_KEY=eyJhbGc...service_role_key
+# One-time: run stickblade/supabase_schema.sql in the Supabase SQL editor.
+# This installs the tables AND the apply_elo_vote() RPC that Python
+# uses for atomic Elo updates. Without it, storage_supabase falls back
+# to REST + in-process lock (logs a one-time downgrade warning).
 
 # Or: just use local SQLite (default, no setup)
+
+# Optional security knobs (env vars, see stickblade/security.py):
+#   RL_MATCHES_PER_HOUR (50)    matches one IP may start per hour
+#   RL_VOTES_PER_HOUR   (100)   votes one IP may cast per hour
+#   RL_REQS_PER_MIN     (120)   general API req/min per IP
+#   MAX_MATCHES_PER_DAY (300)   global daily cap (LLM spend ceiling)
+#   TRUST_XFF           (0)     opt-in: honor X-Forwarded-For (dev/local)
+#                               HF/Vercel/Fly set x-real-ip which is
+#                               trusted by default — no need to enable.
+
 uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Frontend (Next.js)
+### Frontend (Next.js 15)
 
 ```bash
 cd stickblade-web
@@ -345,6 +434,11 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000 npm run dev
 cd stickblade
 python test_phases.py           # 5-phase regression suite
 python test_headless.py         # full mock duel, saves screenshots
+
+# CLI runners (all 5 weapons now selectable, was sword/flail/bow):
+python main.py --weapon dagger --mode macro
+python record_match.py --weapon spear --p1 mock:duelist --p2 mock:berserker
+python tournament.py --size 4 --weapon flail
 ```
 
 ---
@@ -385,11 +479,19 @@ For mock fighters (no API):
 
 ## 🛣 Roadmap
 
-Shipped recently:
+Shipped recently (2026-06 → 2026-07 sweep):
+- ✅ **Live wait screen** — pre-fight quips surfaced in ~5-15s, queue-position badge, spoiler-safe combat ticker, per-matchup head-to-head card, recent-duels feed
+- ✅ **LLM resilience** — 429 circuit breaker with Retry-After respect, provider-diverse buddy failover, catalog-driven per-model reasoning policy (mandatory vs opt-disable vs omit), full server-side error surfacing
+- ✅ **Debug endpoints** — `/api/debug/brain_errors`, `/api/debug/cooldowns`, `/api/debug/openrouter_ping`
+- ✅ **Shared-replay reveal fix** — `/replay?id=…` now shows the correct winner every time (was 50/50 wrong before due to canvas-flip mismatch)
+- ✅ **Atomic Elo updates on Postgres** — new `apply_elo_vote()` RPC serializes concurrent votes with row locks; SQLite path uses `threading.Lock`. Self-play (mirror match) correctly logs a draw with 0 Elo delta instead of double-updating the row.
+- ✅ **Deduped `player.js`** — single source of truth in `stickblade-web/public/`; server serves the same file; no more drift between frontend/backend copies
+- ✅ **XFF spoof hardening** — `client_ip()` trusts `x-real-ip`/`cf-connecting-ip` by default, XFF only via `TRUST_XFF=1` opt-in
+- ✅ **Bug sweeps** — flail/spear mocks now use weapon-appropriate actions (not silently downgraded to "ready"); CLI runners accept all 5 weapons; MATCH_MODES stops leaking; supabase migration hard-fails on missing `weapon` column instead of silently corrupting Elo
+- ✅ **Arena modifiers that actually feel different** — ice bumps damping to 0.996, overrides shin friction to 0.2, AND tells the LLM about it via `state.arena` + system-prompt guidance (used to be a no-op)
 - ✅ Tournaments (single-elim, 4/8 models, live bracket viewer)
 - ✅ Pre-fight trash talk + post-fight commentator roast
 - ✅ New weapons: dagger + spear
-- ✅ Arena modifiers: ice + low gravity
 - ✅ Killcam slow-motion + WebAudio SFX
 - ✅ Predict-then-watch streaks
 - ✅ Per-weapon / per-zone Elo leaderboards
@@ -405,6 +507,8 @@ Coming:
 - 🟦 Spectator emoji reactions during live tournaments
 - 🟦 2v2 team battles
 - 🟦 Live LLM thought streaming during the THINK phase
+- 🟦 BYOK (bring-your-own-key) mode so heavy users can bypass free-tier throttling
+- 🟦 `tools/verify_models.py` — auto-prune dead OpenRouter model ids from the roster on push
 
 ---
 
