@@ -437,6 +437,21 @@ def debug_brain_errors():
         return {"count": 0, "errors": [], "init_err": str(e)[:120]}
 
 
+@app.get("/api/debug/cooldowns")
+def debug_cooldowns():
+    """Which models are currently in 429 cooldown, and for how many more
+    seconds. Useful to see the circuit-breaker doing its thing live."""
+    import time as _t
+    try:
+        from brains import _COOLDOWN
+        now = _t.time()
+        active = {m: round(ts - now, 1)
+                  for m, ts in _COOLDOWN.items() if ts > now}
+        return {"count": len(active), "cooldown_s_remaining": active}
+    except Exception as e:
+        return {"count": 0, "cooldown_s_remaining": {}, "init_err": str(e)[:120]}
+
+
 @app.get("/api/debug/openrouter_ping")
 def debug_openrouter_ping(model: str = "meta-llama/llama-3.3-70b-instruct:free"):
     """One-shot OpenRouter call with the simplest possible payload.
