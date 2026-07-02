@@ -360,7 +360,13 @@ def _max_tokens_for(model_id: str, joint_mode: bool) -> int:
 
 def _buddies_for(brain, k=2):
     """Return up to k buddy model ids from the same tier as `brain.model`,
-    excluding the original. Returns [] for non-OpenRouter brains."""
+    excluding the original AND any model currently in 429 cooldown.
+    Prefers buddies from a DIFFERENT provider host than the original, since
+    the most common failure mode is 'upstream provider throttled' (free
+    Llama-family models mostly go to Venice; if Venice is 429ing on one
+    Llama, the other Llamas will be too — no point retrying them).
+    Returns [] for non-OpenRouter brains.
+    """
     model_id = getattr(brain, "model", None)
     if not model_id or "/" not in model_id:
         return []
@@ -368,7 +374,69 @@ def _buddies_for(brain, k=2):
         return []                           # no key, can't construct buddies
     tier = _MODEL_TIER.get(model_id, "mid") # unknown ids default to mid tier
     pool = [m for m in _BUDDY_POOLS.get(tier, []) if m != model_id]
+    # Remove cooling-down models (429'd recently, upstream still throttled)
+    now = _time.time()
+    pool = [m for m in pool if _COOLDOWN.get(m, 0) < now]
+    # Reorder: put buddies with a DIFFERENT provider host first. When the
+    # original 429s it's almost always because that specific provider is
+    # throttling globally, so a same-provider buddy will 429 too. Falling
+    # back to a different provider is the only way to recover.
+    origin_prov = _PROVIDER_HOST.get(model_id, "")
+    if origin_prov:
+        pool.sort(key=lambda m: _PROVIDER_HOST.get(m, "") == origin_prov)
     return pool[:k]
+
+
+# ----------------------------------------------------------------------
+# Per-model 429 circuit breaker
+# ----------------------------------------------------------------------
+# OpenRouter reports the upstream provider's Retry-After. If a model 429s,
+# we blacklist it for `Retry-After` seconds (default 15s if header missing)
+# so subsequent turns in the same match don't waste API calls / stall the
+# retry ladder waiting for the throttle to clear on its own.
+_COOLDOWN = {}  # {model_id: unix_ts_ready_at}
+_COOLDOWN_LOCK = threading.Lock()
+
+
+def _mark_cooldown(model_id, seconds):
+    if not model_id:
+        return
+    with _COOLDOWN_LOCK:
+        _COOLDOWN[model_id] = _time.time() + max(1.0, min(float(seconds), 60.0))
+
+
+# ----------------------------------------------------------------------
+# Provider host map (hand-curated from OpenRouter catalog, 2026-07-02).
+# When a model 429s, we prefer buddies from a DIFFERENT provider — since
+# the throttle almost always originates at the upstream host, not at OR.
+# ----------------------------------------------------------------------
+_PROVIDER_HOST = {
+    # Venice hosts most Llama-family and Nous free models
+    "meta-llama/llama-3.3-70b-instruct:free":       "venice",
+    "meta-llama/llama-3.2-3b-instruct:free":        "venice",
+    "nousresearch/hermes-3-llama-3.1-405b:free":    "venice",
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free": "venice",
+    # Google AI Studio hosts Gemma
+    "google/gemma-4-31b-it:free":                   "google",
+    "google/gemma-4-26b-a4b-it:free":               "google",
+    # OpenInference hosts gpt-oss + some nvidia + qwen-coder
+    "openai/gpt-oss-120b:free":                     "openinference",
+    "openai/gpt-oss-20b:free":                      "openinference",
+    "qwen/qwen3-coder:free":                        "openinference",
+    "qwen/qwen3-next-80b-a3b-instruct:free":        "alibaba",
+    # Nvidia self-hosts nemotron
+    "nvidia/nemotron-3-super-120b-a12b:free":       "nvidia",
+    "nvidia/nemotron-3-ultra-550b-a55b:free":       "nvidia",
+    "nvidia/nemotron-3-nano-30b-a3b:free":          "nvidia",
+    "nvidia/nemotron-nano-9b-v2:free":              "nvidia",
+    # Others
+    "poolside/laguna-m.1:free":                     "poolside",
+    "poolside/laguna-xs.2:free":                    "poolside",
+    "cohere/north-mini-code:free":                  "cohere",
+    "liquid/lfm-2.5-1.2b-instruct:free":            "liquid",
+    # Paid (OR routes to Azure/Anthropic/etc; unlikely to be free-tier-throttled)
+    "openai/gpt-4o-mini":                           "azure",
+}
 
 
 def _timeout_for(model_id):
@@ -459,17 +527,26 @@ class Brain:
         """
         import time as _t
 
-        # Step 1+2: retry the originally-chosen model first.
-        attempts = [
-            (self, _timeout_for(getattr(self, "model", ""))),
-            (self, _timeout_for(getattr(self, "model", "")) * 1.5),
-        ]
+        # Step 1+2: retry the originally-chosen model first — UNLESS it's
+        # in the 429 cooldown map from a recent throttle. If so, skip
+        # straight to buddies (no point burning a 15s wait for a model
+        # we know is currently blocked upstream).
+        own_model = getattr(self, "model", "")
+        in_cooldown = _COOLDOWN.get(own_model, 0) > _t.time()
+        attempts = []
+        if not in_cooldown:
+            attempts = [
+                (self, _timeout_for(own_model)),
+                (self, _timeout_for(own_model) * 1.5),
+            ]
 
         # Steps 3+4: try up to 2 buddy models if the original keeps failing.
         # Buddies only apply to OpenRouter brains (same client, same key, just
         # a different model id). GPT/Gemini brains use different clients and
         # don't have an equivalent — they get the same model retried twice.
-        for buddy_id in _buddies_for(self):
+        # _buddies_for() already filters out cooling-down buddies and orders
+        # by provider diversity (different upstream host first).
+        for buddy_id in _buddies_for(self, k=3 if in_cooldown else 2):
             try:
                 buddy = OpenRouterBrain(self.sharp, buddy_id,
                                         label=self.label + "→buddy",
@@ -478,6 +555,11 @@ class Brain:
             except Exception:
                 # OpenRouter not configured / brain init failed — skip silently
                 pass
+
+        # If EVERYTHING is cooling down (rare — every buddy 429'd recently)
+        # give the original ONE shot with big timeout; it might be back.
+        if not attempts:
+            attempts = [(self, _timeout_for(own_model) * 1.5)]
 
         last_err = "no attempts"
         for idx, (brain, timeout_s) in enumerate(attempts):
@@ -759,10 +841,23 @@ class OpenRouterBrain(Brain):
         # on 4xx/5xx; we want that message bubbling into [brain] log lines
         # so we know *why* a retry/buddy is firing.
         if r.status_code >= 400:
+            err = ""
+            retry_after = 0
             try:
-                err = (r.json().get("error") or {}).get("message", "")[:200]
+                j = r.json()
+                err_obj = j.get("error") or {}
+                err = err_obj.get("message", "")[:200]
+                # OR nests upstream Retry-After under error.metadata
+                meta = err_obj.get("metadata") or {}
+                retry_after = meta.get("retry_after_seconds") or 0
             except Exception:
                 err = r.text[:200] if r.text else ""
+            # 429 = throttled. Mark this model in cooldown so subsequent
+            # turns in this or any other match don't waste API calls on
+            # a model we KNOW is throttled. Retry-After is usually 5-30s.
+            if r.status_code == 429:
+                _mark_cooldown(self.model,
+                               retry_after or 15)  # default 15s if header absent
             raise ValueError(f"http_{r.status_code}: {err or r.reason_phrase}")
         data = r.json()
         choice = (data.get("choices") or [{}])[0]
@@ -798,10 +893,18 @@ class OpenRouterBrain(Brain):
             payload["reasoning"] = rp
         r = self._client.post("/chat/completions", json=payload)
         if r.status_code >= 400:
+            err = ""
+            retry_after = 0
             try:
-                err = (r.json().get("error") or {}).get("message", "")[:200]
+                j = r.json()
+                err_obj = j.get("error") or {}
+                err = err_obj.get("message", "")[:200]
+                meta = err_obj.get("metadata") or {}
+                retry_after = meta.get("retry_after_seconds") or 0
             except Exception:
                 err = r.text[:200] if r.text else ""
+            if r.status_code == 429:
+                _mark_cooldown(self.model, retry_after or 15)
             raise ValueError(f"http_{r.status_code}: {err or r.reason_phrase}")
         return r.json()["choices"][0]["message"]["content"] or ""
 
