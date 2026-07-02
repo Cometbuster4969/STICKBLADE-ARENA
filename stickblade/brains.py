@@ -7,8 +7,26 @@ import json
 import random
 import re
 import threading
+import time as _time
+from collections import deque
 import config as C
 from moves import ACTIONS, FOOTWORK, ACTION_ZONE
+
+
+# Ring buffer of recent brain failures. Exposed via /api/debug/brain_errors
+# so we can diagnose 'why is every match falling back?' without HF logs auth.
+# Each entry: {"t": unix_ts, "label": brain.label, "model": model_id or "",
+#              "attempt": idx+1, "of": total_attempts, "err": err_str[:200]}
+_RECENT_ERRORS = deque(maxlen=80)
+
+
+def _log_brain_err(label, model, attempt, total, err):
+    _RECENT_ERRORS.append({
+        "t": int(_time.time()),
+        "label": label, "model": model or "",
+        "attempt": attempt, "of": total,
+        "err": str(err)[:200],
+    })
 
 SYSTEM_PROMPT = """You are a stickman fighter in a physics-based duel (like Toribash).
 Your weapon: a {weapon}. Each turn you pick ONE action and ONE footwork; physics then runs for 3 seconds.
@@ -481,7 +499,10 @@ class Brain:
 
             last_err = out.get("err") or f"timeout({timeout_s:.0f}s)"
             print(f"[brain] {self.label} attempt {idx+1}/{len(attempts)} "
-                  f"failed: {last_err[:80]}")
+                  f"failed: {last_err[:120]}")
+            _log_brain_err(self.label,
+                           getattr(brain, "model", ""),
+                           idx + 1, len(attempts), last_err)
 
             # FAST-FAIL on reasoning_burnout: the model just spent its entire
             # token budget on hidden CoT. Retrying with +50% budget might
