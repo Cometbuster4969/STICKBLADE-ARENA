@@ -119,6 +119,105 @@ create index if not exists idx_elo_weapon               on elo                (w
 create index if not exists idx_tournament_matches_tid   on tournament_matches (tournament_id, round, slot);
 
 -- ============================================================================
+-- 3b. ATOMIC ELO UPDATE — server-side function.
+--     The Python record_vote() path used to do
+--         GET elo -> compute in Python -> PATCH elo
+--     with no lock, which lost updates when two votes for the same
+--     (model, sharp, weapon) landed within the same READ window.
+--     This RPC does the whole read-modify-write inside a single
+--     transaction with row-level UPSERTs, so concurrent votes serialize
+--     via Postgres' MVCC + PK constraint instead of silently clobbering.
+--
+--     Signature:
+--       apply_elo_vote(a_model, b_model, sharp, weapon, choice_model)
+--     choice_model is 'a', 'b', or 'draw' (already unflipped for canvas
+--     side by the caller). Returns d_a and d_b so the caller can echo
+--     them back in the reveal payload.
+-- ============================================================================
+create or replace function apply_elo_vote(
+    a_model      text,
+    b_model      text,
+    p_sharp      text,
+    p_weapon     text,
+    choice_model text,   -- 'a' | 'b' | 'draw'
+    k_factor     numeric default 32,
+    start_elo    numeric default 1000
+) returns table (d_a numeric, d_b numeric)
+language plpgsql
+as $$
+declare
+    ra_rating numeric;
+    rb_rating numeric;
+    ea numeric;
+    sa numeric;
+    dda numeric;
+    ddb numeric;
+begin
+    -- Ensure both rows exist. ON CONFLICT DO NOTHING is atomic and
+    -- respects the (model, sharp, weapon) PK.
+    insert into elo(model, sharp, weapon, rating, wins, losses, draws)
+      values (a_model, p_sharp, p_weapon, start_elo, 0, 0, 0)
+      on conflict (model, sharp, weapon) do nothing;
+    insert into elo(model, sharp, weapon, rating, wins, losses, draws)
+      values (b_model, p_sharp, p_weapon, start_elo, 0, 0, 0)
+      on conflict (model, sharp, weapon) do nothing;
+
+    -- Lock both rows for the duration of this txn. Row order (model asc)
+    -- prevents deadlocks when two votes concurrently touch the same pair
+    -- with reversed a/b.
+    perform 1
+      from elo
+      where (model, sharp, weapon) in
+            ((a_model, p_sharp, p_weapon), (b_model, p_sharp, p_weapon))
+      order by model
+      for update;
+
+    select rating into ra_rating
+      from elo where model = a_model and sharp = p_sharp and weapon = p_weapon;
+    select rating into rb_rating
+      from elo where model = b_model and sharp = p_sharp and weapon = p_weapon;
+
+    ea := 1.0 / (1.0 + 10 ^ ((rb_rating - ra_rating) / 400.0));
+    sa := case choice_model
+              when 'a'    then 1.0
+              when 'b'    then 0.0
+              else             0.5
+          end;
+    dda := k_factor * (sa - ea);
+    ddb := k_factor * ((1.0 - sa) - (1.0 - ea));
+
+    -- Self-play (mirror match): both fighters ARE the same row. Elo
+    -- delta must be zero (you can't gain rating from beating yourself),
+    -- and W/L should cancel to a single draw entry so the total match
+    -- count is at least visible in the leaderboard. Without this
+    -- special case both UPDATEs would hit the same row twice and either
+    -- double-count or clobber depending on ordering.
+    if a_model = b_model then
+        update elo
+           set draws = draws + 1
+         where model = a_model and sharp = p_sharp and weapon = p_weapon;
+        return query select 0::numeric, 0::numeric;
+        return;
+    end if;
+
+    update elo
+       set rating = rating + dda,
+           wins   = wins   + case when choice_model = 'a'    then 1 else 0 end,
+           losses = losses + case when choice_model = 'b'    then 1 else 0 end,
+           draws  = draws  + case when choice_model = 'draw' then 1 else 0 end
+     where model = a_model and sharp = p_sharp and weapon = p_weapon;
+
+    update elo
+       set rating = rating + ddb,
+           wins   = wins   + case when choice_model = 'b'    then 1 else 0 end,
+           losses = losses + case when choice_model = 'a'    then 1 else 0 end,
+           draws  = draws  + case when choice_model = 'draw' then 1 else 0 end
+     where model = b_model and sharp = p_sharp and weapon = p_weapon;
+
+    return query select dda, ddb;
+end$$;
+
+-- ============================================================================
 -- 4. ROW LEVEL SECURITY
 --    Backend uses the service_role key (bypasses RLS), so RLS enabled with
 --    no public policies = tables are NOT readable by anonymous users.

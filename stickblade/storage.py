@@ -153,6 +153,53 @@ class LocalStorage:
                 " ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+    def head_to_head(self, a, b, limit=50):
+        """Return VOTED done-matches where (model_a,model_b) is exactly the
+        {a, b} pair (order-insensitive). Used by the wait-screen H2H card
+        to show 'Llama is 2-1 in previous duels vs Qwen'.
+        Returns a small aggregate + up to `limit` recent rows."""
+        if not a or not b:
+            return {"total": 0, "a_wins": 0, "b_wins": 0, "draws": 0,
+                    "avg_turns": 0, "recent": []}
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, model_a, model_b, winner_side, method, turns,"
+                " sharp, weapon, flip, voted, created FROM matches"
+                " WHERE status='done'"
+                "   AND ((model_a=? AND model_b=?) OR (model_a=? AND model_b=?))"
+                " ORDER BY created DESC LIMIT ?",
+                (a, b, b, a, limit)).fetchall()
+        rows = [dict(r) for r in rows]
+        aw = bw = dr = 0
+        turns_total = 0
+        for r in rows:
+            turns_total += (r.get("turns") or 0)
+            side = r.get("winner_side")   # canvas side "a"/"b"/"draw"
+            if side == "draw":
+                dr += 1
+                continue
+            flip = bool(r.get("flip"))
+            # canvas side -> model_a/model_b axis of THIS row
+            model_axis = ("a" if side == "a" else "b")
+            if flip:
+                model_axis = "b" if model_axis == "a" else "a"
+            winner_model = r["model_a"] if model_axis == "a" else r["model_b"]
+            if winner_model == a:
+                aw += 1
+            elif winner_model == b:
+                bw += 1
+        n = len(rows)
+        return {
+            "total":     n,
+            "a_wins":    aw,
+            "b_wins":    bw,
+            "draws":     dr,
+            "avg_turns": round(turns_total / n, 1) if n else 0,
+            "recent":    [{"id": r["id"], "sharp": r["sharp"],
+                            "weapon": r["weapon"], "turns": r["turns"]}
+                           for r in rows[:8]],
+        }
+
     # ----------------------------------------------------------- voting / elo
     def _get_elo(self, c, model, sharp, weapon):
         r = c.execute("SELECT rating FROM elo WHERE model=? AND sharp=? AND weapon=?",
@@ -190,6 +237,16 @@ class LocalStorage:
             c.execute("INSERT INTO votes (id, match_id, created, choice)"
                       " VALUES (?,?,?,?)",
                       (uuid.uuid4().hex[:12], mid, time.time(), choice))
+            # Self-play (mirror match): both fighters ARE the same row. Elo
+            # delta must be zero (you can't beat yourself) and W/L would
+            # double-update the same row and clobber. Log as a single draw.
+            if a == b:
+                self._get_elo(c, a, sharp, weapon)   # ensure row exists
+                c.execute("UPDATE elo SET draws=draws+1 "
+                          "WHERE model=? AND sharp=? AND weapon=?",
+                          (a, sharp, weapon))
+                c.execute("UPDATE matches SET voted=1 WHERE id=?", (mid,))
+                return {"elo_change": {a: 0.0}, **self.reveal(mid)}
             ra, rb = (self._get_elo(c, a, sharp, weapon),
                       self._get_elo(c, b, sharp, weapon))
             ea = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))

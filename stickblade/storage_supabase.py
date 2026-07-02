@@ -12,6 +12,7 @@ via httpx — no extra SDK dependency.
 """
 import json
 import os
+import threading
 import time
 import uuid
 
@@ -35,6 +36,18 @@ class SupabaseStorage:
             },
             timeout=30,
         )
+        # In-process fallback lock. Serializes record_vote() calls WITHIN
+        # this Python process so the read-modify-write path (used when the
+        # apply_elo_vote RPC isn't installed) can't race with itself. This
+        # is a belt to the RPC's suspenders — the RPC still gives real
+        # concurrency safety across multiple processes, but this saves us
+        # from lost updates the first time you deploy after adding a new
+        # supabase-hosted node without re-running the schema.
+        self._vote_lock = threading.Lock()
+        # Cache the RPC availability check (one-time probe per process).
+        # True  = RPC installed, use atomic path
+        # False = RPC missing, fall back to REST + in-process lock
+        self._rpc_ok = None
 
     # ------------------------------------------------------------ helpers
     def _rest(self, method, table, params=None, body=None, prefer=None):
@@ -123,6 +136,48 @@ class SupabaseStorage:
             out.append(m)
         return out
 
+    def head_to_head(self, a, b, limit=50):
+        """Order-insensitive H2H aggregate for the wait-screen card.
+        Matches signature of LocalStorage.head_to_head — see that docstring."""
+        if not a or not b:
+            return {"total": 0, "a_wins": 0, "b_wins": 0, "draws": 0,
+                    "avg_turns": 0, "recent": []}
+        # PostgREST OR filter: (model_a.eq.A,model_b.eq.B),(model_a.eq.B,model_b.eq.A)
+        or_clause = (f"and(model_a.eq.{a},model_b.eq.{b}),"
+                     f"and(model_a.eq.{b},model_b.eq.{a})")
+        rows = self._rest("GET", "matches", params={
+            "status": "eq.done", "or": f"({or_clause})",
+            "order":  "created.desc", "limit": str(limit)})
+        rows = [dict(r) for r in (rows or [])]
+        aw = bw = dr = 0
+        turns_total = 0
+        for r in rows:
+            turns_total += (r.get("turns") or 0)
+            side = r.get("winner_side")
+            if side == "draw":
+                dr += 1
+                continue
+            flip = bool(r.get("flip"))
+            model_axis = ("a" if side == "a" else "b")
+            if flip:
+                model_axis = "b" if model_axis == "a" else "a"
+            winner_model = r["model_a"] if model_axis == "a" else r["model_b"]
+            if winner_model == a:
+                aw += 1
+            elif winner_model == b:
+                bw += 1
+        n = len(rows)
+        return {
+            "total":     n,
+            "a_wins":    aw,
+            "b_wins":    bw,
+            "draws":     dr,
+            "avg_turns": round(turns_total / n, 1) if n else 0,
+            "recent":    [{"id": r["id"], "sharp": r["sharp"],
+                            "weapon": r["weapon"], "turns": r["turns"]}
+                           for r in rows[:8]],
+        }
+
     # ------------------------------------------------------------ votes/elo
     def _get_elo_row(self, model, sharp, weapon):
         params = {"model": f"eq.{model}", "sharp": f"eq.{sharp}",
@@ -132,19 +187,29 @@ class SupabaseStorage:
             return dict(rows[0])
         row = {"model": model, "sharp": sharp, "weapon": weapon,
                "rating": START_ELO, "wins": 0, "losses": 0, "draws": 0}
-        try:
-            self._rest("POST", "elo", body=row,
-                       prefer="resolution=merge-duplicates")
-        except Exception:
-            row.pop("weapon", None)
-            self._rest("POST", "elo", body=row,
-                       prefer="resolution=merge-duplicates")
+        # NOTE: we used to catch here and retry the POST without the
+        # 'weapon' column so an un-migrated schema wouldn't crash. That
+        # was silent data corruption — _set_elo_row's PATCH would then
+        # match the (model, sharp) pair regardless of weapon, so a
+        # dagger vote would clobber the sword row. Better to hard-fail
+        # loudly so the operator re-runs supabase_schema.sql. There is
+        # no ambiguous middle state anymore.
+        self._rest("POST", "elo", body=row,
+                   prefer="resolution=merge-duplicates")
         return row
 
     def _set_elo_row(self, row):
-        params = {"model": f"eq.{row['model']}", "sharp": f"eq.{row['sharp']}"}
-        if row.get("weapon"):
-            params["weapon"] = f"eq.{row['weapon']}"
+        # weapon is REQUIRED — the PK is (model, sharp, weapon) and
+        # patching without it would touch every weapon's row for the
+        # same (model, sharp) pair. Enforced by contract, not silently
+        # papered over as the old code did.
+        if not row.get("weapon"):
+            raise ValueError("_set_elo_row: 'weapon' is required "
+                             "(part of the elo PK); re-run supabase_schema.sql "
+                             "if this fires — the migration is incomplete.")
+        params = {"model":  f"eq.{row['model']}",
+                  "sharp":  f"eq.{row['sharp']}",
+                  "weapon": f"eq.{row['weapon']}"}
         self._rest("PATCH", "elo", params=params,
             body={"rating": row["rating"], "wins": row["wins"],
                   "losses": row["losses"], "draws": row["draws"]})
@@ -157,20 +222,33 @@ class SupabaseStorage:
             return choice
         return "a" if choice == "b" else "b"
 
-    def record_vote(self, mid, choice):
-        m = self.get_match(mid)
-        if not m or m["status"] != "done":
-            return None
-        if m["voted"]:
-            return {"already_voted": True, **self.reveal(mid)}
-        sharp = m["sharp"]
-        weapon = m.get("weapon") or "sword"
-        flip = bool(m.get("flip"))
-        a, b = m["model_a"], m["model_b"]
-        choice_model = self._unflip_choice(choice, flip)
-        self._rest("POST", "votes", body={
-            "id": uuid.uuid4().hex[:12], "match_id": mid,
-            "created": time.time(), "choice": choice})
+    def _apply_elo_atomic(self, a, b, sharp, weapon, choice_model):
+        """Call the apply_elo_vote() Postgres RPC in one atomic txn.
+        Returns (d_a, d_b) or raises if the RPC isn't installed."""
+        rows = self._rest(
+            "POST", "rpc/apply_elo_vote",
+            body={"a_model": a, "b_model": b,
+                  "p_sharp": sharp, "p_weapon": weapon,
+                  "choice_model": choice_model,
+                  "k_factor": K_FACTOR, "start_elo": START_ELO})
+        if not rows:
+            raise RuntimeError("apply_elo_vote RPC returned no row")
+        row = rows[0] if isinstance(rows, list) else rows
+        return float(row["d_a"]), float(row["d_b"])
+
+    def _apply_elo_fallback(self, a, b, sharp, weapon, choice_model):
+        """Read-modify-write path. Racy across processes, but this method
+        is only reached if the atomic RPC isn't installed on the Postgres
+        side. Wrapped by self._vote_lock in record_vote() so it's at least
+        safe within a single Python process."""
+        # Self-play (mirror match): can't gain rating vs yourself. Log a
+        # draw and return zero deltas so the leaderboard reflects the
+        # match without double-updating the same row (which would corrupt).
+        if a == b:
+            row = self._get_elo_row(a, sharp, weapon)
+            row["draws"] += 1
+            self._set_elo_row(row)
+            return 0.0, 0.0
         ra, rb = (self._get_elo_row(a, sharp, weapon),
                   self._get_elo_row(b, sharp, weapon))
         ea = 1.0 / (1.0 + 10 ** ((rb["rating"] - ra["rating"]) / 400.0))
@@ -187,6 +265,44 @@ class SupabaseStorage:
             ra["draws"] += 1; rb["draws"] += 1
         self._set_elo_row(ra)
         self._set_elo_row(rb)
+        return d_a, d_b
+
+    def record_vote(self, mid, choice):
+        m = self.get_match(mid)
+        if not m or m["status"] != "done":
+            return None
+        if m["voted"]:
+            return {"already_voted": True, **self.reveal(mid)}
+        sharp = m["sharp"]
+        weapon = m.get("weapon") or "sword"
+        flip = bool(m.get("flip"))
+        a, b = m["model_a"], m["model_b"]
+        choice_model = self._unflip_choice(choice, flip)
+        self._rest("POST", "votes", body={
+            "id": uuid.uuid4().hex[:12], "match_id": mid,
+            "created": time.time(), "choice": choice})
+        # Prefer the atomic Postgres RPC (safe across processes).
+        # Fall back to REST + in-process lock if the RPC isn't installed
+        # yet — that gates concurrency inside this Python instance but
+        # can still lose updates if the backend runs multiple workers.
+        # After first success we cache _rpc_ok so we skip the retry cost.
+        d_a = d_b = None
+        if self._rpc_ok is not False:
+            try:
+                d_a, d_b = self._apply_elo_atomic(a, b, sharp, weapon,
+                                                  choice_model)
+                self._rpc_ok = True
+            except Exception as e:
+                # RPC missing / bad signature / etc — log once and downgrade.
+                if self._rpc_ok is None:
+                    print(f"[storage] apply_elo_vote RPC unavailable ({e}); "
+                          f"falling back to REST + in-process lock. "
+                          f"Re-run supabase_schema.sql to enable atomic path.")
+                self._rpc_ok = False
+        if d_a is None:
+            with self._vote_lock:
+                d_a, d_b = self._apply_elo_fallback(a, b, sharp, weapon,
+                                                    choice_model)
         self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
                    body={"voted": True})
         return {"elo_change": {a: round(d_a, 1), b: round(d_b, 1)},

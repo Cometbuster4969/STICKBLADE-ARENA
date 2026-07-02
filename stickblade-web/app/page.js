@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import ModelPicker, { CUSTOM } from "@/components/ModelPicker";
 import ReplayPlayer from "@/components/ReplayPlayer";
 import LeaderboardTable from "@/components/LeaderboardTable";
+import WaitPanel from "@/components/WaitPanel";
 import { getModels, createMatch, getMatch, getReplay, postVote,
          getLeaderboard, startKeepalive } from "@/lib/api";
 
@@ -72,7 +73,6 @@ export default function FightPage() {
   const [lb, setLb] = useState([]);
   const [lbSharp, setLbSharp] = useState("");
   const [lbWeapon, setLbWeapon] = useState("");          // "" = all weapons
-  const pollRef = useRef(null);
   const lbSharpId = useId();
   const lbWeaponId = useId();
 
@@ -98,8 +98,6 @@ export default function FightPage() {
       .then(setLb).catch(() => {});
   }, [lbSharp, lbWeapon, reveal]);
 
-  useEffect(() => () => clearTimeout(pollRef.current), []);
-
   const toggleZone = (z) =>
     setSharp((s) => {
       const next = s.includes(z) ? s.filter((x) => x !== z) : [...s, z];
@@ -110,11 +108,13 @@ export default function FightPage() {
 
   async function fight() {
     setBusy(true);
+    setReplay(null);
     setReveal(null);
     setCanVote(false);
     setPrediction(null);
     setLastResult(null);
-    setStatus("⚙ queuing match");
+    setStatus("");
+    setMatchId(null);
     try {
       const { match_id } = await createMatch({
         model_a: modelOf(selA, customA),
@@ -122,37 +122,31 @@ export default function FightPage() {
         sharp, blind: true, mode, weapon, arena,
       });
       setMatchId(match_id);
-      setStatus("🧠 simulating — LLMs are fighting");
-      poll(match_id);
+      // Polling + status display are now owned by <WaitPanel>. It calls
+      // onWaitReady(mid) when the match is done or (mid=null, err) if
+      // simulation failed — we do the replay hand-off from there.
     } catch (e) {
       setStatus("✖ " + e.message);
       setBusy(false);
     }
   }
-  function poll(id) {
-    clearTimeout(pollRef.current);
-    pollRef.current = setTimeout(async () => {
-      try {
-        const s = await getMatch(id);
-        if (s.status === "done") {
-          const r = await getReplay(id);
-          setReplay(r);
-          setCanVote(!s.voted);
-          setStatus("");
-          setBusy(false);
-          return;
-        }
-        if (s.status === "error") {
-          setStatus("✖ simulation error: " + (s.error || ""));
-          setBusy(false);
-          return;
-        }
-        poll(id);
-      } catch (e) {
-        setStatus("✖ " + e.message);
-        setBusy(false);
-      }
-    }, 1500);
+
+  async function onWaitReady(id, err) {
+    if (err || !id) {
+      setStatus("✖ " + (err || "unknown error"));
+      setBusy(false);
+      return;
+    }
+    try {
+      const [s, r] = await Promise.all([getMatch(id), getReplay(id)]);
+      setReplay(r);
+      setCanVote(!s.voted);
+      setStatus("");
+      setBusy(false);
+    } catch (e) {
+      setStatus("✖ " + e.message);
+      setBusy(false);
+    }
   }
 
   async function vote(choice) {
@@ -180,9 +174,6 @@ export default function FightPage() {
 
   const shareUrl = matchId && typeof window !== "undefined"
     ? `${window.location.origin}/replay?id=${matchId}` : null;
-
-  const showDots =
-    busy && status && !status.startsWith("✖") && !status.endsWith(".");
 
   return (
     <>
@@ -291,10 +282,9 @@ export default function FightPage() {
           <button className="fight-btn" onClick={fight} disabled={busy}>
             {busy ? "⚙ Simulating" : "⚔ Fight"}
           </button>
-          <div className="status" aria-live="polite">
-            {status}
-            {showDots && <span className="dots" aria-hidden="true" />}
-          </div>
+          {status && (
+            <div className="status" aria-live="polite">{status}</div>
+          )}
         </div>
 
         {/* ===== Leaderboard panel ===== */}
@@ -343,6 +333,20 @@ export default function FightPage() {
           <LeaderboardTable rows={lb} compact />
         </div>
       </div>
+
+      {/* ---------- Wait screen (visible while a match is in flight) ----------
+          Replaces the old status-dots-only spinner with quips + queue pos +
+          live combat ticker + head-to-head + recent duels. Owns its own
+          poll loop; when done, calls onWaitReady which hands off to the
+          replay panel below. */}
+      {busy && matchId && (
+        <WaitPanel
+          matchId={matchId}
+          modelA={modelOf(selA, customA)}
+          modelB={modelOf(selB, customB)}
+          onReady={onWaitReady}
+        />
+      )}
 
       {/* ---------- Replay ---------- */}
       {replay && (

@@ -75,10 +75,33 @@ def is_admin(request: Request) -> bool:
 
 
 def client_ip(request: Request) -> str:
-    """Real client IP behind HF Spaces / Render / Vercel proxies."""
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """Real client IP behind HF Spaces / Render / Vercel proxies.
+
+    Trust order (most specific first):
+      1. x-real-ip                  — set by HF Spaces edge, not user-writable
+      2. cf-connecting-ip           — Cloudflare (if we ever front with it)
+      3. fly-client-ip              — Fly.io
+      4. x-forwarded-for FIRST hop  — ONLY when TRUST_XFF=1 is set in env.
+         Otherwise ignore XFF entirely, because it's trivially spoofable
+         when the app is reached directly (e.g. local dev, bare VPS, or
+         if an operator ever exposes port 7860 without a proxy). Setting
+         a fresh XFF per request would defeat RL_MATCHES_PER_HOUR /
+         MAX_MATCHES_PER_DAY, which exist specifically to cap LLM spend.
+      5. request.client.host        — direct socket peer (last resort)
+
+    HF Spaces sets x-real-ip on its edge, so on the production deployment
+    #1 will always win and XFF is never consulted. TRUST_XFF is an opt-in
+    escape hatch for operators who front this with their own trusted
+    reverse proxy that sets XFF correctly.
+    """
+    for hdr in ("x-real-ip", "cf-connecting-ip", "fly-client-ip"):
+        v = request.headers.get(hdr)
+        if v:
+            return v.split(",")[0].strip()
+    if os.environ.get("TRUST_XFF", "").strip() in ("1", "true", "yes"):
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            return fwd.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 

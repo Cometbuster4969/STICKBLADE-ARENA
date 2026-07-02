@@ -112,6 +112,108 @@ BLIND_COLORS = {"a": ("#56dc82", 1), "b": ("#5aa0ff", 2)}
 # which colored ragdoll is the model they personally picked.
 MATCH_FLIP = {}     # mid -> bool   True = (model_a -> Fighter B, model_b -> Fighter A)
 
+# ----------------------------------------------------------------------
+# Live in-progress state exposed to the wait screen (spoiler-safe).
+# Populated by the worker as the sim runs; wiped in the finally clause
+# alongside MATCH_MODES/MATCH_FLIP. Contents are BLIND — canvas-side
+# labels ("Fighter A"/"Fighter B") only, no model names, so the wait
+# screen can show them without leaking who's who before the vote.
+#   LIVE_STATE[mid] = {
+#       "quips":       {"a": "...", "b": "..."} | None,
+#       "turn":        int,          # current turn number (0 before quips resolve)
+#       "log":         [ {turn, action_a, action_b, hits:[...]} , ... ],
+#       "queue_pos":   int | None,   # positions ahead when queued (0 = running)
+#   }
+# Bounded: log capped at MAX_LOG_TICKS entries per match; ~40 KB worst case.
+# ----------------------------------------------------------------------
+LIVE_STATE: dict = {}
+LIVE_STATE_LOCK = threading.Lock()
+MAX_LOG_TICKS = 30   # ticker only shows last 5-8; keep a small tail for late joiners
+
+
+def _live_init(mid):
+    with LIVE_STATE_LOCK:
+        LIVE_STATE[mid] = {"quips": None, "turn": 0, "log": [], "queue_pos": None}
+
+
+def _live_set(mid, **fields):
+    with LIVE_STATE_LOCK:
+        if mid in LIVE_STATE:
+            LIVE_STATE[mid].update(fields)
+
+
+def _live_append_turn(mid, entry):
+    """Append one turn's blind summary (no model names)."""
+    with LIVE_STATE_LOCK:
+        st = LIVE_STATE.get(mid)
+        if st is None:
+            return
+        st["log"].append(entry)
+        if len(st["log"]) > MAX_LOG_TICKS:
+            st["log"] = st["log"][-MAX_LOG_TICKS:]
+        st["turn"] = entry.get("turn", st["turn"])
+
+
+def _live_clear(mid):
+    with LIVE_STATE_LOCK:
+        LIVE_STATE.pop(mid, None)
+
+
+def _live_snapshot(mid):
+    with LIVE_STATE_LOCK:
+        st = LIVE_STATE.get(mid)
+        if st is None:
+            return None
+        # return a shallow copy so caller can serialize without lock
+        return {"quips": st["quips"], "turn": st["turn"],
+                "log": list(st["log"]), "queue_pos": st["queue_pos"]}
+
+
+def _live_publish_turn(mid, log_entry, f1, f2, flip):
+    """Translate one Match.log entry into a spoiler-safe wait-screen tick.
+
+    Blind rules:
+      - Use canvas-side keys ("a"/"b"), never model names.
+      - Post-flip: fighter1 is always canvas "a" (green), fighter2 canvas "b".
+        (Because run_simulation assigns slot_left->fighter1 already, and the
+        flip already remapped model->slot. So we don't re-flip here.)
+      - Include: turn #, both actions, hits (with damage + zone + sharp bool).
+      - Include: current HP snapshot AFTER this turn (visible in the canvas
+        HUD anyway, no new info).
+      - Exclude: raw thoughts (already shown as speech bubbles later; also
+        thoughts can leak model style / self-identification).
+    """
+    turn = log_entry.get("turn", 0)
+    # The log dict is keyed by fighter name (Match._start_thinking builds
+    # {self.f1.name: r1, self.f2.name: r2}). In blind mode both names are
+    # "Fighter A" / "Fighter B" already, matching canvas sides.
+    def _pick_action(fname):
+        d = log_entry.get(fname)
+        if not isinstance(d, dict):
+            return None
+        return {"action": d.get("action"), "footwork": d.get("footwork")}
+    hits = []
+    for e in log_entry.get("hits", []):
+        # e = {"attacker": fighter_id (1|2), "zone", "part", "damage", "sharp"}
+        # Translate attacker fighter-id to canvas side.
+        attacker_side = "a" if e.get("attacker") == 1 else "b"
+        hits.append({
+            "by":     attacker_side,
+            "zone":   e.get("zone"),
+            "part":   e.get("part"),
+            "damage": round(float(e.get("damage", 0)), 1),
+            "sharp":  bool(e.get("sharp")),
+        })
+    tick = {
+        "turn":   turn,
+        "action_a": _pick_action(f1.name),
+        "action_b": _pick_action(f2.name),
+        "hits":   hits,
+        "hp_a":   round(float(f1.hp), 1),
+        "hp_b":   round(float(f2.hp), 1),
+    }
+    _live_append_turn(mid, tick)
+
 
 # ------------------------------------------------------------- simulation
 def run_simulation(mid):
@@ -125,6 +227,8 @@ def run_simulation(mid):
     if m is None:
         raise RuntimeError(f"match row {mid} not found in storage")
     store.set_status(mid, "running")
+    _live_init(mid)          # wait-screen listeners start seeing turn/quip updates
+    _live_set(mid, queue_pos=0)  # by definition — we just dequeued this one
     try:
         if not pygame.get_init():
             pygame.init()
@@ -173,21 +277,44 @@ def run_simulation(mid):
             quip_a = pre_fight_quip(match.b1, name_right, weapon=weap)
             quip_b = pre_fight_quip(match.b2, name_left,  weapon=weap)
             rec.set_quips(quip_a, quip_b)
+            # Publish to the wait-screen the instant they're ready — these
+            # generate BEFORE the physics loop starts, so users see the
+            # trash-talk within ~5-15s instead of waiting the full 30-90s
+            # for the replay JSON. Canvas-side keys (a/b), no model names.
+            _live_set(mid, quips={"a": quip_a, "b": quip_b})
         except Exception as e:
             print(f"[quip] failed: {e}")
         # Budget SIM frames only — LLM thinking time must not eat the match.
         # Hard wall-clock ceiling protects against a hung brain.
         deadline = _t.time() + 45 * 60
         sim_frames = 0
+        # Live wait-screen ticker: publish each turn to LIVE_STATE the moment
+        # it finalizes (hits appended). Rule: match.log[i] is finalized once
+        # match.log has grown past i (i.e. the NEXT turn started) OR the
+        # match is over. Watching len() avoids racing with the PH_SIM ->
+        # PH_THINK phase transition.
+        last_published = 0
+        def _publish_finalized():
+            nonlocal last_published
+            # Everything before the last entry is guaranteed finalized.
+            target = len(match.log) - 1
+            if match.phase == Match.PH_OVER:
+                target = len(match.log)   # include the very last entry too
+            while last_published < target:
+                _live_publish_turn(mid, match.log[last_published],
+                                   match.f1, match.f2, flip)
+                last_published += 1
         while match.phase != Match.PH_OVER and _t.time() < deadline \
                 and sim_frames < 60 * 60 * 10:
             match.update(1 / 60, False)
             fx.update(1 / 60)
             rec.tick()
+            _publish_finalized()
             if match.phase == Match.PH_THINK:
                 _t.sleep(0.02)      # don't burn CPU while LLMs think
             else:
                 sim_frames += 1
+        _publish_finalized()   # flush the final turn(s)
         for _ in range(90):
             match.update(1 / 60, False)
             fx.update(1 / 60)
@@ -215,7 +342,7 @@ def run_simulation(mid):
                           C.ARENA_MODELS.get(slot_left, slot_left))
             if side == "draw":
                 wname_real = "Fighter A"; lname_real = "Fighter B"
-            commentator = match.b1 if side != "a" else match.b2  # the loser commentates on themselves losing? -> no, use the winner
+            # Commentator = the WINNING brain (loser roasting themselves reads weird).
             commentator = match.b1 if side == "a" else match.b2
             commentary = commentator_roast(
                 commentator, wname_real, lname_real, res["method"],
@@ -230,6 +357,20 @@ def run_simulation(mid):
         import traceback
         traceback.print_exc()
         store.set_status(mid, "error", _safe_err(e))
+    finally:
+        # Free the per-match config dict now that the sim is done. Without
+        # this, MATCH_MODES grew unbounded for the life of the process
+        # (~300 bytes/match, small but real on a long-running instance).
+        # MATCH_FLIP already pops itself on line 139 above; this closes
+        # the matching leak on the mode/weapon/arena side.
+        MATCH_MODES.pop(mid, None)
+        # Give clients a beat to fetch the final tick before the state
+        # disappears (their poll is every 1.5s; a 3s window covers it).
+        # Then wipe LIVE_STATE so long-running processes don't accumulate.
+        def _delayed_clear(_mid=mid):
+            _t.sleep(3.0)
+            _live_clear(_mid)
+        threading.Thread(target=_delayed_clear, daemon=True).start()
 
 
 def worker_loop():
@@ -559,11 +700,41 @@ def match_status(mid: str):
         raise HTTPException(404, "no such match")
     out = {"match_id": mid, "status": m["status"], "sharp": m["sharp"],
            "voted": bool(m["voted"]), "error": m["error"]}
+    # Live wait-screen data while queued/running: pre-fight quips (visible
+    # ~5-15s in), queue position, and a spoiler-safe combat ticker. All
+    # blind — canvas-side keys only, no model names — so we can safely
+    # show these to the user BEFORE they cast their vote.
+    if m["status"] in ("queued", "running"):
+        snap = _live_snapshot(mid)
+        if snap is None and m["status"] == "queued":
+            # Queued but the worker hasn't dequeued us yet: compute
+            # position from the FIFO's current size. Not exact under
+            # concurrent enqueues, but plenty good enough for the UI's
+            # "N ahead of you" text.
+            snap = {"quips": None, "turn": 0, "log": [],
+                    "queue_pos": max(0, jobs.qsize() - 1)}
+        if snap is not None:
+            out["live"] = snap
     if m["status"] == "done":
         out.update({"engine_winner_side": m["winner_side"],
                     "method": m["method"], "turns": m["turns"]})
         if not m["blind"] or m["voted"]:
-            out.update({"model_a": m["model_a"], "model_b": m["model_b"]})
+            # Expose BOTH axes:
+            #   * model_a / model_b        = user's original pick order (Slot 1/2)
+            #   * canvas_a_model / canvas_b_model = who actually rendered as
+            #     green (Fighter A) vs blue (Fighter B) after the coinflip
+            # The shared /replay?id=... page reads canvas_* first because the
+            # user is watching the canvas, not the original pick order. Without
+            # this, ~50%% of shared reveals show the wrong model as the winner.
+            flip = bool(m.get("flip"))
+            canvas_a = m["model_b"] if flip else m["model_a"]
+            canvas_b = m["model_a"] if flip else m["model_b"]
+            names = {mm: C.ARENA_MODELS.get(mm, mm)
+                     for mm in {m["model_a"], m["model_b"], canvas_a, canvas_b}}
+            out.update({"model_a": m["model_a"], "model_b": m["model_b"],
+                        "canvas_a_model": canvas_a,
+                        "canvas_b_model": canvas_b,
+                        "names": names, "flip": flip})
     return out
 
 
@@ -600,6 +771,25 @@ def leaderboard(sharp: str | None = None, weapon: str | None = None):
         r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
         r["rating"] = round(r["rating"], 1)
     return rows
+
+
+@app.get("/api/head_to_head")
+def head_to_head(a: str, b: str):
+    """Order-insensitive H2H record between two model ids.
+    Powers the wait-screen 'previous duels' card. Only shows VOTED matches
+    (the storage layer filters status=done — Elo isn't touched until vote,
+    but we still count both winner and unvoted; the frontend just hides
+    the card when total==0). No PII, no blind leakage — the user picked
+    these two models themselves so their identities are already known."""
+    for mdl in (a, b):
+        if not _valid_model(mdl):
+            raise HTTPException(400, f"unknown model: {mdl}")
+    h2h = store.head_to_head(a, b)
+    h2h["a_model"] = a
+    h2h["b_model"] = b
+    h2h["a_name"]  = C.ARENA_MODELS.get(a, a)
+    h2h["b_name"]  = C.ARENA_MODELS.get(b, b)
+    return h2h
 
 
 # ============================================================
@@ -690,7 +880,25 @@ def index():
 
 @app.get("/static/player.js")
 def player_js():
+    """Serve the canvas replay player. Single source of truth is
+    stickblade-web/public/player.js (the file Vercel serves to the
+    real Next.js frontend). This route exists only for the legacy
+    embedded arena_page.html; keeping ONE copy of the player prevents
+    the drift bug where the backend/frontend copies got out of sync
+    (missing WEAPON_GEO table, missing audio, wrong canvas sizing).
+    Falls back to a stub file in the same dir if the frontend tree
+    isn't present (e.g. someone pip-installs just the backend)."""
     from fastapi.responses import FileResponse
-    return FileResponse(os.path.join(HERE, "player.js"),
-                        media_type="application/javascript",
-                        headers={"Cache-Control": "no-cache, max-age=0"})
+    candidates = [
+        # 1) monorepo layout used in this repo
+        os.path.normpath(os.path.join(HERE, "..", "stickblade-web",
+                                      "public", "player.js")),
+        # 2) backend-only install fallback (kept for offline dev)
+        os.path.join(HERE, "player.js"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return FileResponse(path,
+                                media_type="application/javascript",
+                                headers={"Cache-Control": "no-cache, max-age=0"})
+    raise HTTPException(404, "player.js not found — frontend tree missing")

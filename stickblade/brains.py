@@ -710,13 +710,10 @@ class MockBrain(Brain):
                 mv = {"action": "guard_high", "footwork": "hop_back",
                       "thought": "Taking damage — reset distance, defend high line."}
             elif d > 240:
-                if self.weapon == "bow":
-                    mv = {"action": random.choice(self._sharp_attacks()),
-                          "footwork": "hold",
-                          "thought": "Perfect range — loose an arrow."}
-                else:
-                    mv = {"action": "ready", "footwork": "advance",
-                          "thought": "Walk in behind guard, no wasted swings."}
+                # Bow is handled by the early-return above; only melee reaches
+                # this branch, so no need to special-case it here.
+                mv = {"action": "ready", "footwork": "advance",
+                      "thought": "Walk in behind guard, no wasted swings."}
             elif d > 130:
                 mv = {"action": random.choice(atk), "footwork": "lunge",
                       "thought": "Perfect entry distance — explosive sharp attack."}
@@ -726,7 +723,12 @@ class MockBrain(Brain):
             else:
                 mv = {"action": random.choice(atk), "footwork": random.choice(["hold", "advance"]),
                       "thought": "Strike range. Aim the sharp zone at his head."}
-        return _sanitize(mv)
+        # Pass self.actions so weapon-specific moves (wide_swing / spin_up
+        # for flail, thrust_over for spear, etc.) survive sanitization. The
+        # default ACTIONS list is sword-only; without this a flail mock's
+        # 'wide_swing' silently downgraded to 'ready' and the fighter just
+        # stood there whenever the API fell back to the mock brain.
+        return _sanitize(mv, self.actions)
 
 
 # ---------------------------------------------------------------- real LLMs
