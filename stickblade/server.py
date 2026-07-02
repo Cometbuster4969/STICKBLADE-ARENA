@@ -420,6 +420,66 @@ def models():
     return [{"id": k, "name": v} for k, v in C.ARENA_MODELS.items()]
 
 
+# ----------------------------------------------------------------------
+# Debug: recent brain errors + live OpenRouter self-test
+# ----------------------------------------------------------------------
+# Read-only diagnostics. No PII or secrets. Useful for live debugging the
+# 'why does every match fall back?' class of bug without HF Spaces log
+# access. The brain logger appends every retry/buddy failure into a tiny
+# ring buffer so we can see WHAT actually went wrong server-side.
+@app.get("/api/debug/brain_errors")
+def debug_brain_errors():
+    try:
+        from brains import _RECENT_ERRORS  # ring buffer (deque)
+        return {"count": len(_RECENT_ERRORS),
+                "errors": list(_RECENT_ERRORS)}
+    except Exception as e:
+        return {"count": 0, "errors": [], "init_err": str(e)[:120]}
+
+
+@app.get("/api/debug/openrouter_ping")
+def debug_openrouter_ping(model: str = "meta-llama/llama-3.3-70b-instruct:free"):
+    """One-shot OpenRouter call with the simplest possible payload.
+    Returns the raw status code + first 400 chars of response body so we
+    can confirm: (a) the key works, (b) the model is reachable, (c) what
+    error OR gives if it isn't. Bypasses every wrapper in brains.py.
+    """
+    if not C.OPENROUTER_API_KEY:
+        return {"ok": False, "reason": "OPENROUTER_API_KEY not set"}
+    if not _valid_model(model):
+        return {"ok": False, "reason": "invalid model id"}
+    import httpx
+    try:
+        r = httpx.post(
+            f"{C.OPENROUTER_BASE}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {C.OPENROUTER_API_KEY}",
+                "HTTP-Referer": "https://stickblade.arena",
+                "X-Title": "Stickblade Arena debug",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user",
+                              "content": "Reply with exactly: PONG"}],
+                "max_tokens": 16,
+            },
+            timeout=20,
+        )
+        body = r.text[:400]
+        try:
+            j = r.json()
+            content = ((j.get("choices") or [{}])[0]
+                       .get("message", {})
+                       .get("content") or "")[:80]
+        except Exception:
+            content = ""
+        return {"ok": r.status_code == 200 and bool(content),
+                "status": r.status_code, "content": content,
+                "body_preview": body}
+    except Exception as e:
+        return {"ok": False, "exception": str(e)[:200]}
+
+
 @app.get("/api/weapons")
 def weapons_list():
     from weapons import WEAPONS, WEAPON_ZONES
