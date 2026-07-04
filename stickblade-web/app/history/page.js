@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { getRecent } from "@/lib/api";
+import ShareButton from "@/components/ShareButton";
 
 export default function HistoryPage() {
   const [rows, setRows] = useState(null);
@@ -23,25 +24,32 @@ export default function HistoryPage() {
             <thead>
               <tr>
                 <th>Fighters</th><th>Sharp</th><th className="r">Turns</th>
-                <th>Method</th><th>Replay</th>
+                <th>Method</th><th>Replay</th><th></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((m) => (
-                <tr key={m.match_id}>
-                  <td>{m.models ? m.models.join(" vs ") : "🎭 anonymous (unvoted)"}</td>
-                  <td>{m.sharp}</td>
-                  <td className="r">{m.turns}</td>
-                  <td>{m.method}</td>
-                  <td>
-                    <a className="mlink" href={`/replay?id=${m.match_id}`}>
-                      ▶ watch
-                    </a>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((m) => {
+                const url = typeof window !== "undefined"
+                  ? `${window.location.origin}/replay?id=${m.match_id}` : "";
+                return (
+                  <tr key={m.match_id}>
+                    <td>{m.models ? m.models.join(" vs ") : "🎭 anonymous (unvoted)"}</td>
+                    <td>{m.sharp}</td>
+                    <td className="r">{m.turns}</td>
+                    <td>{m.method}</td>
+                    <td>
+                      <a className="mlink" href={`/replay?id=${m.match_id}`}>
+                        ▶ watch
+                      </a>
+                    </td>
+                    <td className="r">
+                      <ShareButton url={url} label="📋 share" compact />
+                    </td>
+                  </tr>
+                );
+              })}
               {!rows.length && (
-                <tr><td colSpan={5} style={{ color: "var(--dim)" }}>
+                <tr><td colSpan={6} style={{ color: "var(--dim)" }}>
                   no matches yet — go fight!
                 </td></tr>
               )}

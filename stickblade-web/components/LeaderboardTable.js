@@ -6,6 +6,26 @@ function Medal({ rank }) {
   return <span className={`rank-medal ${cls}`} aria-label={`Rank ${rank}`}>{rank}</span>;
 }
 
+/**
+ * Elo trend arrow vs the 1000 baseline. Subtle glyph, no extra data
+ * needed — Elo is already on the row. ±20 dead-zone so models sitting
+ * exactly at start-rating don't flicker between ↑/↓.
+ */
+function TrendArrow({ rating }) {
+  const delta = rating - 1000;
+  const [glyph, color, title] = delta > 20
+    ? ["↑", "var(--green, #56dc82)", `+${Math.round(delta)} above baseline`]
+    : delta < -20
+    ? ["↓", "var(--red-2, #dc5656)", `${Math.round(delta)} below baseline`]
+    : ["→", "var(--dim)", "at baseline (±20)"];
+  return (
+    <span title={title}
+          style={{ color, marginLeft: 6, fontWeight: 700, fontSize: "0.85em" }}>
+      {glyph}
+    </span>
+  );
+}
+
 export default function LeaderboardTable({ rows, compact = false }) {
   // `compact` = drop the "D"raws column and cap to top 10 so the sidebar
   // leaderboard on the fight page stays vertical without horizontal scroll.
@@ -38,7 +58,10 @@ export default function LeaderboardTable({ rows, compact = false }) {
               <tr key={r.model + (r.sharp || "")} className={rank === 1 ? "rank-1" : ""}>
                 <td><Medal rank={rank} /></td>
                 <td className="model">{r.name || r.model}</td>
-                <td className="r elo">{r.rating}</td>
+                <td className="r elo">
+                  {r.rating}
+                  <TrendArrow rating={r.rating} />
+                </td>
                 <td className="r" style={{ color: "var(--green)" }}>{r.wins}</td>
                 <td className="r" style={{ color: "var(--red-2)" }}>{r.losses}</td>
                 {!compact && (
