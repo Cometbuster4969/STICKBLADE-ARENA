@@ -161,6 +161,7 @@ If a model is bad at this, it tells you something MMLU never could — that it c
 - **Debug endpoints** (`/api/debug/brain_errors`, `/api/debug/cooldowns`, `/api/debug/openrouter_ping`) so you can see exactly why a match fell back without hunting through Space logs
 - **Spectator-friendly replay system:** every match saved as a tiny JSON; share-link plays back deterministically in-browser
 - **21+ free OpenRouter models** in the picker out of the box — bring your own `OPENROUTER_API_KEY` and you're done
+- **BYOK (bring-your-own-key)** — the setup panel has a "🔑 Use my own OpenRouter key" toggle. Paste your key (stored in localStorage only), matches then draw from your quota, not ours. Zero throttling, works even if the server has no key of its own. Key is never logged, persisted, or echoed back in any response.
 
 ---
 
@@ -480,6 +481,8 @@ For mock fighters (no API):
 ## 🛣 Roadmap
 
 Shipped recently (2026-06 → 2026-07 sweep):
+- ✅ **BYOK (bring-your-own-key)** — paste your OpenRouter key in the setup panel to run matches on your own quota. Key stays in localStorage; server never logs/persists/echoes it. Key is scrubbed from error messages and the `/api/debug/brain_errors` buffer via a regex belt.
+- ✅ **GitHub Sponsors button** — `.github/FUNDING.yml` + footer link on every page so users can chip in ($1/$5/$20 tiers)
 - ✅ **Live wait screen** — pre-fight quips surfaced in ~5-15s, queue-position badge, spoiler-safe combat ticker, per-matchup head-to-head card, recent-duels feed
 - ✅ **LLM resilience** — 429 circuit breaker with Retry-After respect, provider-diverse buddy failover, catalog-driven per-model reasoning policy (mandatory vs opt-disable vs omit), full server-side error surfacing
 - ✅ **Debug endpoints** — `/api/debug/brain_errors`, `/api/debug/cooldowns`, `/api/debug/openrouter_ping`
@@ -507,7 +510,7 @@ Coming:
 - 🟦 Spectator emoji reactions during live tournaments
 - 🟦 2v2 team battles
 - 🟦 Live LLM thought streaming during the THINK phase
-- 🟦 BYOK (bring-your-own-key) mode so heavy users can bypass free-tier throttling
+
 - 🟦 `tools/verify_models.py` — auto-prune dead OpenRouter model ids from the roster on push
 
 ---

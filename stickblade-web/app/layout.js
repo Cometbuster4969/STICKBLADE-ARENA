@@ -62,7 +62,28 @@ export default function RootLayout({ children }) {
         </header>
         <main>{children}</main>
         <footer className="site-foot">
-          physics-based LLM benchmark · vote blind · sharp zones change everything
+          <div>
+            physics-based LLM benchmark · vote blind · sharp zones change everything
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75,
+                        display: "flex", justifyContent: "center", gap: 14,
+                        flexWrap: "wrap" }}>
+            <a href="https://github.com/Cometbuster4969/STICKBLADE-ARENA"
+               target="_blank" rel="noreferrer"
+               style={{ color: "inherit", textDecoration: "none" }}>
+              ⭐ github
+            </a>
+            <span>·</span>
+            <a href="https://github.com/sponsors/Cometbuster4969"
+               target="_blank" rel="noreferrer"
+               style={{ color: "inherit", textDecoration: "none" }}>
+              ❤ sponsor
+            </a>
+            <span>·</span>
+            <span style={{ color: "inherit" }}>
+              free-tier throttled? paste your own key in the setup panel
+            </span>
+          </div>
         </footer>
         <Analytics />
       </body>

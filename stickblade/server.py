@@ -29,6 +29,9 @@ def _safe_err(e) -> str:
     s = _re_top.sub(r"https?://\S+", "<url>", s)
     # strip bearer-ish tokens / api keys
     s = _re_top.sub(r"(?i)(api[_-]?key|bearer|token)[=:\s]+\S+", r"\1 <hidden>", s)
+    # strip bare sk-* / sk-or-* tokens (BYOK keys might appear raw in
+    # upstream error bodies without a bearer/api_key prefix)
+    s = _re_top.sub(r"sk-[a-zA-Z0-9_-]{16,}", "<hidden-key>", s)
     # strip absolute paths
     s = _re_top.sub(r"/[a-zA-Z0-9_/.-]{12,}", "<path>", s)
     # collapse whitespace, clamp
@@ -111,6 +114,13 @@ BLIND_COLORS = {"a": ("#56dc82", 1), "b": ("#5aa0ff", 2)}
 # by the worker when the simulation kicks off. Keeps the user from knowing
 # which colored ragdoll is the model they personally picked.
 MATCH_FLIP = {}     # mid -> bool   True = (model_a -> Fighter B, model_b -> Fighter A)
+
+# BYOK — per-match OpenRouter API keys. Never persisted to DB, never
+# echoed back in any API response, popped when the sim finishes. Only
+# lives here for the ~30s window between /api/match POST and the worker
+# picking up the job. Access is single-threaded (worker consumes, request
+# handler produces) so no lock is needed — but be careful if that changes.
+MATCH_API_KEYS: dict = {}
 
 # ----------------------------------------------------------------------
 # Live in-progress state exposed to the wait screen (spoiler-safe).
@@ -253,11 +263,16 @@ def run_simulation(mid):
         else:
             slot_left, slot_right = m["model_a"], m["model_b"]
         mm = MATCH_MODES.get(mid, {})
+        # BYOK: consume the per-match key (if any) and pass into Match.
+        # Popping here (not in finally) means we never re-read the key
+        # even if the sim somehow got restarted for the same mid.
+        byok = MATCH_API_KEYS.pop(mid, None)
         match = Match(slot_left, slot_right, sharp, fx,
                       log_path=os.path.join(store.root, f"log_{mid}.json"),
                       mode=mm.get("mode", "macro"),
                       weapon=mm.get("weapon", "sword"),
-                      arena=mm.get("arena", "normal"))
+                      arena=mm.get("arena", "normal"),
+                      api_key=byok)
         # blind mode: hide model identity in the replay itself
         if m["blind"]:
             match.f1.name = match.b1.label = BLIND_NAMES["a"]
@@ -364,6 +379,11 @@ def run_simulation(mid):
         # MATCH_FLIP already pops itself on line 139 above; this closes
         # the matching leak on the mode/weapon/arena side.
         MATCH_MODES.pop(mid, None)
+        # Defensive: normally MATCH_API_KEYS[mid] is popped BEFORE Match()
+        # is constructed. If an exception fired between the request handler
+        # stashing the key and the worker consuming it, the entry would
+        # linger — this keeps the map bounded regardless of failure path.
+        MATCH_API_KEYS.pop(mid, None)
         # Give clients a beat to fetch the final tick before the state
         # disappears (their poll is every 1.5s; a 3s window covers it).
         # Then wipe LIVE_STATE so long-running processes don't accumulate.
@@ -516,6 +536,16 @@ class MatchReq(BaseModel):
     mode: str = Field(default="macro", max_length=8)    # macro | joint
     weapon: str = Field(default="sword", max_length=8)  # sword | dagger | spear | flail | bow
     arena: str = Field(default="normal", max_length=16) # normal | ice | low_gravity
+    # BYOK — optional per-match OpenRouter API key. Sent from the user's
+    # localStorage only when they've opted in via the "🔑 Use my key"
+    # toggle. Server behavior:
+    #   * NEVER logged, printed, or stored in the DB / replay JSON
+    #   * lives only in-memory in MATCH_API_KEYS[mid] until the sim wraps
+    #   * threaded into the Brain HTTP client headers, nowhere else
+    #   * request body containing this field is not echoed back
+    # Length cap is generous — OpenRouter keys are ~48 chars but we allow
+    # up to 200 for BYOK from other proxies with longer prefixes.
+    api_key: str | None = Field(default=None, max_length=200)
 
 
 class VoteReq(BaseModel):
@@ -682,6 +712,14 @@ def create_match(req: MatchReq, request: Request):
     arena = req.arena if req.arena in ("normal", "ice", "low_gravity") else "normal"
     mid = store.create_match(req.model_a, req.model_b, sharp, req.blind, weapon)
     MATCH_MODES[mid] = {"mode": mode, "weapon": weapon, "arena": arena}
+    # BYOK: stash the user-supplied key in-memory for the worker to
+    # consume. Basic sanity check (OR keys start with 'sk-or-') so we
+    # don't accept obvious garbage; anything else with the sk- prefix
+    # is passed through (OR occasionally accepts alt formats).
+    if req.api_key:
+        k = req.api_key.strip()
+        if len(k) >= 20 and k.startswith("sk-"):
+            MATCH_API_KEYS[mid] = k
     # Lock in the A↔green/B↔blue random assignment at queue time so even
     # the worker that picks up the job can't pre-leak which colored
     # ragdoll the user's picks correspond to.
