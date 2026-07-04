@@ -335,6 +335,19 @@ function BracketView({ tid, onPickOther }) {
   const nameOf = (id) => t.model_names[id] || id || "—";
   const champion = t.winner_model;
 
+  // "Match 3 of 7 in progress — Llama vs DeepSeek"
+  // Heuristic for THE current match: has both fighters + a match_id +
+  // no winner yet. There's typically only one at a time because the
+  // tournament worker runs bracket matches sequentially. Also count
+  // completed / total for the "N of M" hint.
+  const allBracketMatches = t.matches.filter(
+    (m) => m.model_a && m.model_b);
+  const completed = allBracketMatches.filter((m) => m.winner_model).length;
+  const total = allBracketMatches.length;
+  const current = t.status === "running"
+    ? allBracketMatches.find((m) => !m.winner_model && m.match_id)
+    : null;
+
   return (
     <>
       <section className="tagline" style={{ marginBottom: 8 }}>
@@ -353,6 +366,31 @@ function BracketView({ tid, onPickOther }) {
           <StatusPill status={t.status} />
         </p>
       </section>
+
+      {current && (
+        <div className="panel" style={{
+          padding: "12px 16px", textAlign: "center",
+          border: "1px solid var(--gold, #d4b962)",
+          background: "rgba(212,185,98,0.06)",
+          animation: "sb-pulse 1.8s ease-in-out infinite",
+        }}>
+          <div style={{ fontSize: 11, letterSpacing: 3, color: "var(--gold, #d4b962)",
+                        textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>
+            🥊 Match {completed + 1} of {total} in progress
+          </div>
+          <div style={{ fontSize: 15, color: "var(--text)" }}>
+            <b>{nameOf(current.model_a)}</b>
+            <span style={{ color: "var(--dim)", margin: "0 10px" }}>vs</span>
+            <b>{nameOf(current.model_b)}</b>
+          </div>
+          <style jsx>{`
+            @keyframes sb-pulse {
+              0%, 100% { box-shadow: 0 0 0 0 rgba(212,185,98,0.4); }
+              50%      { box-shadow: 0 0 0 8px rgba(212,185,98,0);  }
+            }
+          `}</style>
+        </div>
+      )}
 
       {champion && (
         <div className="panel" style={{ textAlign: "center", padding: 18,
@@ -384,7 +422,8 @@ function BracketView({ tid, onPickOther }) {
                 : `Round ${ri + 1}`}
             </div>
             {roundMatches.map((m) => (
-              <BracketCard key={m.id} m={m} nameOf={nameOf} />
+              <BracketCard key={m.id} m={m} nameOf={nameOf}
+                isCurrent={current && current.id === m.id} />
             ))}
             {!roundMatches.length && (
               <div style={{ color: "var(--dim)", fontSize: 12, textAlign: "center" }}>
@@ -404,16 +443,23 @@ function BracketView({ tid, onPickOther }) {
   );
 }
 
-function BracketCard({ m, nameOf }) {
+function BracketCard({ m, nameOf, isCurrent = false }) {
   const aWon = m.winner_model && m.winner_model === m.model_a;
   const bWon = m.winner_model && m.winner_model === m.model_b;
   const pending = !m.winner_model;
   const cardStyle = {
-    border: "1px solid var(--line)",
+    border: isCurrent
+      ? "1px solid var(--gold, #d4b962)"
+      : "1px solid var(--line)",
     borderRadius: "var(--radius-sm)",
     background: "var(--bg-2)",
     overflow: "hidden",
     boxShadow: pending ? "none" : "0 6px 20px rgba(0,0,0,0.35)",
+    animation: isCurrent ? "sb-card-pulse 1.6s ease-in-out infinite" : "none",
+    // Fully-pending future matches (no fighters assigned yet, e.g. Round 2
+    // slots before Round 1 finishes) get muted so users know they're
+    // waiting on upstream results.
+    opacity: (!m.model_a || !m.model_b) ? 0.55 : 1,
   };
   const rowStyle = (won, lost) => ({
     display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -440,6 +486,12 @@ function BracketCard({ m, nameOf }) {
              href={`/replay?id=${m.match_id}`}>watch ▶</a>
         )}
       </div>
+      <style jsx>{`
+        @keyframes sb-card-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(212,185,98,0.5); }
+          50%      { box-shadow: 0 0 0 6px rgba(212,185,98,0);  }
+        }
+      `}</style>
     </div>
   );
 }
