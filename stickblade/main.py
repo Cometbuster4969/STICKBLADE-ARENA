@@ -58,7 +58,7 @@ class Match:
     PH_THINK, PH_SIM, PH_BANNER, PH_OVER = "THINKING", "SIM", "BANNER", "OVER"
 
     def __init__(self, p1_kind, p2_kind, sharp, fx, log_path=None,
-                 mode="macro", weapon="sword", arena="normal"):
+                 mode="macro", weapon="sword", arena="normal", api_key=None):
         from weapons import WEAPONS, WEAPON_ZONES
         self.weapon = weapon if weapon in WEAPONS else "sword"
         # keep only zones valid for this weapon; default to first zone
@@ -104,10 +104,14 @@ class Match:
         self.arrows = {1: ArrowManager(self.space, self.f1),
                        2: ArrowManager(self.space, self.f2)} \
             if self.weapon == "bow" else None
+        # api_key: per-match BYOK OpenRouter key. Threaded down into both
+        # brains so their retry+buddy failover ladders also use it. Never
+        # stored on self — only lives inside the Brain instances' HTTP
+        # clients for the duration of this Match's lifetime.
         self.b1 = make_brain(p1_kind, self.sharp, mode=self.mode,
-                             weapon=self.weapon)
+                             weapon=self.weapon, api_key=api_key)
         self.b2 = make_brain(p2_kind, self.sharp, mode=self.mode,
-                             weapon=self.weapon)
+                             weapon=self.weapon, api_key=api_key)
         if self.b1.label == self.b2.label:          # mirror match: disambiguate
             self.b1.label += " #1"
             self.b2.label += " #2"

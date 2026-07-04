@@ -20,12 +20,20 @@ from moves import ACTIONS, FOOTWORK, ACTION_ZONE
 _RECENT_ERRORS = deque(maxlen=80)
 
 
+_KEY_LEAK_RE = re.compile(r"(?i)(bearer|api[_-]?key|token)[=:\s]+\S+|sk-[a-zA-Z0-9_-]{16,}")
+
+
 def _log_brain_err(label, model, attempt, total, err):
+    """Append a brain failure to the public /api/debug/brain_errors buffer.
+    BYOK safety: strip any accidentally-leaked bearer tokens / sk-* keys
+    before storing, since the buffer is served over an unauthenticated
+    read-only endpoint."""
+    safe = _KEY_LEAK_RE.sub("<hidden>", str(err))[:200]
     _RECENT_ERRORS.append({
         "t": int(_time.time()),
         "label": label, "model": model or "",
         "attempt": attempt, "of": total,
-        "err": str(err)[:200],
+        "err": safe,
     })
 
 SYSTEM_PROMPT = """You are a stickman fighter in a physics-based duel (like Toribash).
@@ -49,7 +57,10 @@ If `relative.facing_enemy` is false you are looking the WRONG WAY — your
 strike will whiff; use the next turn to reorient (your engine will auto-flip
 if you simply walk past them).
 For ranged shots, `ranged_hint.aim_at_enemy_head` is the world point to aim
-at and `vertical_drop_to_compensate` tells you how much the arrow will fall.
+at. `ranged_hint.per_shot[action].vertical_drop_to_compensate` tells you
+how many pixels the arrow will drop for each specific shot type — pick
+the shot, then aim `drop` pixels HIGHER than the target head. All drop
+values are arena-aware (low_gravity gives ~35% of normal drop).
 
 Distance guide: <70 = clinch range, 70-150 = strike range, 150-260 = closing range, >260 = far.
 {range_hint}
@@ -121,10 +132,30 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
     me_vel = _vel(me.bodies["torso"])
     foe_vel = _vel(foe.bodies["torso"])
 
-    # Ranged shot helper: how much arrow flight time at a typical 700 px/s
-    # speed, and the vertical drop that should be compensated for.
-    flight_t = round(d / 700.0, 2)
-    gravity_drop = round(0.5 * abs(C.GRAVITY[1]) * flight_t * flight_t)
+    # ---------- Ranged combat helpers (bow-aiming hints) ----------
+    # Arena-aware gravity: low_gravity scales space.gravity to 35%, so
+    # the drop model expects at any given flight time is much smaller.
+    # Previously this used C.GRAVITY[1] unconditionally, telling low-grav
+    # bow fighters to aim for a drop ~2.86x too large — the model
+    # overcompensated and hoisted every shot high. (See main.py line 74.)
+    g_scale = 0.35 if arena == "low_gravity" else 1.0
+    g_eff   = abs(C.GRAVITY[1]) * g_scale
+    # Per-shot-type flight time + drop. Was a flat 700 px/s guess before,
+    # which was 40%% too slow for a draw_shot (980 px/s) and 8%% too fast
+    # for a quick_shot (640 px/s). The drop grows with t^2, so those
+    # errors compounded into ~30-90 px of aim bias depending on distance.
+    # Emitting per-shot values lets the LLM pick the shot type first,
+    # then aim precisely — no need for it to guess our internal average.
+    def _drop_for(speed):
+        t = d / speed
+        return {"flight_time_s": round(t, 2),
+                "vertical_drop_to_compensate": round(0.5 * g_eff * t * t)}
+    # Kept for backwards compat with any external consumer that reads
+    # `arrow_flight_time_s` / `vertical_drop_to_compensate` directly.
+    # Uses draw_shot as the reference since it's the highest-damage
+    # (and most-used) bow action.
+    flight_t = round(d / 980.0, 2)
+    gravity_drop = round(0.5 * g_eff * flight_t * flight_t)
 
     rel = []
     for e in last_events:
@@ -175,8 +206,19 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
         },
         # Ranged combat helpers (mostly useful for bow / flail leads).
         "ranged_hint": {
+            # Kept for back-compat; matches draw_shot as the reference.
             "arrow_flight_time_s": flight_t,
             "vertical_drop_to_compensate": gravity_drop,
+            # Per-shot-type breakdown so the model can pick a shot AND
+            # aim it correctly in the same turn. All arena-aware — the
+            # `vertical_drop_to_compensate` values here reflect the
+            # actual gravity of state.arena (0.35x under low_gravity).
+            "per_shot": {
+                "draw_shot":     _drop_for(980.0),
+                "quick_shot":    _drop_for(640.0),
+                "high_arc_shot": _drop_for(760.0),
+            },
+            "gravity_scale": g_scale,   # 1.0 normal / ice, 0.35 low_gravity
             # aim point if you want to hit the enemy HEAD with a flat arrow
             "aim_at_enemy_head": _xy(foe_head),
         },
@@ -546,11 +588,23 @@ class Brain:
         # don't have an equivalent — they get the same model retried twice.
         # _buddies_for() already filters out cooling-down buddies and orders
         # by provider diversity (different upstream host first).
+        # Reuse the same OpenRouter key the original used (server env OR
+        # a per-match BYOK key). Without this, BYOK matches would fall
+        # back to the server's key on the first 429, defeating the point
+        # of BYOK. Non-OR brains have no ._client so this is a no-op.
+        origin_key = None
+        client = getattr(self, "_client", None)
+        if client is not None:
+            auth = client.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                origin_key = auth[7:]
         for buddy_id in _buddies_for(self, k=3 if in_cooldown else 2):
             try:
-                buddy = OpenRouterBrain(self.sharp, buddy_id,
-                                        label=self.label + "→buddy",
-                                        mode=self.mode, weapon=self.weapon)
+                buddy = OpenRouterBrain(
+                    self.sharp, buddy_id,
+                    label=self.label + "→buddy",
+                    mode=self.mode, weapon=self.weapon,
+                    api_key=origin_key if getattr(self, "_byok", False) else None)
                 attempts.append((buddy, _timeout_for(buddy_id)))
             except Exception:
                 # OpenRouter not configured / brain init failed — skip silently
@@ -804,15 +858,25 @@ class OpenRouterBrain(Brain):
     model: e.g. 'meta-llama/llama-3.3-70b-instruct:free' or 'openai/gpt-4o-mini'
     """
 
-    def __init__(self, sharp_zones, model, label=None, mode="macro", weapon="sword"):
+    def __init__(self, sharp_zones, model, label=None, mode="macro", weapon="sword",
+                 api_key=None):
         super().__init__(sharp_zones, mode, weapon)
         self.model = model
         self.label = label or model.split("/")[-1].replace(":free", "")[:24]
+        # BYOK: if the caller passed a per-match api_key (from the user's
+        # localStorage via /api/match), use it instead of the server-side
+        # OPENROUTER_API_KEY. The user's traffic then draws from THEIR quota,
+        # not ours — bypasses the 50-req/day free-tier ceiling.
+        # api_key is intentionally NOT stored on self; only baked into
+        # this httpx.Client's default headers so it never appears in logs,
+        # replay JSON, error messages, or the recorder output.
+        self._byok = bool(api_key)
+        key = api_key or C.OPENROUTER_API_KEY
         import httpx
         self._client = httpx.Client(
             base_url=C.OPENROUTER_BASE,
             headers={
-                "Authorization": f"Bearer {C.OPENROUTER_API_KEY}",
+                "Authorization": f"Bearer {key}",
                 "HTTP-Referer": "https://stickblade.arena",
                 "X-Title": "Stickblade Arena",
             },
@@ -959,7 +1023,14 @@ def commentator_roast(commentator_brain, winner_name, loser_name, method,
         fallback=fallback)
 
 
-def make_brain(kind, sharp_zones, mode="macro", weapon="sword"):
+def make_brain(kind, sharp_zones, mode="macro", weapon="sword", api_key=None):
+    """Build the right Brain subclass for a given kind.
+
+    api_key: optional per-match BYOK OpenRouter key. If passed, OpenRouter
+    calls draw from the caller's quota instead of the server's env var.
+    Threaded via server.py -> Match -> make_brain -> OpenRouterBrain and
+    is never stored anywhere persistent.
+    """
     kind = kind.lower()
 
     def _mock(personality="duelist", label=None):
@@ -974,13 +1045,19 @@ def make_brain(kind, sharp_zones, mode="macro", weapon="sword"):
         return _mock(p if p in PERSONALITIES else "duelist")
     # OpenRouter model id (contains "/"), e.g. meta-llama/llama-3.3-70b:free
     if "/" in kind:
-        if C.OPENROUTER_API_KEY:
+        # BYOK wins over env var: if the caller passed api_key, use it
+        # even when the server has no OPENROUTER_API_KEY of its own
+        # (letting a locally-hosted instance run purely on user keys).
+        effective_key = api_key or C.OPENROUTER_API_KEY
+        if effective_key:
             try:
-                return OpenRouterBrain(sharp_zones, kind, mode=mode, weapon=weapon)
+                return OpenRouterBrain(sharp_zones, kind, mode=mode,
+                                       weapon=weapon, api_key=api_key)
             except Exception as e:
                 print(f"[brains] OpenRouter init failed ({e}); using mock.")
         else:
-            print(f"[brains] No OPENROUTER_API_KEY — '{kind}' slot uses mock.")
+            print(f"[brains] No OpenRouter key (server env or BYOK) — "
+                  f"'{kind}' slot uses mock.")
         label = kind.split("/")[-1].replace(":free", "")[:20] + "(mock)"
         return _mock("duelist", label=label)
     if kind == "gpt":

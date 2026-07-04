@@ -4,6 +4,10 @@ import ModelPicker, { CUSTOM } from "@/components/ModelPicker";
 import ReplayPlayer from "@/components/ReplayPlayer";
 import LeaderboardTable from "@/components/LeaderboardTable";
 import WaitPanel from "@/components/WaitPanel";
+import ByokPanel from "@/components/ByokPanel";
+import OnboardingCard from "@/components/OnboardingCard";
+import ShareButton from "@/components/ShareButton";
+import { readByokKey, readByokEnabled } from "@/lib/byok";
 import { getModels, createMatch, getMatch, getReplay, postVote,
          getLeaderboard, startKeepalive } from "@/lib/api";
 
@@ -116,11 +120,19 @@ export default function FightPage() {
     setStatus("");
     setMatchId(null);
     try {
-      const { match_id } = await createMatch({
+      // BYOK: include the user's own OpenRouter key ONLY if they've
+      // enabled it via the ByokPanel. Backend uses it in place of its
+      // env var for THIS match only, then discards. Never persisted.
+      const body = {
         model_a: modelOf(selA, customA),
         model_b: modelOf(selB, customB),
         sharp, blind: true, mode, weapon, arena,
-      });
+      };
+      if (readByokEnabled()) {
+        const k = readByokKey();
+        if (k) body.api_key = k;
+      }
+      const { match_id } = await createMatch(body);
       setMatchId(match_id);
       // Polling + status display are now owned by <WaitPanel>. It calls
       // onWaitReady(mid) when the match is done or (mid=null, err) if
@@ -178,6 +190,7 @@ export default function FightPage() {
   return (
     <>
       {/* ---------- Hero ---------- */}
+      <OnboardingCard />
       <section className="tagline">
         <h1>
           Two LLM Swordsmen.<br />
@@ -279,6 +292,8 @@ export default function FightPage() {
             </div>
           </div>
 
+          <ByokPanel />
+
           <button className="fight-btn" onClick={fight} disabled={busy}>
             {busy ? "⚙ Simulating" : "⚔ Fight"}
           </button>
@@ -353,8 +368,12 @@ export default function FightPage() {
         <div className="panel" style={{ padding: 14 }}>
           <ReplayPlayer replay={replay} />
           {shareUrl && (
-            <div className="share">
-              share this duel: <a href={shareUrl}>{shareUrl}</a>
+            <div className="share" style={{ display: "flex",
+                    alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ color: "var(--dim)", fontSize: 13 }}>
+                share this duel:
+              </span>
+              <ShareButton url={shareUrl} />
             </div>
           )}
         </div>
@@ -430,19 +449,37 @@ export default function FightPage() {
             </div>
           )}
           {reveal.commentary && (
+            /* Standalone bordered quote card. Only renders when the
+               commentator LLM actually produced text — empty/null
+               commentary just shows nothing (per spec). */
             <div style={{
-              marginTop: 14, paddingTop: 12,
-              borderTop: "1px dashed var(--line)",
-              fontStyle: "italic", fontSize: 15, lineHeight: 1.5,
-              color: "var(--text)",
-              textAlign: "left", maxWidth: 720, margin: "14px auto 0",
+              marginTop: 18, padding: "16px 20px", maxWidth: 720,
+              marginLeft: "auto", marginRight: "auto",
+              borderRadius: 8, border: "1px solid var(--gold, #d4b962)",
+              background: "linear-gradient(135deg, rgba(212,185,98,0.06), rgba(0,0,0,0.25))",
+              textAlign: "left",
             }}>
               <div style={{
-                fontStyle: "normal", fontSize: 11, letterSpacing: 2,
-                color: "var(--gold)", textTransform: "uppercase",
-                marginBottom: 6, fontWeight: 700,
-              }}>📣 Commentator's call</div>
-              “{reveal.commentary}”
+                fontSize: 11, letterSpacing: 2, color: "var(--gold, #d4b962)",
+                textTransform: "uppercase", marginBottom: 10, fontWeight: 700,
+                display: "flex", alignItems: "center", gap: 8,
+              }}>
+                🎙️ Post-fight analysis
+              </div>
+              <blockquote style={{
+                margin: 0, padding: 0,
+                fontFamily: "var(--font-display), 'Rajdhani', ui-serif, serif",
+                fontStyle: "italic", fontSize: 17, lineHeight: 1.5,
+                color: "var(--text)", quotes: "\"“\" \"”\"",
+              }}>
+                {reveal.commentary}
+              </blockquote>
+              <div style={{
+                marginTop: 10, textAlign: "right",
+                fontSize: 12, color: "var(--dim)", letterSpacing: 1,
+              }}>
+                — the commentator
+              </div>
             </div>
           )}
         </div>
