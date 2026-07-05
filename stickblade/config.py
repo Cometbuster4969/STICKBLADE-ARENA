@@ -48,6 +48,14 @@ GEMINI_MODEL = os.environ.get("STICKBLADE_GEMINI_MODEL", "gemini-2.0-flash")
 # OpenRouter: one key -> 100+ models (https://openrouter.ai/keys)
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+# Groq: independent OpenAI-compatible provider, 500+ tokens/sec, generous
+# free tier (30 req/min, no daily cap on most models). Added specifically
+# to remove the single-provider dependency on OpenRouter — when OR throttles
+# or goes down, the retry ladder falls over to Groq automatically.
+# Get a key at https://console.groq.com/keys.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_BASE    = "https://api.groq.com/openai/v1"
 # Models offered in the web arena (id -> display name).
 # ":free" variants cost $0 (list verified live against the OpenRouter catalog
 # 2026-06; the free pool rotates, so refresh occasionally).
@@ -78,6 +86,19 @@ ARENA_MODELS = {
     # ---- paid (cheap, billed via OpenRouter credits) ----
     "openai/gpt-4o-mini":                         "GPT-4o mini",
     # anthropic/claude-3.5-haiku — pulled by OpenRouter (404 as of 2026-06-30)
+    # ---- Groq (independent provider, 500+ tok/s, 14,400 req/day free) ----
+    # These are prefixed 'groq:' internally so the make_brain() router can
+    # tell them apart from OpenRouter ids (which contain '/'). Free tier
+    # ceiling is ~288x OpenRouter's — reserved as the primary failover
+    # target when OpenRouter throttles.
+    "groq:llama-3.3-70b-versatile":               "Llama 3.3 70B (Groq)",
+    "groq:llama-3.1-8b-instant":                  "Llama 3.1 8B (Groq, fast)",
+    "groq:llama-4-scout-17b-16e-instruct":        "Llama 4 Scout 17B (Groq)",
+    "groq:qwen/qwen3-32b":                        "Qwen3 32B (Groq)",
+    "groq:openai/gpt-oss-120b":                   "GPT-OSS 120B (Groq)",
+    "groq:openai/gpt-oss-20b":                    "GPT-OSS 20B (Groq)",
+    "groq:deepseek-r1-distill-llama-70b":         "DeepSeek R1 Distill 70B (Groq)",
+    "groq:moonshotai/kimi-k2-instruct":           "Kimi K2 (Groq)",
     # ---- no API needed ----
     "mock:duelist":                               "Mock Duelist (no API)",
     "mock:berserker":                             "Mock Berserker (no API)",
