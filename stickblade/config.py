@@ -93,7 +93,7 @@ ARENA_MODELS = {
     # target when OpenRouter throttles.
     "groq:llama-3.3-70b-versatile":               "Llama 3.3 70B (Groq)",
     "groq:llama-3.1-8b-instant":                  "Llama 3.1 8B (Groq, fast)",
-    "groq:llama-4-scout-17b-16e-instruct":        "Llama 4 Scout 17B (Groq)",
+    "groq:meta-llama/llama-4-scout-17b-16e-instruct": "Llama 4 Scout 17B (Groq)",
     "groq:qwen/qwen3-32b":                        "Qwen3 32B (Groq)",
     "groq:openai/gpt-oss-120b":                   "GPT-OSS 120B (Groq)",
     "groq:openai/gpt-oss-20b":                    "GPT-OSS 20B (Groq)",
