@@ -9,7 +9,7 @@ import {
 /**
  * Collapsible BYOK settings panel. Lives in the setup panel above the
  * Fight button. Two states:
- *   - default (no key saved): a single "🔑 Use my own OpenRouter key"
+ *   - default (no key saved): a single "🔑 Use your own OpenRouter key"
  *     button that expands into a paste field + save/cancel
  *   - active (key saved + enabled): a small badge showing the masked
  *     key with "clear" and "disable" actions
@@ -120,7 +120,7 @@ export default function ByokPanel() {
                   padding: "6px 10px", fontSize: 12, cursor: "pointer",
                   letterSpacing: 1,
                 }}>
-          🔑 Use my own OpenRouter key (skip free-tier throttling)
+          🔑 Use your own OpenRouter key (skip free-tier throttling)
         </button>
       </div>
     );
