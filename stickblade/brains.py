@@ -1081,7 +1081,14 @@ class GroqBrain(OpenRouterBrain):
     Groq's endpoint and reads the GROQ_API_KEY env var instead. Models
     are stored with a 'groq:' prefix in ARENA_MODELS but sent to Groq
     with the prefix stripped (e.g. 'groq:llama-3.3-70b-versatile' ->
-    'llama-3.3-70b-versatile')."""
+    'llama-3.3-70b-versatile').
+
+    Overrides decide() and chat() because Groq REJECTS OpenRouter's
+    `reasoning: {enabled, exclude}` object with a 400. Groq uses:
+      * `include_reasoning: false`         (openai/gpt-oss-* models)
+      * `reasoning_format: "hidden"`       (qwen, deepseek reasoning models)
+      * (nothing)                          (vanilla llama, kimi, etc.)
+    """
 
     def __init__(self, sharp_zones, model, label=None, mode="macro",
                  weapon="sword", api_key=None):
@@ -1106,6 +1113,100 @@ class GroqBrain(OpenRouterBrain):
             },
             timeout=C.LLM_TIMEOUT,
         )
+
+    def _groq_reasoning_params(self):
+        """Return a dict of Groq-specific reasoning-disable params for
+        this model (may be empty). Keeps the switch in one place.
+        Vanilla llama/kimi/etc. → {} (nothing to disable).
+        gpt-oss-*                → include_reasoning=False
+        qwen3, deepseek-r1       → reasoning_format='hidden'
+        """
+        m = self.model.lower()
+        if "gpt-oss" in m:
+            # Groq's gpt-oss uses include_reasoning boolean, NOT reasoning_format.
+            # Also accepts reasoning_effort='low' — combined they give us the
+            # equivalent of OR's exclude+low_effort.
+            return {"include_reasoning": False, "reasoning_effort": "low"}
+        if any(t in m for t in ("qwen3", "qwen-3", "deepseek-r1")):
+            # Both families accept reasoning_format=hidden.
+            # qwen3 also accepts reasoning_effort=none for a stronger disable.
+            out = {"reasoning_format": "hidden"}
+            if "qwen" in m:
+                out["reasoning_effort"] = "none"
+            return out
+        return {}
+
+    def decide(self, state):
+        user = json.dumps(state)
+        msgs = [{"role": "system", "content": self.sys}]
+        msgs += self.history[-6:]
+        msgs.append({"role": "user", "content": user})
+        payload = {
+            "model": self.model, "messages": msgs,
+            "temperature": 0.8,
+            # Groq's gpt-oss can still burn tokens even with disable; give
+            # them the same 3x headroom OR gets via _max_tokens_for.
+            "max_tokens": _max_tokens_for(
+                "openai/gpt-oss-120b:free" if "gpt-oss" in self.model.lower()
+                else "", self.mode == "joint"),
+        }
+        payload.update(self._groq_reasoning_params())
+        r = self._client.post("/chat/completions", json=payload)
+        if r.status_code >= 400:
+            err = ""
+            retry_after = 0
+            try:
+                j = r.json()
+                err_obj = j.get("error") or {}
+                err = err_obj.get("message", "")[:200]
+                meta = err_obj.get("metadata") or {}
+                retry_after = meta.get("retry_after_seconds") or 0
+            except Exception:
+                err = r.text[:200] if r.text else ""
+            if r.status_code == 429:
+                # Cool down under the 'groq:'-prefixed key so _COOLDOWN
+                # matches what _buddies_for filters against.
+                _mark_cooldown("groq:" + self.model, retry_after or 15)
+            raise ValueError(f"http_{r.status_code}: {err or r.reason_phrase}")
+        data = r.json()
+        choice = (data.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        txt = msg.get("content")
+        finish = choice.get("finish_reason", "")
+        if (not txt) and finish == "length":
+            raise ValueError(f"reasoning_burnout: {self.model} spent entire "
+                             f"budget on hidden CoT (finish=length, content=null)")
+        if not txt:
+            raise ValueError(f"empty response (finish={finish or 'unknown'})")
+        self.history += [{"role": "user", "content": user},
+                         {"role": "assistant", "content": txt}]
+        return self._clean(_extract_json(txt))
+
+    def chat(self, system, user, max_tokens=80, temperature=0.95):
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user",   "content": user}],
+            "temperature": temperature,
+            "max_tokens": max(max_tokens, 400),
+        }
+        payload.update(self._groq_reasoning_params())
+        r = self._client.post("/chat/completions", json=payload)
+        if r.status_code >= 400:
+            err = ""
+            retry_after = 0
+            try:
+                j = r.json()
+                err_obj = j.get("error") or {}
+                err = err_obj.get("message", "")[:200]
+                meta = err_obj.get("metadata") or {}
+                retry_after = meta.get("retry_after_seconds") or 0
+            except Exception:
+                err = r.text[:200] if r.text else ""
+            if r.status_code == 429:
+                _mark_cooldown("groq:" + self.model, retry_after or 15)
+            raise ValueError(f"http_{r.status_code}: {err or r.reason_phrase}")
+        return r.json()["choices"][0]["message"]["content"] or ""
 
 
 def make_brain(kind, sharp_zones, mode="macro", weapon="sword", api_key=None):
