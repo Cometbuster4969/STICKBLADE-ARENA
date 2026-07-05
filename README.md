@@ -160,7 +160,8 @@ If a model is bad at this, it tells you something MMLU never could — that it c
 - **Resilient LLM layer** — per-model 429 circuit breaker, provider-diverse buddy failover, per-model reasoning policy (`gpt-oss` handled as mandatory-reasoning, `gemma-4`/`nemotron` disabled via `enabled: false`, vanilla models get no reasoning param), and a scripted-fallback banner if the LLMs error out mid-match
 - **Debug endpoints** (`/api/debug/brain_errors`, `/api/debug/cooldowns`, `/api/debug/openrouter_ping`) so you can see exactly why a match fell back without hunting through Space logs
 - **Spectator-friendly replay system:** every match saved as a tiny JSON; share-link plays back deterministically in-browser
-- **21+ free OpenRouter models** in the picker out of the box — bring your own `OPENROUTER_API_KEY` and you're done
+- **29+ free models across TWO independent providers** — 21 from OpenRouter + 8 from Groq (independent LPU-hosted, 288× higher daily quota than OR's free tier). Bring your own `OPENROUTER_API_KEY` and/or `GROQ_API_KEY` and you're done.
+- **Multi-provider failover** — the retry ladder crosses providers automatically. If OpenRouter throttles a Llama call, the next buddy is a Groq-hosted Llama on completely different infrastructure. Removes single-provider dependency as a failure mode.
 - **BYOK (bring-your-own-key)** — the setup panel has a "🔑 Use my own OpenRouter key" toggle. Paste your key (stored in localStorage only), matches then draw from your quota, not ours. Zero throttling, works even if the server has no key of its own. Key is never logged, persisted, or echoed back in any response.
 
 ---
@@ -481,6 +482,7 @@ For mock fighters (no API):
 ## 🛣 Roadmap
 
 Shipped recently (2026-06 → 2026-07 sweep):
+- ✅ **Multi-provider backend (Groq)** — removed the single-provider dependency on OpenRouter. `GroqBrain` (subclass of `OpenRouterBrain`) points at Groq's OpenAI-compatible endpoint; 8 Groq models added to the roster. Buddy pools now interleave Groq entries so a throttled OR match automatically fails over to Groq's independent infrastructure (288× larger daily free tier, 500+ tok/s LPU inference). `/api/health` exposes `has_groq`.
 - ✅ **BYOK (bring-your-own-key)** — paste your OpenRouter key in the setup panel to run matches on your own quota. Key stays in localStorage; server never logs/persists/echoes it. Key is scrubbed from error messages and the `/api/debug/brain_errors` buffer via a regex belt.
 - ✅ **GitHub Sponsors button** — `.github/FUNDING.yml` + footer link on every page so users can chip in ($1/$5/$20 tiers)
 - ✅ **Live wait screen** — pre-fight quips surfaced in ~5-15s, queue-position badge, spoiler-safe combat ticker, per-matchup head-to-head card, recent-duels feed

@@ -283,27 +283,39 @@ def _trim(text, max_words=25):
 # rotates (see tools/verify_models.py).
 
 _BUDDY_POOLS = {
-    # Large / slow / strong. Order = preference: vanilla-first because they
-    # emit shorter, faster, and are more likely to JSON cleanly on the first
-    # try. Reasoning models (gpt-oss, nemotron-super) still work since we
-    # now always send reasoning:{exclude:true}, but they're slightly more
-    # latency-variable, so try them after.
+    # Large / slow / strong. Ordered by preference: OpenRouter vanilla
+    # first (fast + cheap), then cross-provider Groq buddies (independent
+    # infrastructure — the whole point of adding Groq was to have a real
+    # failover when OR throttles or goes down), then OR reasoning models
+    # as the last-resort intra-provider option.
     "large": [
         "nousresearch/hermes-3-llama-3.1-405b:free",
         "qwen/qwen3-coder:free",
+        # Cross-provider: Groq's gpt-oss-120b, different upstream from
+        # OR's OpenInference hosting — hits when OR itself is down.
+        "groq:openai/gpt-oss-120b",
+        "groq:moonshotai/kimi-k2-instruct",
         "openai/gpt-oss-120b:free",
         "nvidia/nemotron-3-super-120b-a12b:free",
     ],
-    # Mid / balanced (fast enough for 15s budget).
+    # Mid / balanced (fast enough for 15s budget). Groq's llama-3.3-70b
+    # is a direct twin of OR's version but runs on Groq's LPU (~10x faster)
+    # with a 288x larger daily quota — best mid-tier failover we have.
     "mid": [
         "meta-llama/llama-3.3-70b-instruct:free",
+        "groq:llama-3.3-70b-versatile",        # cross-provider twin
+        "groq:qwen/qwen3-32b",
         "qwen/qwen3-next-80b-a3b-instruct:free",
+        "groq:llama-4-scout-17b-16e-instruct",
         "google/gemma-4-31b-it:free",
         "google/gemma-4-26b-a4b-it:free",
         "openai/gpt-oss-20b:free",
     ],
-    # Small / fast (good for snap-shot scenarios where speed matters)
+    # Small / fast (good for snap-shot scenarios where speed matters).
+    # Groq's llama-3.1-8b-instant is the fastest LLM on the internet
+    # right now — sub-second responses even under load.
     "small": [
+        "groq:llama-3.1-8b-instant",           # fastest option, cross-provider
         "meta-llama/llama-3.2-3b-instruct:free",
         "liquid/lfm-2.5-1.2b-instruct:free",
         "nvidia/nemotron-nano-9b-v2:free",
@@ -478,6 +490,19 @@ _PROVIDER_HOST = {
     "liquid/lfm-2.5-1.2b-instruct:free":            "liquid",
     # Paid (OR routes to Azure/Anthropic/etc; unlikely to be free-tier-throttled)
     "openai/gpt-4o-mini":                           "azure",
+    # Groq — independent provider entirely (LPU-based, not GPU). Given
+    # a single provider tag so the buddy-diversity sort correctly treats
+    # a same-provider Groq buddy as 'closer' than an OR buddy when the
+    # original was Groq. In practice cross-OR-to-Groq is the failover
+    # we actually care about.
+    "groq:llama-3.3-70b-versatile":                 "groq",
+    "groq:llama-3.1-8b-instant":                    "groq",
+    "groq:llama-4-scout-17b-16e-instruct":          "groq",
+    "groq:qwen/qwen3-32b":                          "groq",
+    "groq:openai/gpt-oss-120b":                     "groq",
+    "groq:openai/gpt-oss-20b":                      "groq",
+    "groq:deepseek-r1-distill-llama-70b":           "groq",
+    "groq:moonshotai/kimi-k2-instruct":             "groq",
 }
 
 
@@ -600,14 +625,29 @@ class Brain:
                 origin_key = auth[7:]
         for buddy_id in _buddies_for(self, k=3 if in_cooldown else 2):
             try:
-                buddy = OpenRouterBrain(
-                    self.sharp, buddy_id,
-                    label=self.label + "→buddy",
-                    mode=self.mode, weapon=self.weapon,
-                    api_key=origin_key if getattr(self, "_byok", False) else None)
+                # Route by prefix: 'groq:*' → GroqBrain (Groq API endpoint),
+                # anything else → OpenRouterBrain. This is the cross-provider
+                # failover in action — a throttled OR buddy pool selection
+                # can drop us onto Groq entirely, using an independent key
+                # against independent infrastructure.
+                if buddy_id.startswith("groq:"):
+                    # BYOK is OR-only for now — don't leak an OR user key
+                    # into a Groq call. Groq falls back to its env var.
+                    buddy = GroqBrain(
+                        self.sharp, buddy_id,
+                        label=self.label + "→buddy",
+                        mode=self.mode, weapon=self.weapon)
+                else:
+                    buddy = OpenRouterBrain(
+                        self.sharp, buddy_id,
+                        label=self.label + "→buddy",
+                        mode=self.mode, weapon=self.weapon,
+                        api_key=origin_key if getattr(self, "_byok", False) else None)
                 attempts.append((buddy, _timeout_for(buddy_id)))
             except Exception:
-                # OpenRouter not configured / brain init failed — skip silently
+                # Provider not configured / brain init failed — skip silently.
+                # If GROQ_API_KEY isn't set, groq: buddies just get skipped
+                # and we fall back to OR-only buddies + mock as before.
                 pass
 
         # If EVERYTHING is cooling down (rare — every buddy 429'd recently)
@@ -1023,6 +1063,51 @@ def commentator_roast(commentator_brain, winner_name, loser_name, method,
         fallback=fallback)
 
 
+# =========================================================================
+# Groq — independent OpenAI-compatible provider.
+# =========================================================================
+# Only differs from OpenRouter in three ways:
+#   1. Base URL (Groq's /openai/v1)
+#   2. Auth key (GROQ_API_KEY env var; BYOK not supported for Groq yet —
+#      users mostly want to unblock OR's tight quota, not Groq's generous one)
+#   3. reasoning param — Groq honors {"reasoning_format": "hidden"} to
+#      request no chain-of-thought in the response (their equivalent of
+#      OR's reasoning.exclude). Non-reasoning models ignore this.
+# Everything else — retry ladder, cooldowns, error surfacing, live ticker,
+# BYOK header stripping — inherits unchanged from OpenRouterBrain.
+# =========================================================================
+class GroqBrain(OpenRouterBrain):
+    """Groq API client. Same shape as OpenRouterBrain but points at
+    Groq's endpoint and reads the GROQ_API_KEY env var instead. Models
+    are stored with a 'groq:' prefix in ARENA_MODELS but sent to Groq
+    with the prefix stripped (e.g. 'groq:llama-3.3-70b-versatile' ->
+    'llama-3.3-70b-versatile')."""
+
+    def __init__(self, sharp_zones, model, label=None, mode="macro",
+                 weapon="sword", api_key=None):
+        # Strip the 'groq:' prefix used by our internal router. Groq's API
+        # doesn't know about that prefix.
+        wire_model = model[5:] if model.startswith("groq:") else model
+        # Bypass OpenRouterBrain.__init__ so we can swap base_url + key
+        # source cleanly. Still inherit its decide()/chat() methods via
+        # class inheritance, which read self._client + self.model.
+        Brain.__init__(self, sharp_zones, mode, weapon)
+        self.model = wire_model
+        self.label = label or wire_model.split("/")[-1][:24]
+        self._byok = False   # BYOK not plumbed through Groq path
+        key = api_key or C.GROQ_API_KEY
+        import httpx
+        self._client = httpx.Client(
+            base_url=C.GROQ_BASE,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "HTTP-Referer": "https://stickblade.arena",
+                "X-Title": "Stickblade Arena",
+            },
+            timeout=C.LLM_TIMEOUT,
+        )
+
+
 def make_brain(kind, sharp_zones, mode="macro", weapon="sword", api_key=None):
     """Build the right Brain subclass for a given kind.
 
@@ -1043,6 +1128,21 @@ def make_brain(kind, sharp_zones, mode="macro", weapon="sword", api_key=None):
     if kind.startswith("mock:"):
         p = kind.split(":", 1)[1]
         return _mock(p if p in PERSONALITIES else "duelist")
+    # Groq model id: "groq:<groq-model-name>" — independent provider,
+    # much larger free-tier ceiling. Routed through GroqBrain (subclass
+    # of OpenRouterBrain) which just swaps base URL + auth key. If
+    # GROQ_API_KEY isn't set, fall through to mock rather than pretending
+    # to succeed — same shape as the OpenRouter branch below.
+    if kind.startswith("groq:"):
+        if C.GROQ_API_KEY:
+            try:
+                return GroqBrain(sharp_zones, kind, mode=mode, weapon=weapon)
+            except Exception as e:
+                print(f"[brains] Groq init failed ({e}); using mock.")
+        else:
+            print(f"[brains] No GROQ_API_KEY — '{kind}' slot uses mock.")
+        label = kind.split(":", 1)[1].split("/")[-1][:20] + "(mock)"
+        return _mock("duelist", label=label)
     # OpenRouter model id (contains "/"), e.g. meta-llama/llama-3.3-70b:free
     if "/" in kind:
         # BYOK wins over env var: if the caller passed api_key, use it

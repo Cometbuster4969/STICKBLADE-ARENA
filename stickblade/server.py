@@ -577,6 +577,7 @@ def health():
         "up": True,
         "version": VERSION,
         "has_openrouter": bool(C.OPENROUTER_API_KEY),
+        "has_groq":       bool(C.GROQ_API_KEY),
         "has_openai":     bool(C.OPENAI_API_KEY),
         "has_gemini":     bool(C.GEMINI_API_KEY),
         "has_supabase":   bool(os.environ.get("SUPABASE_URL")
