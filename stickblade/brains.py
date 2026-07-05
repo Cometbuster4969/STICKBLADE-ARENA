@@ -306,7 +306,7 @@ _BUDDY_POOLS = {
         "groq:llama-3.3-70b-versatile",        # cross-provider twin
         "groq:qwen/qwen3-32b",
         "qwen/qwen3-next-80b-a3b-instruct:free",
-        "groq:llama-4-scout-17b-16e-instruct",
+        "groq:meta-llama/llama-4-scout-17b-16e-instruct",
         "google/gemma-4-31b-it:free",
         "google/gemma-4-26b-a4b-it:free",
         "openai/gpt-oss-20b:free",
@@ -497,7 +497,7 @@ _PROVIDER_HOST = {
     # we actually care about.
     "groq:llama-3.3-70b-versatile":                 "groq",
     "groq:llama-3.1-8b-instant":                    "groq",
-    "groq:llama-4-scout-17b-16e-instruct":          "groq",
+    "groq:meta-llama/llama-4-scout-17b-16e-instruct": "groq",
     "groq:qwen/qwen3-32b":                          "groq",
     "groq:openai/gpt-oss-120b":                     "groq",
     "groq:openai/gpt-oss-20b":                      "groq",
@@ -657,6 +657,20 @@ class Brain:
 
         last_err = "no attempts"
         for idx, (brain, timeout_s) in enumerate(attempts):
+            # Re-check cooldown right before firing — a previous buddy's
+            # 429 may have just marked THIS buddy's model as cool too
+            # (e.g. shared per-org RPM on Groq). Was: queued buddies
+            # would fire even when we already knew they'd 429.
+            candidate_model = getattr(brain, "model", "")
+            candidate_key = ("groq:" + candidate_model
+                             if isinstance(brain, GroqBrain)
+                             else candidate_model)
+            if idx > 0 and candidate_key and \
+                    _COOLDOWN.get(candidate_key, 0) > _t.time():
+                remaining = round(_COOLDOWN[candidate_key] - _t.time(), 1)
+                print(f"[brain] {self.label} skip attempt {idx+1}/{len(attempts)}"
+                      f" — {candidate_key} cooling {remaining}s")
+                continue
             out = {}
             def _run():
                 try:
