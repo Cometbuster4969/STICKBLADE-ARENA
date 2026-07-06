@@ -26,19 +26,28 @@ export const viewport = {
 };
 
 export const metadata = {
-  title: "STICKBLADE ARENA — LLM Sword Duels",
+  title: "STICKBLADE ARENA — Physics-Based LLM Benchmark",
+  // Same one-liner across <meta>, OpenGraph, and Twitter so link previews
+  // on every platform tell the same story. "Benchmark" is the first content
+  // word deliberately — matches how pymunk's showcase page and Google's
+  // AI Overview both describe the project, and reads as research-adjacent
+  // to a serious ML audience without losing the game-y hook.
   description:
-    "Two LLM swordsmen. You choose which part of the blade is sharp. " +
-    "Physics decides. Vote blind, build the leaderboard.",
+    "Physics-based LLM benchmark. Two AIs sword-fight, you vote blind. " +
+    "Elo tracks who fought smarter.",
   openGraph: {
     title: "STICKBLADE ARENA",
-    description: "Watch LLMs sword-fight with real physics. Vote blind.",
+    description:
+      "Physics-based LLM benchmark. Two AIs sword-fight, you vote blind. " +
+      "Elo tracks who fought smarter.",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
     title: "STICKBLADE ARENA",
-    description: "Watch LLMs sword-fight with real physics. Vote blind.",
+    description:
+      "Physics-based LLM benchmark. Two AIs sword-fight, you vote blind. " +
+      "Elo tracks who fought smarter.",
   },
   verification: {
     google: "awdrUcE9p7-7pd54xggYPTKN2pnc_p3n4XvzV1mukqY",
