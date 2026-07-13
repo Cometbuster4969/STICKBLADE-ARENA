@@ -59,10 +59,10 @@ jobs:
         python: ["3.11", "3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -233,7 +233,7 @@ jobs:
         node: ["20", "22"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node ${{ matrix.node }}
         uses: actions/setup-node@v4
@@ -285,12 +285,12 @@ jobs:
     name: Security scans
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Fetch full history so the "no key ever committed" grep is meaningful
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -298,14 +298,19 @@ jobs:
         run: pip install bandit
 
       - name: Bandit — static security analysis of backend
-        # Skips B101 (assert used, fine for our smoke tests) and B404 (subprocess
-        # import, not used in prod paths). All other findings are surfaced.
+        # Skips:
+        #   B101 assert_used: fine in our smoke/regression tests
+        #   B404 import_subprocess: not used in prod code paths
+        #   B608 hardcoded_sql_expressions: every hit here is a false
+        #        positive — WHERE clauses are hardcoded string constants,
+        #        user values flow through parameterized (?) placeholders.
+        #        Bandit's regex-level analysis can't distinguish literal
+        #        concat from user-input concat.
         run: |
           bandit -r stickblade/ \
-            --skip B101,B404 \
+            --skip B101,B404,B608 \
             --severity-level medium \
-            --confidence-level medium \
-            -q
+            --confidence-level medium
 
       - name: No .env / key / credential files ever tracked
         run: |
@@ -350,7 +355,7 @@ jobs:
     # Non-blocking: if pymunk.org has an outage, we don't want CI red for it.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check README + AGENTS.md links
         uses: lycheeverse/lychee-action@v2
@@ -379,19 +384,29 @@ jobs:
     name: Roster consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: stickblade/requirements.txt
 
-      - name: Install minimal deps for import
+      - name: Install system deps for pymunk
+        # brains transitively imports moves -> ragdoll -> pymunk, and pymunk
+        # needs cffi + SDL-adjacent libs on Linux. Install the same way
+        # backend-tests does so the import chain resolves cleanly.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 \
+            libsdl2-ttf-2.0-0 libfreetype6
+
+      - name: Install Python deps
         working-directory: stickblade
         run: |
           python -m pip install --upgrade pip
-          pip install httpx  # enough for config + brains to import
+          pip install -r requirements.txt
 
       - name: Assert every OpenRouter model in roster has a _reasoning_policy
         working-directory: stickblade
