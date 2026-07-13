@@ -301,7 +301,11 @@ def run_simulation(mid):
             print(f"[quip] failed: {e}")
         # Budget SIM frames only — LLM thinking time must not eat the match.
         # Hard wall-clock ceiling protects against a hung brain.
-        deadline = _t.time() + 45 * 60
+        # 3 min is generous — a normal 24-turn match with two real LLMs
+        # completes in 60-120s. Was 45 min (leftover debug value) which
+        # meant a single hung brain could block the worker queue for
+        # nearly an hour, DoS'ing every queued match behind it.
+        deadline = _t.time() + 3 * 60
         sim_frames = 0
         # Live wait-screen ticker: publish each turn to LIVE_STATE the moment
         # it finalizes (hits appended). Rule: match.log[i] is finalized once
