@@ -461,8 +461,7 @@ before committing. These are `.gitignore`'d but visible in `git status`.
 - ❌ **Don't paraphrase official copy the user wrote.** README frontmatter,
   onboarding card text, quips — preserve exact wording unless asked to
   rewrite.
-- ❌ **Don't cold-tag anyone on user's social posts.** The user has a
-  standing rule against needy tagging.
+
 - ❌ **Don't recommend paid tools without a fit check.** The user prefers
   free-tier solutions and calls out unnecessary spend.
 - ❌ **Don't delete files without clear reason.** Some seemingly-dead
