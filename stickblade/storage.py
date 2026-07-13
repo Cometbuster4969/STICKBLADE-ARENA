@@ -253,19 +253,35 @@ class LocalStorage:
             sa = {"a": 1.0, "b": 0.0, "draw": 0.5}[choice_model]
             ra2 = ra + K_FACTOR * (sa - ea)
             rb2 = rb + K_FACTOR * ((1.0 - sa) - (1.0 - ea))
-            wa, la, da = ("wins", "losses", "draws")
-            W = "model=? AND sharp=? AND weapon=?"
             ax = (a, sharp, weapon)
             bx = (b, sharp, weapon)
             if choice_model == "a":
-                c.execute(f"UPDATE elo SET rating=?, {wa}={wa}+1 WHERE {W}", (ra2, *ax))
-                c.execute(f"UPDATE elo SET rating=?, {la}={la}+1 WHERE {W}", (rb2, *bx))
+                c.execute(
+                    "UPDATE elo SET rating=?, wins=wins+1"
+                    " WHERE model=? AND sharp=? AND weapon=?",
+                    (ra2, *ax))
+                c.execute(
+                    "UPDATE elo SET rating=?, losses=losses+1"
+                    " WHERE model=? AND sharp=? AND weapon=?",
+                    (rb2, *bx))
             elif choice_model == "b":
-                c.execute(f"UPDATE elo SET rating=?, {la}={la}+1 WHERE {W}", (ra2, *ax))
-                c.execute(f"UPDATE elo SET rating=?, {wa}={wa}+1 WHERE {W}", (rb2, *bx))
+                c.execute(
+                    "UPDATE elo SET rating=?, losses=losses+1"
+                    " WHERE model=? AND sharp=? AND weapon=?",
+                    (ra2, *ax))
+                c.execute(
+                    "UPDATE elo SET rating=?, wins=wins+1"
+                    " WHERE model=? AND sharp=? AND weapon=?",
+                    (rb2, *bx))
             else:
-                c.execute(f"UPDATE elo SET rating=?, {da}={da}+1 WHERE {W}", (ra2, *ax))
-                c.execute(f"UPDATE elo SET rating=?, {da}={da}+1 WHERE {W}", (rb2, *bx))
+                c.execute(
+                    "UPDATE elo SET rating=?, draws=draws+1"
+                    " WHERE model=? AND sharp=? AND weapon=?",
+                    (ra2, *ax))
+                c.execute(
+                    "UPDATE elo SET rating=?, draws=draws+1"
+                    " WHERE model=? AND sharp=? AND weapon=?",
+                    (rb2, *bx))
             c.execute("UPDATE matches SET voted=1 WHERE id=?", (mid,))
         return {"elo_change": {a: round(ra2 - ra, 1), b: round(rb2 - rb, 1)},
                 **self.reveal(mid)}
@@ -364,15 +380,18 @@ class LocalStorage:
 
     def leaderboard(self, sharp=None, weapon=None):
         with self._conn() as c:
-            where, params = [], []
-            if sharp:
-                where.append("sharp=?"); params.append(sharp)
-            if weapon:
-                where.append("weapon=?"); params.append(weapon)
-            if where:
+            if sharp and weapon:
                 rows = c.execute(
-                    "SELECT * FROM elo WHERE " + " AND ".join(where) +
-                    " ORDER BY rating DESC", params).fetchall()
+                    "SELECT * FROM elo WHERE sharp=? AND weapon=?"
+                    " ORDER BY rating DESC", (sharp, weapon)).fetchall()
+            elif sharp:
+                rows = c.execute(
+                    "SELECT * FROM elo WHERE sharp=? ORDER BY rating DESC",
+                    (sharp,)).fetchall()
+            elif weapon:
+                rows = c.execute(
+                    "SELECT * FROM elo WHERE weapon=? ORDER BY rating DESC",
+                    (weapon,)).fetchall()
             else:
                 rows = c.execute(
                     "SELECT model, 'ALL' as sharp, 'ALL' as weapon,"
