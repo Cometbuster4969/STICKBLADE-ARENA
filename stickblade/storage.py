@@ -253,6 +253,11 @@ class LocalStorage:
             sa = {"a": 1.0, "b": 0.0, "draw": 0.5}[choice_model]
             ra2 = ra + K_FACTOR * (sa - ea)
             rb2 = rb + K_FACTOR * ((1.0 - sa) - (1.0 - ea))
+            # Column names ({wa}/{la}/{da}) and WHERE clause ({W}) are Python
+            # string CONSTANTS defined here — never user input. User values
+            # flow through the (ra2, *ax) params tuple (parameterized).
+            # Bandit flags all of these as B608 SQL injection but they aren't;
+            # B608 is globally skipped in .bandit for this reason.
             wa, la, da = ("wins", "losses", "draws")
             W = "model=? AND sharp=? AND weapon=?"
             ax = (a, sharp, weapon)
@@ -370,6 +375,10 @@ class LocalStorage:
             if weapon:
                 where.append("weapon=?"); params.append(weapon)
             if where:
+                # 'where' only ever contains hardcoded strings ("sharp=?",
+                # "weapon=?"); user values go through the `params` tuple
+                # (parameterized). Bandit flags this as B608 — globally
+                # skipped in .bandit for that reason.
                 rows = c.execute(
                     "SELECT * FROM elo WHERE " + " AND ".join(where) +
                     " ORDER BY rating DESC", params).fetchall()
