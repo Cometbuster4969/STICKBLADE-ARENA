@@ -9,6 +9,30 @@ pinned: false
 
 # ⚔ STICKBLADE ARENA
 
+[![CI](https://github.com/Cometbuster4969/STICKBLADE-ARENA/actions/workflows/ci.yml/badge.svg)](https://github.com/Cometbuster4969/STICKBLADE-ARENA/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Live demo](https://img.shields.io/badge/live-stickblade--arena.vercel.app-red)](https://stickblade-arena.vercel.app)
+[![Featured on pymunk](https://img.shields.io/badge/featured-pymunk%20showcase-8b5cf6)](https://www.pymunk.org/en/latest/showcase.html#stickblade-arena)
+
+> 🏆 **Featured on the [Official Pymunk Showcase](https://www.pymunk.org/en/latest/showcase.html#stickblade-arena) (Non-Games)** — praised by library creator [@viblo](https://github.com/viblo): *"I think it's a very cool project!"* → [#5](https://github.com/Cometbuster4969/STICKBLADE-ARENA/issues/5)
+>
+> 🥉 **Product of the Day (Bronze)** on [PeerPush](https://peerpush.com/p/stickblade-arena)
+>
+> 🤖 Cited by Google's AI Overview as *"a brilliant example of gamified AI evaluation"*
+
+## TL;DR — AI Olympics with swords
+
+Two AIs sword-fight in real physics. You pick which part of the blade is dangerous. They fight blind. You vote blind. Elo tracks who's actually better at tactical reasoning under time pressure.
+
+**Live:** [stickblade-arena.vercel.app](https://stickblade-arena.vercel.app) — pick two models, hit Fight, watch a match in ~60 seconds.
+
+**Why it's not a game:** it's an LLM benchmark. Both fighters are language models, not scripted AI. Same idea as [Chatbot Arena](https://lmarena.ai/), but measuring real-time tactical decision-making instead of chat quality. The physics engine is the referee; you're the judge.
+
+---
+
+<details>
+<summary><b>Full technical breakdown (for engineers & researchers)</b> — click to expand</summary>
+
 **A physics-driven benchmark for LLM reasoning, creativity, and real-time decision-making — disguised as a Toribash-style stick-figure sword duel.**
 
 Two large language models step into a 2D physics arena. You decide what part of the weapon is sharp. They fight blind. Physics decides who actually dies. You vote without knowing which model is which. Their Elo updates. Over time, the leaderboard tells you which model is the most *tactically creative* swordsman — separately from how it codes, chats, or writes essays.
@@ -16,6 +40,8 @@ Two large language models step into a 2D physics arena. You decide what part of 
 🌐 **Live:** [stickblade-arena.vercel.app](https://stickblade-arena.vercel.app)
 🛠 **Backend:** FastAPI + pymunk on Hugging Face Spaces
 🎨 **Frontend:** Next.js 15 on Vercel
+
+</details>
 
 ---
 
@@ -481,7 +507,14 @@ For mock fighters (no API):
 
 ## 🛣 Roadmap
 
+External validation (2026-07):
+- 🏆 **Featured on the [Official Pymunk Showcase](https://www.pymunk.org/en/latest/showcase.html#stickblade-arena)** (Non-Games section) by library creator Victor Blomqvist — sits alongside published research projects like AUTO-IceNav and FissionMunk
+- 🥉 **Bronze — Product of the Day on [PeerPush](https://peerpush.com/p/stickblade-arena)** launch race
+- 🤖 Google's AI Overview describes the project as *"a brilliant example of gamified AI evaluation"*
+- 🎥 Match-quality proof: the [replay of GPT-OSS 120B vs Llama 3.3 70B](https://stickblade-arena.vercel.app/replay?id=86c662f9cd56) shows GPT-OSS on turn 7 publishing *"Enemy just hit my head with sword tip; I'm at 59 HP, they at 32.5. Distance 72 is strike range. I need to counter quickly and defend"* — spatial + HP + tactical reasoning in a single turn, then executing it 4 turns later for the kill
+
 Shipped recently (2026-06 → 2026-07 sweep):
+- ✅ **Deadline hardening** — capped per-match wall-clock at 3 min (was 45 min leftover from debug). A hung LLM used to block the worker queue for nearly an hour; now degrades gracefully instead.
 - ✅ **Multi-provider backend (Groq)** — removed the single-provider dependency on OpenRouter. `GroqBrain` (subclass of `OpenRouterBrain`) points at Groq's OpenAI-compatible endpoint; 8 Groq models added to the roster. Buddy pools now interleave Groq entries so a throttled OR match automatically fails over to Groq's independent infrastructure (288× larger daily free tier, 500+ tok/s LPU inference). `/api/health` exposes `has_groq`.
 - ✅ **BYOK (bring-your-own-key)** — paste your OpenRouter key in the setup panel to run matches on your own quota. Key stays in localStorage; server never logs/persists/echoes it. Key is scrubbed from error messages and the `/api/debug/brain_errors` buffer via a regex belt.
 - ✅ **GitHub Sponsors button** — `.github/FUNDING.yml` + footer link on every page so users can chip in ($1/$5/$20 tiers)
