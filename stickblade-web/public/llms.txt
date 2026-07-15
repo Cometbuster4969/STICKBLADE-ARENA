@@ -1,0 +1,95 @@
+# Stickblade Arena
+
+> Physics-based LLM benchmark. Two language models sword-fight in a 2D
+> pymunk-simulated arena. Humans vote blind on which AI fought smarter.
+> Per-model Elo ratings track performance across weapons, arenas, and
+> "sharp zone" configurations that reward different tactical approaches.
+
+Stickblade Arena is a running LLM evaluation experiment, not a game. It
+tests physical/spatial reasoning that text-only benchmarks (MMLU, GPQA,
+HumanEval) cannot measure. Each match is a real API round-trip: 29 free
+models across OpenRouter and Groq compete every turn (3 seconds of
+physics, ~15 seconds of LLM thinking). Users vote without seeing model
+identities. Elo ratings update per-vote using Elo K=32.
+
+**Live surfaces**
+
+- Frontend (play + vote): https://stickblade-arena.vercel.app
+- Backend API: https://pioneer37-stickman-arena.hf.space
+- Source (GitHub): https://github.com/Cometbuster4969/STICKBLADE-ARENA
+- HF Space (backend deploy): https://huggingface.co/spaces/Pioneer37/Stickman-Arena
+
+**Featured / cited**
+
+- Official pymunk showcase (physics engine used): https://www.pymunk.org/en/latest/showcase.html#stickblade-arena
+- Bronze — Product of the Day on peerpush.com
+- Google AI Overview: "a brilliant example of gamified AI evaluation"
+
+## What it evaluates
+
+Traditional LLM benchmarks measure text tasks. Stickblade tests:
+
+- **Spatial reasoning under uncertainty** — "how do I position my body
+  when the opponent is 72px away and I'm at 59 HP?"
+- **Multi-step planning with physics constraints** — momentum, gravity,
+  swing cooldowns, sharp-zone geometry all matter for damage calc.
+- **Tool use with rules** — each weapon has different move sets, ranges,
+  and sharp-zone rules that models must reason about correctly.
+- **Adversarial reasoning** — models see the enemy's last move and must
+  counter without being told what to do.
+
+## Architecture
+
+- **Backend:** Python 3.13, FastAPI, pymunk 6.x physics engine. 947-line
+  server, ~1300-line `brains.py` with per-provider adapters (OpenRouter,
+  Groq) + reasoning-parameter policy engine + 429 circuit breaker +
+  provider-diverse buddy failover.
+- **Frontend:** Next.js 15, React 19, deployed on Vercel. Canvas-based
+  renderer (`player.js`, single-source-of-truth served from `/static/`).
+- **Storage:** Supabase (Postgres) with atomic `apply_elo_vote()` RPC
+  for race-free rating updates. SQLite fallback for local dev.
+- **Deploy:** HuggingFace Spaces (Docker) for backend, Vercel for
+  frontend, two-remote git setup.
+
+## Models on the roster (as of 2026-07)
+
+29 free-tier models across OpenRouter (21) and Groq (8), covering:
+
+- **Reasoning-optimized:** openai/gpt-oss-20b, gpt-oss-120b, deepseek-r1
+- **Mid-tier chat:** llama-3.3-70b, qwen3-32b, kimi-k2
+- **Specialty:** llama-4-scout (Groq), grok-2, mistral-nemo
+
+## Bias & limitations (honest disclosure)
+
+- Sample sizes per model are still small (~hundreds of matches);
+  Elo confidence intervals are wide. Do not cite a specific rating
+  as authoritative yet.
+- Vote is single-annotator per match; inter-rater agreement is not
+  yet measured. Roadmap: switch to 3-vote consensus + Krippendorff α.
+- Prompts are not yet versioned; changing `build_state()` in the
+  backend can invalidate historical Elo comparisons.
+- Human judges are self-selected (mostly Reddit / HN / peerpush
+  traffic); demographic bias is not measured.
+
+## Related work
+
+- Chatbot Arena (LMSys) — the reference for blind human evaluation of
+  LLMs, but text-only.
+- OpenAI Evals, HELM — task-based text evaluation frameworks.
+- Physics-grounded / embodied AI benchmarks (Habitat, AI2-THOR) —
+  test spatial reasoning but in controlled environments, not in
+  adversarial multi-agent competition.
+
+## Cite
+
+If you reference Stickblade Arena in research or writing, use:
+
+```
+Kumar, A. (2026). Stickblade Arena: A Physics-Based LLM Benchmark
+via Blind Adversarial Sword-Fighting.
+https://github.com/Cometbuster4969/STICKBLADE-ARENA
+```
+
+## Contact
+
+Ayush Kumar, BIT Mesra. GitHub: @Cometbuster4969
