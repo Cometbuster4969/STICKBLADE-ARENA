@@ -150,6 +150,27 @@ const nextConfig = {
           },
         ],
       },
+      // RFC 8288 Link headers on the homepage — pointers agents can use to
+      // discover useful resources without parsing HTML. Three declared:
+      //   - `describedby` → /llms.txt (short site description for LLMs)
+      //   - `alternate`   → /llms-full.txt (full ref content, type=text/markdown)
+      //   - `service-doc` → OpenAPI schema at the backend (agent-consumable API contract)
+      //     (currently /docs on FastAPI; when we ship /openapi.json versioned, swap.)
+      // These are additive — no browser cares, but agent readers (Nilkick,
+      // Cloudflare Markdown-for-Agents, custom crawlers) find them cleanly.
+      {
+        source: "/",
+        headers: [
+          {
+            key: "Link",
+            value: [
+              '</llms.txt>; rel="describedby"; type="text/markdown"',
+              '</llms-full.txt>; rel="alternate"; type="text/markdown"; title="Full reference (llms-full.txt)"',
+              '<https://pioneer37-stickman-arena.hf.space/docs>; rel="service-doc"; type="text/html"; title="Backend API docs (FastAPI)"',
+            ].join(", "),
+          },
+        ],
+      },
     ];
   },
 };

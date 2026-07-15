@@ -1,0 +1,322 @@
+# Stickblade Arena — Full Reference (llms-full.txt)
+
+> Physics-based LLM benchmark. Two language models sword-fight in a 2D
+> pymunk-simulated arena. Humans vote blind on which AI fought smarter.
+> Per-model Elo ratings track performance across weapons, arenas, and
+> "sharp zone" configurations that reward different tactical approaches.
+
+This is the expanded companion to /llms.txt. It contains the complete
+reference content of the site as a single machine-readable markdown
+document, per the llmstxt.org specification. LLM agents can consume
+this file to answer any question about Stickblade Arena without
+crawling the rendered HTML pages.
+
+---
+
+## Live Surfaces
+
+| Surface        | URL                                                                         |
+| -------------- | --------------------------------------------------------------------------- |
+| Frontend       | https://stickblade-arena.vercel.app                                         |
+| Backend API    | https://pioneer37-stickman-arena.hf.space                                   |
+| GitHub source  | https://github.com/Cometbuster4969/STICKBLADE-ARENA                         |
+| HF Space       | https://huggingface.co/spaces/Pioneer37/Stickman-Arena                      |
+| Pymunk feature | https://www.pymunk.org/en/latest/showcase.html#stickblade-arena             |
+| Sponsor        | https://github.com/sponsors/Cometbuster4969                                 |
+
+---
+
+## What Stickblade Arena Actually Is
+
+Stickblade Arena is a **running LLM evaluation experiment**, not a
+game. It tests physical/spatial reasoning that text-only benchmarks
+(MMLU, GPQA, HumanEval, HELM) cannot measure. Every match is a real
+API round-trip: two language models sitting at the exact same context
+(HP, position, distance, weapon, arena modifier, opponent's last move)
+must each pick their next action every 3 seconds of simulated physics.
+Users watch the fight play out, vote blind on who fought smarter, and
+per-model Elo ratings update.
+
+Positioning quotes:
+- Google AI Overview: *"a brilliant example of gamified AI evaluation"*
+- Official Pymunk showcase (non-games): featured 2026
+- PeerPush: Bronze — Product of the Day
+
+---
+
+## What Gets Measured
+
+Traditional LLM benchmarks measure text tasks (question answering,
+code completion, reasoning chains). Stickblade tests four axes those
+benchmarks miss:
+
+1. **Spatial reasoning under uncertainty.** "The enemy is 72px away,
+   I'm at 59 HP, my last swing missed. What's my optimal action given
+   my current velocity and momentum?" No text-only benchmark surfaces
+   this class of decision.
+2. **Multi-step planning with physics constraints.** Momentum, gravity,
+   swing cooldowns, hit rectangles, and sharp-zone geometry all affect
+   damage. Models that plan 2-3 turns ahead beat greedy models.
+3. **Tool use with distinct rule sets.** Each weapon has different
+   move sets, ranges, wind-up times, sharp zones, and damage curves.
+   A model that dominates with a sword may lose with a spear or bow.
+4. **Adversarial reasoning.** Each model sees the opponent's last
+   action and current state. It must counter *without* being told
+   what to do. No system prompt says "the opponent used quick_shot,
+   here's the correct response" — the model must infer that.
+
+---
+
+## Architecture
+
+### Backend
+- **Language:** Python 3.13
+- **Web framework:** FastAPI (~947-line server.py)
+- **Physics:** pymunk 6.x (2D rigid-body sim from Chipmunk2D)
+- **LLM router:** custom `brains.py` (~1296 lines) — per-provider
+  adapters (OpenRouter, Groq), reasoning-parameter policy engine,
+  429 circuit breaker with `retry_after_seconds` parsing, provider-
+  diverse buddy failover pool.
+- **Storage:** Supabase (Postgres) with atomic `apply_elo_vote()` RPC
+  for race-free rating updates. SQLite fallback for local dev.
+- **Deploy:** Docker on Hugging Face Spaces.
+
+### Frontend
+- **Framework:** Next.js 15, React 19
+- **Rendering:** Canvas-based (`player.js` served as static asset)
+- **Deploy:** Vercel
+- **Analytics:** Vercel Web Analytics + Speed Insights
+
+### CI
+- **Provider:** GitHub Actions (`.github/workflows/ci.yml`, ~449 lines)
+- **Jobs:** 8 parallel — matrix backend tests on Python 3.11/3.12/3.13,
+  frontend build on Node 20/22, Bandit security scan, secret history
+  scan, roster consistency check, link check (README + AGENTS.md),
+  summary gate.
+- **Latest run:** green in ~1m 0s (was 13m 24s on first run pre-cache).
+
+---
+
+## Model Roster (as of 2026-07-15)
+
+**29 free-tier models** across two providers:
+
+### OpenRouter (21 models)
+Reasoning-optimized:
+- `openai/gpt-oss-20b:free`
+- `openai/gpt-oss-120b:free`
+- `deepseek/deepseek-r1:free`
+
+Mid-tier chat:
+- `meta-llama/llama-3.3-70b-instruct:free`
+- `qwen/qwen3-32b:free`
+- `moonshotai/kimi-k2:free`
+- `google/gemma-2-9b-it:free`
+- (14 others across mistral, cohere, laguna, nemotron families)
+
+### Groq (8 models)
+- `llama-3.3-70b-versatile`
+- `llama-3.1-8b-instant`
+- `meta-llama/llama-4-scout-17b-16e-instruct`
+- `openai/gpt-oss-20b`
+- `openai/gpt-oss-120b`
+- `qwen/qwen3-32b`
+- `moonshotai/kimi-k2-instruct`
+- `deepseek-r1-distill-llama-70b`
+
+### Reasoning-parameter matrix
+
+Different model families require different reasoning-param payloads;
+sending the wrong shape returns 400 or silently disables reasoning.
+The catalog-driven policy in `brains._reasoning_policy(model_id)`:
+
+| Family                        | Provider   | Params                                                        |
+| ----------------------------- | ---------- | ------------------------------------------------------------- |
+| `gpt-oss-*` (Groq)            | Groq       | `{"include_reasoning": false, "reasoning_effort": "low"}`     |
+| `qwen3` (Groq)                | Groq       | `{"reasoning_format": "hidden", "reasoning_effort": "none"}`  |
+| `deepseek-r1-distill` (Groq)  | Groq       | `{"reasoning_format": "hidden"}`                              |
+| vanilla llama/kimi/etc (Groq) | Groq       | `{}` (no reasoning params)                                    |
+| `openai/gpt-oss-*:free`       | OpenRouter | `{"effort": "low", "exclude": true}` (mandatory reasoning)    |
+| default OpenRouter            | OpenRouter | `{"enabled": false, "exclude": true}`                         |
+
+---
+
+## Game / Simulation Rules
+
+### Physics constants (`stickblade/config.py`)
+- `FPS = 60`, `DT = 1/120`, `SUBSTEPS = 2`
+- `GRAVITY = (0, -1150.0)`, `SPACE_DAMPING = 0.99` (ice arena: 0.996)
+- `TURN_SECONDS = 3.0`, `MAX_TURNS = 24`, `START_HP = 100.0`
+- `LLM_TIMEOUT = 30.0` (falls back to scripted move)
+
+### Damage model
+- `SHARP_SPEED_MIN = 150.0` — below this, sharp zones only scratch
+- `KILL_HEAD_SPEED = 660.0` — sharp head hit at/above = instant kill
+- `DMG_SCALE = 0.055`, `DMG_CAP = 38.0` (sharp)
+- `BLUNT_SPEED_MIN = 260.0`, `BLUNT_CAP = 6.0` (blunt)
+- `HIT_COOLDOWN = 0.35s`, `SWING_COOLDOWN = 0.55s`
+- Part multipliers: head=1.9, torso=1.25, arm=0.7, leg=0.8
+
+### Weapons (5)
+- **Sword** — balanced, tip is sharp by default
+- **Dagger** — fast swing, short reach
+- **Spear** — long reach, tip-only damage
+- **Bow** — ranged, draw + shot mechanics, gravity-affected arrows
+- **Flail** — chain physics, high blunt damage, hard to control
+
+### Arenas (3)
+- **Default** — standard damping, standard gravity
+- **Ice** — `damping = 0.996` (vs 0.99), shin friction 1.6→0.2, LLM
+  told via system prompt
+- **Low gravity** — g-scale 0.35, affects arrow drop calculations
+
+### Sharp zones
+The user picks which part of the weapon is "sharp" (tip, pommel,
+edge, etc.) before starting the match. Same weapon can play very
+differently depending on this. Sharp zones do slice/kill damage;
+non-sharp zones do bounded blunt damage.
+
+---
+
+## Elo Rating System
+
+### Formula
+Standard Elo, K = 32, per (model, sharp_zone, weapon) tuple:
+```
+ea = 1 / (1 + 10^((rb - ra) / 400))
+sa = {"a": 1.0, "b": 0.0, "draw": 0.5}[choice]
+ra_new = ra + K * (sa - ea)
+rb_new = rb + K * ((1 - sa) - (1 - ea))
+```
+
+### Self-play guard
+If `model_a == model_b` (mirror match), delta is forced to 0 and a
+single draw is logged. Prevents double-updating the same row.
+
+### Atomicity
+- **Supabase (prod):** `apply_elo_vote()` Postgres RPC does the
+  read-modify-write in one atomic transaction with row locks ordered
+  by model asc (deadlock prevention).
+- **SQLite (local dev):** `threading.Lock` fallback.
+
+---
+
+## API Endpoints
+
+Base: `https://pioneer37-stickman-arena.hf.space`
+
+| Method | Path                       | Purpose                                  |
+| ------ | -------------------------- | ---------------------------------------- |
+| GET    | `/api/health`              | Backend liveness + version               |
+| GET    | `/api/models`              | Full roster with metadata                |
+| GET    | `/api/weapons`             | 5 weapons + sharp-zone options           |
+| GET    | `/api/arenas`              | 3 arenas + modifier descriptions         |
+| POST   | `/api/match`               | Create a match; returns match_id         |
+| GET    | `/api/match/{mid}`         | Poll match status (running → done)       |
+| GET    | `/api/match/{mid}/replay`  | Full replay JSON (gzipped ~5KB/turn)     |
+| POST   | `/api/vote`                | Submit a canvas-side vote (a/b/draw)     |
+| GET    | `/api/leaderboard`         | Per-(sharp, weapon) or aggregate         |
+| GET    | `/api/recent`              | Last 20 completed matches                |
+| POST   | `/api/tournament`          | Single-elim bracket                      |
+
+### Rate limits (from `stickblade/security.py`)
+- `RL_MATCHES_PER_HOUR = 50` per IP
+- `RL_REQS_PER_MIN = 120` per IP
+- `MAX_QUEUE = 10` simultaneous pending sims
+- `MAX_MATCHES_PER_DAY = 300` global daily cap (LLM spend ceiling)
+
+### Trust configuration
+- `TRUST_XFF` opt-in only. Default trust chain:
+  x-real-ip → cf-connecting-ip → fly-client-ip → XFF (only if opt-in).
+- BYOK: user-supplied API keys live only in `MATCH_API_KEYS[mid]` for
+  ~30 seconds, then popped in the worker's `try/finally`. Never
+  persisted, never logged, scrubbed from error surfaces via
+  `_KEY_LEAK_RE = re.compile(r"(?i)(bearer|api[_-]?key|token)[=:\s]+\S+|sk-[a-zA-Z0-9_-]{16,}")`.
+
+---
+
+## Security Posture
+
+- **Bandit static analysis:** clean at Medium+ severity (B101, B404,
+  B608 skipped with documented justification — assertions in tests,
+  subprocess not used in prod paths, and SQL uses parameterized `?`
+  placeholders with hardcoded WHERE clauses).
+- **Secret scanning:** full git history scanned in CI for `.env`,
+  `.key`, `.pem`, real API key patterns (sk-or, sk-ant, AKIA, AIza,
+  ghp_). Clean.
+- **CSP:** `default-src 'self'`, `script-src 'self' 'unsafe-inline'
+  'unsafe-eval' https://va.vercel-scripts.com`, `frame-ancestors 'none'`,
+  Trusted Types Report-Only.
+- **HSTS:** `max-age=63072000; includeSubDomains; preload`
+- **COOP:** `same-origin`, **CORP:** `same-origin`
+- **Permissions-Policy:** locks down 15 browser APIs (camera, mic,
+  geolocation, etc.)
+- **CORS:** allowlist (vercel.app + localhost:3000), not `*`.
+
+---
+
+## Honest Limitations (Research Bias Disclosure)
+
+- **Sample size is small.** Elo confidence intervals for individual
+  models are wide. Do not cite a specific rating as authoritative.
+  Roadmap: bootstrap CIs, provisional K=48 for first 5 votes.
+- **Single-annotator voting.** One vote per match = one subjective
+  opinion per data point. Inter-rater agreement is not yet measured.
+  Roadmap: 3-vote consensus + Krippendorff's α.
+- **Prompt is unversioned.** Changing `build_state()` in the backend
+  can invalidate historical Elo comparisons. Roadmap: prompt_version
+  column in elo table.
+- **Self-selected judges.** Users come from Reddit, HN, PeerPush;
+  demographic bias is not measured.
+- **No calibration set.** No known-answer set of "obviously A won"
+  matches to verify user vote accuracy on trivial cases. If accuracy
+  is <90% on obvious cases, the entire signal is contaminated.
+- **No correlation with established benchmarks.** Reviewer's first
+  question: "does top on Stickblade correlate with MMLU / GPQA /
+  Arena-Hard?" We haven't run that yet.
+
+---
+
+## Reproducibility
+
+- Replay JSON is stored per match (~5KB/second, gzipped) — every
+  match is reproducible from state.
+- Match seed persisted via `MATCH_FLIP` dict for A/B canvas assignment.
+- Mock brains (used in smoke tests) are NOT currently seeded, so
+  mock vs mock matches are non-deterministic. Roadmap:
+  `random.seed(int(mid, 16))` in mock init.
+
+---
+
+## Related Work
+
+- **Chatbot Arena (LMSys)** — reference for blind human evaluation
+  of LLMs; text-only.
+- **OpenAI Evals, HELM** — task-based text evaluation frameworks.
+- **Habitat, AI2-THOR** — embodied AI benchmarks; test spatial
+  reasoning but in single-agent scripted environments, not
+  adversarial multi-agent.
+- **Toribash** — physics-based fighting game with real-time joint
+  control; used in some robotics research but not for LLM eval.
+
+Stickblade Arena's specific contribution: **adversarial multi-agent
+LLM evaluation in a fully-simulated physics environment with blind
+human judgment.**
+
+---
+
+## Citation
+
+```
+Kumar, A. (2026). Stickblade Arena: A Physics-Based LLM Benchmark
+via Blind Adversarial Sword-Fighting.
+https://github.com/Cometbuster4969/STICKBLADE-ARENA
+```
+
+## Contact & Contribution
+
+- **Author:** Ayush Kumar (BIT Mesra)
+- **GitHub:** [@Cometbuster4969](https://github.com/Cometbuster4969)
+- **Issues:** https://github.com/Cometbuster4969/STICKBLADE-ARENA/issues
+- **Sponsor:** https://github.com/sponsors/Cometbuster4969
+- **License:** MIT

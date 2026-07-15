@@ -1,0 +1,66 @@
+# Stickblade Arena — robots policy
+#
+# The whole product is a public LLM benchmark. Being indexed / trained on /
+# grounded in AI answers is a feature, not a leak. All bots welcome.
+
+# Content-Signal (contentsignals.org) — machine-readable AI-usage declaration.
+# Legacy crawlers ignore this comment line safely.
+# Content-Signal: ai-train=yes, search=yes, ai-input=yes
+
+User-agent: *
+Allow: /
+
+# Explicit per-bot allow rules (Nilkick Tier-1 agent-readiness signal).
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: DuckAssistBot
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+User-agent: Meta-ExternalFetcher
+Allow: /
+
+User-agent: MistralAI-User
+Allow: /
+
+Sitemap: https://stickblade-arena.vercel.app/sitemap.xml
+Host: https://stickblade-arena.vercel.app
