@@ -28,6 +28,91 @@ actual current line content. If you can't, don't make the claim.
 
 ---
 
+## 0.5. Anti-sycophancy protocol — NON-NEGOTIABLE
+
+Two separate audit sessions (Jul 13 2026) failed the same way: two LLMs
+ping-ponged grades without either re-grepping the code. Each one caved
+to the other's pushback instead of holding a defensible flag. The user
+called it "gaslighting" and was right. This section exists so it never
+happens again.
+
+**Rules for any code audit, security review, or grade you produce on this repo:**
+
+1. **No claim without a `file:line` citation.** If you can't cite
+   `stickblade/security.py:66` or `next.config.mjs:46`, don't make the
+   claim. "I think there's no rate limit" is not allowed. Grep first.
+
+2. **Run this checklist before any grade:**
+   ```bash
+   git log --oneline -10                              # tip commit
+   grep -rn "RL_\|MAX_\|rate_limit\|check_match_allowed" stickblade/
+   grep -rn "TODO\|FIXME\|console\.log" stickblade/ stickblade-web/app stickblade-web/lib
+   grep -n "Content-Security-Policy\|frame-ancestors\|HSTS" stickblade-web/next.config.mjs
+   grep -n "apply_elo_vote\|ON CONFLICT\|FOR UPDATE" stickblade/storage_supabase.py
+   bandit -r stickblade/ --skip B101,B404,B608 --severity-level medium --confidence-level medium
+   ```
+   Every "missing" claim must survive this checklist. If it doesn't,
+   delete the claim, don't hedge it.
+
+3. **Never move a grade based on another LLM's pushback alone.**
+   If another agent (or the user relaying one) says "you're too generous"
+   or "you're too harsh" — that's an input, not evidence. Re-run the
+   checklist. If the facts you cited are still true, hold the grade
+   and defend it with citations. If the facts are wrong, name the
+   specific fact that was wrong and only move the grade for that fact.
+   "Vibes moves" of ±0.3 across the board are the sycophancy tell.
+
+4. **Publish the audit's inputs, not just its outputs.**
+   Every grade must be accompanied by:
+     - the commit SHA it's grading (from `git log`)
+     - the file:line evidence for each dimension
+     - a "what would move this grade" list (concrete, e.g. "add
+       pip-audit to CI → security +0.3")
+   No SHA + no citations = the grade is invalid, refuse to give one.
+
+5. **Grade inflation forensics.** If your first draft came out
+   "impressive prototype, top 5% of solo work" — stop, re-read for
+   emotional adjectives, delete them, re-grade against a public
+   product bar (would this pass a code review at a company that
+   ships LLM eval tools? — not "is this good for a 19yo indie?").
+   The user explicitly does not want the indie-encouragement grade.
+   They want the honest-peer-reviewer grade.
+
+6. **Grade deflation forensics.** If your draft came out harsh
+   because the previous LLM was too generous — stop, that's reactive
+   grading. Re-anchor to the checklist in rule 2. Harshness that
+   isn't backed by a specific failed grep is just contrarianism.
+
+7. **When in disagreement with another audit, produce a diff table:**
+   | Claim | Other audit said | You say | Grep result | Winner |
+   Fill it in with actual grep output. Whoever's facts hold up wins
+   that row. Grade = sum of rows, not vibes.
+
+**Anchor grades (established Jul 13 2026, commit `0abd354`, verified via
+the checklist above):**
+  - Codebase: **8.4 / 10** — modular, 0 TODO/console.log, `config.py`
+    centralizes magic numbers, real error handling. Held back by:
+    `brains.py` 1296L (coherent but fat), no pytest suite, no type
+    hints, no ruff/mypy gate.
+  - Security: **8.7 / 10** — `RL_MATCHES_PER_HOUR=50/IP`,
+    `MAX_MATCHES_PER_DAY=300` global, `MAX_QUEUE=10`, `TRUST_XFF` opt-in
+    with docstring, CSP+HSTS+COOP+Permissions-Policy lockdown, atomic
+    `apply_elo_vote` RPC on Supabase path, `_validate_id` regex guard,
+    full-history secret scan in CI, BYOK zero-log with `_KEY_LEAK_RE`
+    scrubber. Held back by: no dependabot / pip-audit, no CAPTCHA
+    (IP rotation possible), no per-API-key rate limit.
+  - Research-readiness: **5.5 / 10** — blind eval, Elo, replays, 29
+    models real. Missing: dataset dump w/ DOI, N-per-model surfaced,
+    confidence intervals, inter-rater agreement, calibration set,
+    prompt versioning, correlation vs MMLU/GPQA. ~3 focused weekends
+    to reach 7.5.
+
+If you produce a materially different grade, you must show which
+specific line-cited fact from above is now wrong. Otherwise the
+anchor holds.
+
+---
+
 ## 1. How the user works with agents
 
 ### Communication style — mandatory
@@ -461,7 +546,8 @@ before committing. These are `.gitignore`'d but visible in `git status`.
 - ❌ **Don't paraphrase official copy the user wrote.** README frontmatter,
   onboarding card text, quips — preserve exact wording unless asked to
   rewrite.
-
+- ❌ **Don't cold-tag anyone on user's social posts.** The user has a
+  standing rule against needy tagging.
 - ❌ **Don't recommend paid tools without a fit check.** The user prefers
   free-tier solutions and calls out unnecessary spend.
 - ❌ **Don't delete files without clear reason.** Some seemingly-dead
