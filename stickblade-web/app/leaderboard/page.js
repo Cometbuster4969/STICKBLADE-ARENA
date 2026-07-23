@@ -15,15 +15,21 @@ const ZONE_TABS_BY_WEAPON = {
 export default function LeaderboardPage() {
   const [weapon, setWeapon] = useState("");
   const [sharp, setSharp] = useState("");
+  // Tier-S commit 2: mode + arena are first-class eval axes. "" = don't
+  // filter (aggregate across the axis when combined with other filters,
+  // or per-cell rows when at least one filter is set).
+  const [mode, setMode] = useState("");
+  const [arena, setArena] = useState("");
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
   const wId = useId();
 
   useEffect(() => {
-    getLeaderboard(sharp || undefined, weapon || undefined)
+    getLeaderboard(sharp || undefined, weapon || undefined,
+                   mode || undefined, arena || undefined)
       .then(setRows)
       .catch((e) => setErr(e.message));
-  }, [sharp, weapon]);
+  }, [sharp, weapon, mode, arena]);
 
   // If the user switches weapon, drop the sharp filter so we don't request a
   // (weapon, sharp) combo that doesn't exist for the new weapon.
@@ -35,9 +41,11 @@ export default function LeaderboardPage() {
     <div style={{ width: "100%", maxWidth: 760 }}>
       <h2 style={{ margin: "6px 0 4px" }}>Leaderboard</h2>
       <p style={{ color: "var(--dim)", fontSize: 13, marginBottom: 12 }}>
-        Elo from blind human votes — tracked separately per weapon AND per sharp zone.
-        A model that wins with a sharp tip is a fencer; winning with only a sharp pommel
-        takes a whole different strategy. A great fencer may be a terrible bowman.
+        Elo from blind human votes — tracked separately per weapon, sharp zone,
+        control mode, AND arena. A model that dominates macro-mode swordplay
+        may collapse in joint-mode or on the ice arena. The uncertainty
+        column shows the 95% Wilson CI on win-rate; rows under N=10 are
+        marked provisional (?) to prevent over-reading small-sample noise.
       </p>
 
       <label htmlFor={wId} className="lbl">Weapon</label>
@@ -63,6 +71,45 @@ export default function LeaderboardPage() {
             onClick={() => setSharp(z)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSharp(z); } }}>
             {name}
+          </div>
+        ))}
+      </div>
+
+      <label className="lbl">Control mode</label>
+      <div className="zones" style={{ marginBottom: 12 }}>
+        {[["", "All"], ["macro", "🎯 MACRO"], ["joint", "🧠 JOINT"]].map(([m, n]) => (
+          <div key={m}
+            role="button" tabIndex={0} aria-pressed={mode === m}
+            className={"zone" + (mode === m ? " on" : "")}
+            title={m === "joint"
+              ? "LLM drives every joint raw — totally different task from MACRO"
+              : m === "macro"
+                ? "LLM picks tactical moves; engine executes clean swordplay"
+                : "Both modes averaged (aggregate view)"}
+            onClick={() => setMode(m)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setMode(m); } }}>
+            {n}
+          </div>
+        ))}
+      </div>
+
+      <label className="lbl">Arena</label>
+      <div className="zones" style={{ marginBottom: 12 }}>
+        {[["", "All"], ["normal", "🏟 Normal"], ["ice", "❄ Ice"],
+          ["low_gravity", "🌙 Low G"]].map(([a, n]) => (
+          <div key={a}
+            role="button" tabIndex={0} aria-pressed={arena === a}
+            className={"zone" + (arena === a ? " on" : "")}
+            title={a === "ice"
+              ? "Slippery floor — fighters slide on impact"
+              : a === "low_gravity"
+                ? "Moon-ish gravity — bigger arcs, slower falls"
+                : a === "normal"
+                  ? "Standard physics"
+                  : "All arenas averaged"}
+            onClick={() => setArena(a)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setArena(a); } }}>
+            {n}
           </div>
         ))}
       </div>

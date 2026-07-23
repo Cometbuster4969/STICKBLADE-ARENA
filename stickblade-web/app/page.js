@@ -31,20 +31,32 @@ const ARENAS = [
   ["low_gravity", "🌙 LOW G"],
 ];
 
-// ----- predict-streak (localStorage) ----------------------------------------
+// ----- predict-streak + accuracy (localStorage) -----------------------------
+// Two counters:
+//   sba.predictStreak / sba.predictBest — current + all-time-best streak
+//   sba.predictWins   / sba.predictTotal — lifetime accuracy denominator
+// Accuracy is stored separately from streak so a wrong prediction doesn't
+// wipe historical hit-rate — just resets the current streak.
 const STREAK_KEY = "sba.predictStreak";
 const STREAK_BEST_KEY = "sba.predictBest";
+const PREDICT_WINS_KEY = "sba.predictWins";
+const PREDICT_TOTAL_KEY = "sba.predictTotal";
 function readStreak() {
-  if (typeof window === "undefined") return { cur: 0, best: 0 };
+  if (typeof window === "undefined")
+    return { cur: 0, best: 0, wins: 0, total: 0 };
   return {
-    cur:  parseInt(localStorage.getItem(STREAK_KEY) || "0", 10) || 0,
-    best: parseInt(localStorage.getItem(STREAK_BEST_KEY) || "0", 10) || 0,
+    cur:   parseInt(localStorage.getItem(STREAK_KEY) || "0", 10) || 0,
+    best:  parseInt(localStorage.getItem(STREAK_BEST_KEY) || "0", 10) || 0,
+    wins:  parseInt(localStorage.getItem(PREDICT_WINS_KEY) || "0", 10) || 0,
+    total: parseInt(localStorage.getItem(PREDICT_TOTAL_KEY) || "0", 10) || 0,
   };
 }
-function writeStreak({ cur, best }) {
+function writeStreak({ cur, best, wins, total }) {
   try {
     localStorage.setItem(STREAK_KEY, String(cur));
     localStorage.setItem(STREAK_BEST_KEY, String(best));
+    localStorage.setItem(PREDICT_WINS_KEY, String(wins));
+    localStorage.setItem(PREDICT_TOTAL_KEY, String(total));
   } catch (_) { /* private mode */ }
 }
 
@@ -71,7 +83,7 @@ export default function FightPage() {
   const [canVote, setCanVote] = useState(false);
   const [reveal, setReveal] = useState(null);
   const [prediction, setPrediction] = useState(null);   // "a" | "b" | "draw" | null
-  const [streak, setStreak] = useState({ cur: 0, best: 0 });
+  const [streak, setStreak] = useState({ cur: 0, best: 0, wins: 0, total: 0 });
   const [lastResult, setLastResult] = useState(null);   // "correct" | "wrong" | null
 
   const [lb, setLb] = useState([]);
@@ -166,15 +178,22 @@ export default function FightPage() {
     try {
       const r = await postVote(matchId, choice);
       setReveal(r);
-      // Update predict-streak if the user predicted before the match.
+      // Update predict-streak + lifetime accuracy if the user predicted
+      // before the match. Accuracy denominator (`total`) is incremented
+      // on every predicted vote regardless of outcome; wins tracks the
+      // numerator. Current streak resets on a miss but best-streak and
+      // accuracy persist forever.
       if (prediction) {
         // The "engine_winner_side" is canvas-side ("a"=green, "b"=blue),
         // matching what the user predicted before the fight.
         const engineWinner = r.engine_winner_side;
         const correct = prediction === engineWinner;
-        const next = correct
-          ? { cur: streak.cur + 1, best: Math.max(streak.best, streak.cur + 1) }
-          : { cur: 0, best: streak.best };
+        const nextCur   = correct ? streak.cur + 1 : 0;
+        const nextBest  = Math.max(streak.best, nextCur);
+        const nextWins  = streak.wins + (correct ? 1 : 0);
+        const nextTotal = streak.total + 1;
+        const next = { cur: nextCur, best: nextBest,
+                       wins: nextWins, total: nextTotal };
         setStreak(next);
         writeStreak(next);
         setLastResult(correct ? "correct" : "wrong");
@@ -412,16 +431,51 @@ export default function FightPage() {
         </div>
       )}
 
-      {/* ---------- Vote ---------- */}
+      {/* ---------- Vote ----------
+          The vote IS the reward gate. Everything the user actually wants
+          to know — which model each fighter was, Elo change, whether
+          their prediction was right — stays hidden until they click.
+          Copy makes the trade explicit; without this ~70% of visitors
+          skip voting because they don't realize the reveal is locked
+          behind it (the prediction dopamine already fired, they leave). */}
       {canVote && (
-        <div className="vote-row">
-          <button className="vote-a" onClick={() => vote("a")}>
-            🗳 Fighter A fought better
-          </button>
-          <button className="vote-draw" onClick={() => vote("draw")}>Draw</button>
-          <button className="vote-b" onClick={() => vote("b")}>
-            Fighter B fought better 🗳
-          </button>
+        <div className="panel" style={{ padding: 14, textAlign: "center",
+                                        borderColor: "var(--gold, #d4b962)",
+                                        borderStyle: "solid" }}>
+          <div style={{ fontSize: 11, letterSpacing: 2, fontWeight: 700,
+                        color: "var(--gold, #d4b962)", textTransform: "uppercase",
+                        marginBottom: 8 }}>
+            🔒 Models hidden — vote to reveal
+          </div>
+          <p style={{ color: "var(--dim)", fontSize: 13, marginBottom: 12,
+                      maxWidth: 520, marginLeft: "auto", marginRight: "auto" }}>
+            Voting unlocks: <b style={{ color: "var(--text)" }}>model names</b>,
+            {" "}<b style={{ color: "var(--text)" }}>Elo change</b>
+            {prediction ? <>, and <b style={{ color: "var(--text)" }}>whether
+              your prediction was right</b>.</> : "."}
+            {" "}It's blind on purpose — your vote counts most before you know.
+          </p>
+          <div className="vote-row">
+            <button className="vote-a" onClick={() => vote("a")}>
+              👑 Fighter A
+            </button>
+            <button className="vote-draw" onClick={() => vote("draw")}>Draw</button>
+            <button className="vote-b" onClick={() => vote("b")}>
+              Fighter B 👑
+            </button>
+          </div>
+          {streak.total > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--dim)",
+                          letterSpacing: 1 }}>
+              your predictions:
+              {" "}<b style={{ color: "var(--gold)" }}>{streak.wins}</b>/{streak.total}
+              {" "}({Math.round((streak.wins / streak.total) * 100)}%)
+              <span style={{ margin: "0 6px", color: "var(--mute)" }}>·</span>
+              streak <b style={{ color: "var(--gold)" }}>{streak.cur}</b>
+              <span style={{ margin: "0 6px", color: "var(--mute)" }}>·</span>
+              best <b style={{ color: "var(--text)" }}>{streak.best}</b>
+            </div>
+          )}
         </div>
       )}
 

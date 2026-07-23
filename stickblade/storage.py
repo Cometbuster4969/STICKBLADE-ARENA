@@ -38,6 +38,15 @@ class LocalStorage:
                 model_a TEXT, model_b TEXT,
                 sharp TEXT,
                 weapon TEXT DEFAULT 'sword',
+                -- Mode (macro | joint) and arena (normal | ice | low_gravity)
+                -- are part of the eval axis — different control regime or
+                -- physics = different rating cell. Persisted per-match so
+                -- votes update the RIGHT elo row instead of silently
+                -- clobbering the (macro, normal) default. Both default to
+                -- their "vanilla" values so any pre-existing INSERTs that
+                -- don't set them behave exactly as before the migration.
+                mode TEXT DEFAULT 'macro',
+                arena TEXT DEFAULT 'normal',
                 status TEXT,            -- queued | running | done | error
                 winner_side TEXT,       -- a | b | draw | NULL  (canvas-side: a=green, b=blue)
                 method TEXT,
@@ -53,14 +62,21 @@ class LocalStorage:
                 match_id TEXT, created REAL,
                 choice TEXT              -- a | b | draw
             );
+            -- Elo is segmented per (model, sharp, weapon, mode, arena). Prior
+            -- schema had (model, sharp, weapon) — the mode/arena migration
+            -- below promotes the PK for existing installs. Rows created
+            -- before the migration are treated as (macro, normal), which
+            -- is what production had been running all along.
             CREATE TABLE IF NOT EXISTS elo (
                 model TEXT,
                 sharp TEXT,
                 weapon TEXT DEFAULT 'sword',
+                mode TEXT DEFAULT 'macro',
+                arena TEXT DEFAULT 'normal',
                 rating REAL,
                 wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0,
                 draws INTEGER DEFAULT 0,
-                PRIMARY KEY (model, sharp, weapon)
+                PRIMARY KEY (model, sharp, weapon, mode, arena)
             );
             CREATE TABLE IF NOT EXISTS tournaments (
                 id            TEXT PRIMARY KEY,
@@ -94,22 +110,91 @@ class LocalStorage:
                 "ALTER TABLE matches ADD COLUMN weapon TEXT DEFAULT 'sword'",
                 "ALTER TABLE matches ADD COLUMN flip   INTEGER DEFAULT 0",
                 "ALTER TABLE matches ADD COLUMN commentary TEXT",
+                "ALTER TABLE matches ADD COLUMN mode   TEXT DEFAULT 'macro'",
+                "ALTER TABLE matches ADD COLUMN arena  TEXT DEFAULT 'normal'",
                 "ALTER TABLE elo     ADD COLUMN weapon TEXT DEFAULT 'sword'",
+                "ALTER TABLE elo     ADD COLUMN mode   TEXT DEFAULT 'macro'",
+                "ALTER TABLE elo     ADD COLUMN arena  TEXT DEFAULT 'normal'",
             ]:
                 try:
                     c.execute(ddl)
                 except sqlite3.OperationalError:
                     pass  # column already there
+            # ------ PK promotion on `elo`: (model,sharp,weapon) -> +(mode,arena)
+            # SQLite can't ALTER a PK. If the existing `elo` PK doesn't
+            # include mode+arena, we rebuild the table (create-copy-swap)
+            # inside a txn so a crash mid-migration doesn't leave a broken
+            # schema. Detection: look at pragma index list to see if the
+            # existing PK includes 'mode'.
+            try:
+                cols = c.execute("PRAGMA table_info(elo)").fetchall()
+                pk_cols = {row["name"] for row in cols if row["pk"]}
+                needs_promotion = "mode" not in pk_cols or "arena" not in pk_cols
+            except sqlite3.OperationalError:
+                needs_promotion = False
+            if needs_promotion:
+                # Backfill NULLs on any pre-existing rows so the composite
+                # PK is well-defined (COALESCE isn't cheap; explicit UPDATE
+                # runs once at migration time).
+                c.execute("UPDATE elo SET mode  = COALESCE(mode,  'macro')")
+                c.execute("UPDATE elo SET arena = COALESCE(arena, 'normal')")
+                c.execute("UPDATE elo SET weapon= COALESCE(weapon,'sword')")
+                # Recreate table with the correct PK, copy data, swap in.
+                # NOTE: use individual c.execute() calls (NOT executescript)
+                # because executescript() issues an implicit COMMIT that
+                # conflicts with sqlite3's connection-level implicit txn
+                # under `with self._conn() as c:`. The visible symptom was
+                # the copied rows disappearing after the DROP. Individual
+                # execute() calls run in the same txn cleanly.
+                c.execute("""
+                    CREATE TABLE elo_new (
+                        model TEXT,
+                        sharp TEXT,
+                        weapon TEXT DEFAULT 'sword',
+                        mode TEXT DEFAULT 'macro',
+                        arena TEXT DEFAULT 'normal',
+                        rating REAL,
+                        wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0,
+                        draws INTEGER DEFAULT 0,
+                        PRIMARY KEY (model, sharp, weapon, mode, arena)
+                    )
+                """)
+                c.execute("""
+                    INSERT INTO elo_new
+                        (model, sharp, weapon, mode, arena, rating, wins, losses, draws)
+                    SELECT
+                        model, sharp, weapon,
+                        COALESCE(mode,  'macro'),
+                        COALESCE(arena, 'normal'),
+                        rating, wins, losses, draws
+                    FROM elo
+                """)
+                c.execute("DROP TABLE elo")
+                c.execute("ALTER TABLE elo_new RENAME TO elo")
+                # Force commit here so the rebuild is durable even if the
+                # outer `with self._conn() as c:` context's implicit COMMIT
+                # runs into weirdness with a mix of executescript + DDL
+                # (Python sqlite3's txn semantics get confusing when a
+                # single connection issues both script + statements).
+                # Explicit commit = zero ambiguity, migration lands.
+                c.commit()
 
     # ----------------------------------------------------------- matches
-    def create_match(self, model_a, model_b, sharp, blind=True, weapon="sword"):
+    def create_match(self, model_a, model_b, sharp, blind=True, weapon="sword",
+                     mode="macro", arena="normal"):
+        """Insert a new match. `mode` and `arena` default to the pre-Tier-S-
+        commit-2 defaults (macro control, normal arena) so any caller that
+        hasn't been updated behaves exactly as before. New callers should
+        pass the actual mode/arena so votes route to the correct elo cell.
+        """
         mid = uuid.uuid4().hex[:12]
         with self._lock, self._conn() as c:
             c.execute(
                 "INSERT INTO matches (id, created, model_a, model_b, sharp,"
-                " weapon, status, blind) VALUES (?,?,?,?,?,?,?,?)",
+                " weapon, mode, arena, status, blind)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (mid, time.time(), model_a, model_b, ",".join(sharp),
-                 weapon, "queued", int(blind)))
+                 weapon, mode, arena, "queued", int(blind)))
         return mid
 
     def set_flip(self, mid, flip: bool):
@@ -152,6 +237,45 @@ class LocalStorage:
                 "SELECT * FROM matches WHERE status='done'"
                 " ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    def vote_rate_stats(self, window_days=7):
+        """Compute vote-through rate: what fraction of completed matches
+        get voted on? Powers the /api/stats/vote_rate endpoint that lets
+        us diagnose the "people run matches but don't vote" problem
+        surfaced pre-HN. Returns done/voted counts over the last
+        `window_days` plus lifetime, so we can see if UI changes moved
+        the needle.
+
+        We measure over completed (status='done') matches only —
+        pending/failed matches wouldn't produce a vote either way and
+        shouldn't dilute the ratio. `voted=1` flips exactly once per
+        match in `record_vote()` (self-play too), so it's a clean
+        boolean per match. No PII, no BYOK residue — just two integers
+        and a ratio."""
+        import time as _time
+        since = _time.time() - window_days * 86400
+        with self._conn() as c:
+            # Window (last N days)
+            done_win = c.execute(
+                "SELECT COUNT(*) FROM matches"
+                " WHERE status='done' AND created >= ?", (since,)).fetchone()[0]
+            voted_win = c.execute(
+                "SELECT COUNT(*) FROM matches"
+                " WHERE status='done' AND voted=1 AND created >= ?",
+                (since,)).fetchone()[0]
+            # Lifetime
+            done_all = c.execute(
+                "SELECT COUNT(*) FROM matches WHERE status='done'").fetchone()[0]
+            voted_all = c.execute(
+                "SELECT COUNT(*) FROM matches"
+                " WHERE status='done' AND voted=1").fetchone()[0]
+        return {
+            "window_days": window_days,
+            "window": {"done": done_win, "voted": voted_win,
+                       "rate": round(voted_win / done_win, 4) if done_win else 0.0},
+            "lifetime": {"done": done_all, "voted": voted_all,
+                         "rate": round(voted_all / done_all, 4) if done_all else 0.0},
+        }
 
     def head_to_head(self, a, b, limit=50):
         """Return VOTED done-matches where (model_a,model_b) is exactly the
@@ -201,13 +325,18 @@ class LocalStorage:
         }
 
     # ----------------------------------------------------------- voting / elo
-    def _get_elo(self, c, model, sharp, weapon):
-        r = c.execute("SELECT rating FROM elo WHERE model=? AND sharp=? AND weapon=?",
-                      (model, sharp, weapon)).fetchone()
+    def _get_elo(self, c, model, sharp, weapon, mode="macro", arena="normal"):
+        """Fetch or lazily-create the elo row for a specific eval cell.
+        Cell key is (model, sharp, weapon, mode, arena) — see Tier-S
+        commit 2 rationale in AGENTS.md §10.5."""
+        r = c.execute("SELECT rating FROM elo WHERE model=? AND sharp=?"
+                      " AND weapon=? AND mode=? AND arena=?",
+                      (model, sharp, weapon, mode, arena)).fetchone()
         if r:
             return r["rating"]
-        c.execute("INSERT INTO elo (model, sharp, weapon, rating) VALUES (?,?,?,?)",
-                  (model, sharp, weapon, START_ELO))
+        c.execute("INSERT INTO elo (model, sharp, weapon, mode, arena, rating)"
+                  " VALUES (?,?,?,?,?,?)",
+                  (model, sharp, weapon, mode, arena, START_ELO))
         return START_ELO
 
     @staticmethod
@@ -229,6 +358,12 @@ class LocalStorage:
             return {"already_voted": True, **self.reveal(mid)}
         sharp = m["sharp"]
         weapon = m.get("weapon") or "sword"
+        # Pull mode + arena from the match row so votes route to the SAME
+        # elo cell that the match was played under. Pre-Tier-S-commit-2
+        # matches (no mode/arena set) fall back to the historic defaults
+        # via COALESCE-in-Python; that's what those matches actually were.
+        mode = m.get("mode") or "macro"
+        arena = m.get("arena") or "normal"
         flip = bool(m.get("flip"))
         a, b = m["model_a"], m["model_b"]
         # translate canvas vote -> model_a/model_b axis
@@ -241,14 +376,15 @@ class LocalStorage:
             # delta must be zero (you can't beat yourself) and W/L would
             # double-update the same row and clobber. Log as a single draw.
             if a == b:
-                self._get_elo(c, a, sharp, weapon)   # ensure row exists
+                self._get_elo(c, a, sharp, weapon, mode, arena)   # ensure row exists
                 c.execute("UPDATE elo SET draws=draws+1 "
-                          "WHERE model=? AND sharp=? AND weapon=?",
-                          (a, sharp, weapon))
+                          "WHERE model=? AND sharp=? AND weapon=?"
+                          " AND mode=? AND arena=?",
+                          (a, sharp, weapon, mode, arena))
                 c.execute("UPDATE matches SET voted=1 WHERE id=?", (mid,))
                 return {"elo_change": {a: 0.0}, **self.reveal(mid)}
-            ra, rb = (self._get_elo(c, a, sharp, weapon),
-                      self._get_elo(c, b, sharp, weapon))
+            ra, rb = (self._get_elo(c, a, sharp, weapon, mode, arena),
+                      self._get_elo(c, b, sharp, weapon, mode, arena))
             ea = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
             sa = {"a": 1.0, "b": 0.0, "draw": 0.5}[choice_model]
             ra2 = ra + K_FACTOR * (sa - ea)
@@ -259,9 +395,9 @@ class LocalStorage:
             # Bandit flags all of these as B608 SQL injection but they aren't;
             # B608 is globally skipped in .bandit for this reason.
             wa, la, da = ("wins", "losses", "draws")
-            W = "model=? AND sharp=? AND weapon=?"
-            ax = (a, sharp, weapon)
-            bx = (b, sharp, weapon)
+            W = "model=? AND sharp=? AND weapon=? AND mode=? AND arena=?"
+            ax = (a, sharp, weapon, mode, arena)
+            bx = (b, sharp, weapon, mode, arena)
             if choice_model == "a":
                 c.execute(f"UPDATE elo SET rating=?, {wa}={wa}+1 WHERE {W}", (ra2, *ax))
                 c.execute(f"UPDATE elo SET rating=?, {la}={la}+1 WHERE {W}", (rb2, *bx))
@@ -367,24 +503,40 @@ class LocalStorage:
                       " WHERE tournament_id=? AND round=? AND slot=?",
                       (winner_model, tid, round_n, slot))
 
-    def leaderboard(self, sharp=None, weapon=None):
+    def leaderboard(self, sharp=None, weapon=None, mode=None, arena=None):
+        """Leaderboard filter. Any of (sharp, weapon, mode, arena) can be
+        None; None = don't filter on that dimension. When ALL four are
+        None the query aggregates across every cell per-model (the
+        historic 'overall' view). Any non-None combination returns the
+        raw rows matching those filters.
+
+        Tier-S commit 2: previously segmented by (sharp, weapon) only.
+        Now supports (sharp, weapon, mode, arena) segmentation — mode
+        and arena are legitimate eval axes (macro vs joint = totally
+        different control regime; ice vs normal = totally different
+        physics), and averaging across them was silent dishonesty."""
         with self._conn() as c:
             where, params = [], []
             if sharp:
                 where.append("sharp=?"); params.append(sharp)
             if weapon:
                 where.append("weapon=?"); params.append(weapon)
+            if mode:
+                where.append("mode=?"); params.append(mode)
+            if arena:
+                where.append("arena=?"); params.append(arena)
             if where:
                 # 'where' only ever contains hardcoded strings ("sharp=?",
-                # "weapon=?"); user values go through the `params` tuple
-                # (parameterized). Bandit flags this as B608 — globally
-                # skipped in .bandit for that reason.
+                # "weapon=?", "mode=?", "arena=?"); user values go through
+                # the `params` tuple (parameterized). Bandit flags this as
+                # B608 — globally skipped in .bandit for that reason.
                 rows = c.execute(
                     "SELECT * FROM elo WHERE " + " AND ".join(where) +
                     " ORDER BY rating DESC", params).fetchall()
             else:
                 rows = c.execute(
                     "SELECT model, 'ALL' as sharp, 'ALL' as weapon,"
+                    " 'ALL' as mode, 'ALL' as arena,"
                     " AVG(rating) as rating,"
                     " SUM(wins) as wins, SUM(losses) as losses,"
                     " SUM(draws) as draws FROM elo GROUP BY model"
