@@ -13,6 +13,12 @@ create table if not exists matches (
     model_b     text,
     sharp       text,
     weapon      text default 'sword',     -- sword | dagger | spear | flail | bow
+    -- Tier-S commit 2: mode + arena are part of the eval axis. Different
+    -- control regime (macro vs joint) and different physics (normal / ice /
+    -- low_gravity) = different rating cell. Persisted per-match so votes
+    -- route to the right (model, sharp, weapon, mode, arena) elo row.
+    mode        text default 'macro',     -- macro | joint
+    arena       text default 'normal',    -- normal | ice | low_gravity
     status      text,                     -- queued | running | done | error
     winner_side text,                     -- a | b | draw (CANVAS side: a=green, b=blue)
     method      text,
@@ -34,16 +40,21 @@ create table if not exists votes (
     choice    text                          -- a | b | draw (CANVAS side)
 );
 
--- Per-weapon, per-sharp Elo leaderboards. (model, sharp, weapon) is the PK.
+-- Per-weapon, per-sharp, per-mode, per-arena Elo leaderboards.
+-- PK is (model, sharp, weapon, mode, arena) — see Tier-S commit 2.
+-- On fresh installs this creates the correct PK directly; on existing
+-- deployments the migration block below promotes the PK safely.
 create table if not exists elo (
     model   text,
     sharp   text,
     weapon  text default 'sword',
+    mode    text default 'macro',    -- macro | joint
+    arena   text default 'normal',   -- normal | ice | low_gravity
     rating  double precision default 1000,
     wins    integer default 0,
     losses  integer default 0,
     draws   integer default 0,
-    primary key (model, sharp, weapon)
+    primary key (model, sharp, weapon, mode, arena)
 );
 
 create table if not exists tournaments (
@@ -81,32 +92,47 @@ create table if not exists tournament_matches (
 alter table matches add column if not exists weapon     text default 'sword';
 alter table matches add column if not exists flip       boolean default false;
 alter table matches add column if not exists commentary text;
+-- Tier-S commit 2:
+alter table matches add column if not exists mode       text default 'macro';
+alter table matches add column if not exists arena      text default 'normal';
 alter table elo     add column if not exists weapon     text default 'sword';
+alter table elo     add column if not exists mode       text default 'macro';
+alter table elo     add column if not exists arena      text default 'normal';
 
--- Backfill any rows that pre-date the weapon column so the new PK won't
--- complain about NULLs. (default 'sword' only applies to NEW rows.)
-update elo     set weapon = 'sword' where weapon is null;
-update matches set weapon = 'sword' where weapon is null;
+-- Backfill any rows that pre-date these columns so the composite PK is
+-- well-defined. (`default ...` only applies to NEW rows, not existing ones.)
+update elo     set weapon = 'sword'  where weapon is null;
+update elo     set mode   = 'macro'  where mode   is null;
+update elo     set arena  = 'normal' where arena  is null;
+update matches set weapon = 'sword'  where weapon is null;
+update matches set mode   = 'macro'  where mode   is null;
+update matches set arena  = 'normal' where arena  is null;
 
--- Promote the elo PK to include `weapon` — only if it hasn't been promoted yet.
+-- Promote the elo PK across two milestones:
+--   old: (model, sharp)
+--   Tier-S commit 1 shipped code that assumed: (model, sharp, weapon)
+--   Tier-S commit 2 (this one) wants: (model, sharp, weapon, mode, arena)
+-- Detect the current PK shape by looking for the presence of mode+arena
+-- among the PK columns. If either is missing, drop the PK and add the
+-- full composite. Idempotent: safe to re-run.
 do $$
 declare
-  has_weapon_pk boolean;
+  has_full_pk boolean;
 begin
-  select exists (
-    select 1
-    from   pg_index i
-    join   pg_attribute a
-           on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
-    where  i.indrelid = 'public.elo'::regclass
-    and    i.indisprimary
-    and    a.attname  = 'weapon'
-  ) into has_weapon_pk;
+  select
+    (bool_or(a.attname = 'mode') and bool_or(a.attname = 'arena'))
+  into has_full_pk
+  from   pg_index i
+  join   pg_attribute a
+         on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
+  where  i.indrelid = 'public.elo'::regclass
+  and    i.indisprimary;
 
-  if not has_weapon_pk then
-    -- drop whatever the old PK was (likely (model, sharp))
+  if not coalesce(has_full_pk, false) then
+    -- drop whatever the old PK was — (model, sharp) or
+    -- (model, sharp, weapon), doesn't matter which
     alter table elo drop constraint if exists elo_pkey;
-    alter table elo add primary key (model, sharp, weapon);
+    alter table elo add primary key (model, sharp, weapon, mode, arena);
   end if;
 end$$;
 
@@ -116,6 +142,8 @@ end$$;
 create index if not exists idx_matches_created          on matches            (created desc);
 create index if not exists idx_elo_sharp                on elo                (sharp,  rating desc);
 create index if not exists idx_elo_weapon               on elo                (weapon, rating desc);
+create index if not exists idx_elo_mode                 on elo                (mode,   rating desc);
+create index if not exists idx_elo_arena                on elo                (arena,  rating desc);
 create index if not exists idx_tournament_matches_tid   on tournament_matches (tournament_id, round, slot);
 
 -- ============================================================================
@@ -134,11 +162,18 @@ create index if not exists idx_tournament_matches_tid   on tournament_matches (t
 --     side by the caller). Returns d_a and d_b so the caller can echo
 --     them back in the reveal payload.
 -- ============================================================================
+-- Drop the old signature so PostgREST doesn't cache the previous
+-- 4-param version alongside the 6-param one. Idempotent — no-op if
+-- the old signature isn't installed.
+drop function if exists apply_elo_vote(text, text, text, text, text, numeric, numeric);
+
 create or replace function apply_elo_vote(
     a_model      text,
     b_model      text,
     p_sharp      text,
     p_weapon     text,
+    p_mode       text,   -- macro | joint    (Tier-S commit 2)
+    p_arena      text,   -- normal | ice | low_gravity  (Tier-S commit 2)
     choice_model text,   -- 'a' | 'b' | 'draw'
     k_factor     numeric default 32,
     start_elo    numeric default 1000
@@ -154,28 +189,31 @@ declare
     ddb numeric;
 begin
     -- Ensure both rows exist. ON CONFLICT DO NOTHING is atomic and
-    -- respects the (model, sharp, weapon) PK.
-    insert into elo(model, sharp, weapon, rating, wins, losses, draws)
-      values (a_model, p_sharp, p_weapon, start_elo, 0, 0, 0)
-      on conflict (model, sharp, weapon) do nothing;
-    insert into elo(model, sharp, weapon, rating, wins, losses, draws)
-      values (b_model, p_sharp, p_weapon, start_elo, 0, 0, 0)
-      on conflict (model, sharp, weapon) do nothing;
+    -- respects the full (model, sharp, weapon, mode, arena) PK.
+    insert into elo(model, sharp, weapon, mode, arena, rating, wins, losses, draws)
+      values (a_model, p_sharp, p_weapon, p_mode, p_arena, start_elo, 0, 0, 0)
+      on conflict (model, sharp, weapon, mode, arena) do nothing;
+    insert into elo(model, sharp, weapon, mode, arena, rating, wins, losses, draws)
+      values (b_model, p_sharp, p_weapon, p_mode, p_arena, start_elo, 0, 0, 0)
+      on conflict (model, sharp, weapon, mode, arena) do nothing;
 
     -- Lock both rows for the duration of this txn. Row order (model asc)
     -- prevents deadlocks when two votes concurrently touch the same pair
     -- with reversed a/b.
     perform 1
       from elo
-      where (model, sharp, weapon) in
-            ((a_model, p_sharp, p_weapon), (b_model, p_sharp, p_weapon))
+      where (model, sharp, weapon, mode, arena) in
+            ((a_model, p_sharp, p_weapon, p_mode, p_arena),
+             (b_model, p_sharp, p_weapon, p_mode, p_arena))
       order by model
       for update;
 
     select rating into ra_rating
-      from elo where model = a_model and sharp = p_sharp and weapon = p_weapon;
+      from elo where model = a_model and sharp = p_sharp and weapon = p_weapon
+                and mode = p_mode and arena = p_arena;
     select rating into rb_rating
-      from elo where model = b_model and sharp = p_sharp and weapon = p_weapon;
+      from elo where model = b_model and sharp = p_sharp and weapon = p_weapon
+                and mode = p_mode and arena = p_arena;
 
     ea := 1.0 / (1.0 + 10 ^ ((rb_rating - ra_rating) / 400.0));
     sa := case choice_model
@@ -195,7 +233,8 @@ begin
     if a_model = b_model then
         update elo
            set draws = draws + 1
-         where model = a_model and sharp = p_sharp and weapon = p_weapon;
+         where model = a_model and sharp = p_sharp and weapon = p_weapon
+           and mode = p_mode and arena = p_arena;
         return query select 0::numeric, 0::numeric;
         return;
     end if;
@@ -205,14 +244,16 @@ begin
            wins   = wins   + case when choice_model = 'a'    then 1 else 0 end,
            losses = losses + case when choice_model = 'b'    then 1 else 0 end,
            draws  = draws  + case when choice_model = 'draw' then 1 else 0 end
-     where model = a_model and sharp = p_sharp and weapon = p_weapon;
+     where model = a_model and sharp = p_sharp and weapon = p_weapon
+       and mode = p_mode and arena = p_arena;
 
     update elo
        set rating = rating + ddb,
            wins   = wins   + case when choice_model = 'b'    then 1 else 0 end,
            losses = losses + case when choice_model = 'a'    then 1 else 0 end,
            draws  = draws  + case when choice_model = 'draw' then 1 else 0 end
-     where model = b_model and sharp = p_sharp and weapon = p_weapon;
+     where model = b_model and sharp = p_sharp and weapon = p_weapon
+       and mode = p_mode and arena = p_arena;
 
     return query select dda, ddb;
 end$$;

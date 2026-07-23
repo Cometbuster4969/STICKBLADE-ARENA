@@ -13,6 +13,29 @@ import config as C
 from moves import ACTIONS, FOOTWORK, ACTION_ZONE
 
 
+# ============================================================================
+# PROMPT_VERSION — the evaluation prompt schema version.
+#
+# What "prompt" means here: the full set of {system prompt template + state
+# JSON schema + response format} that every model sees before deciding a move.
+# Any semantic change to `build_state()`, SYSTEM_PROMPT template, ACTIONS
+# vocabulary, or the required response shape must bump this number.
+#
+# WHY IT MATTERS: Elo ratings are only meaningful if all models were rated
+# under the SAME question. Silently changing the prompt = silently
+# invalidating every historical rating on the leaderboard. This constant
+# is exposed via /api/version and the /api/leaderboard rows so external
+# dataset consumers, correlation studies, and paper citations can pin
+# their analysis to a specific prompt schema.
+#
+# Version 1 baseline (2026-07-18): sword/dagger/spear/flail/bow weapons,
+# 3 arenas (normal/ice/low_gravity), macro/joint control modes, spatial
+# state with rounded ints + facing_enemy boolean + arena-aware bow drop
+# hints. See AGENTS.md §PROMPT_VERSION_LOG for the full change ledger.
+# ============================================================================
+PROMPT_VERSION = 1
+
+
 # Ring buffer of recent brain failures. Exposed via /api/debug/brain_errors
 # so we can diagnose 'why is every match falling back?' without HF logs auth.
 # Each entry: {"t": unix_ts, "label": brain.label, "model": model_id or "",
@@ -100,6 +123,27 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
     a few derived ranged-combat hints (line-of-sight clearance, vertical lead
     needed for an arrow shot, etc.). All values rounded to ints so the JSON
     payload stays small.
+
+    ---- PROMPT VERSIONING ----
+    The exact contents of this state (which fields, what units, what
+    parseable hints) IS the benchmark's evaluation prompt. Any semantic
+    change here (add/remove/rename fields, change unit, change rounding
+    granularity) makes historical Elo INCOMPARABLE to future Elo — the
+    models are answering a different question, so cross-version ratings
+    are apples-to-oranges.
+
+    When you change the meaning of what `build_state()` returns:
+      1. Bump PROMPT_VERSION below (v1 -> v2 -> v3).
+      2. Note the change in AGENTS.md §PROMPT_VERSION_LOG.
+      3. Decide: reset the elo table (clean cutover) OR accept comparability
+         loss on old data (soft cutover — UI still labels ratings vN based
+         on when they were earned).
+    Cosmetic changes (rewording a docstring, refactoring the code that
+    BUILDS this dict without changing the OUTPUT) do NOT require a bump.
+
+    The version is a public field on /api/version so external tooling
+    (dataset consumers, replay downloaders, correlation studies) can
+    key off the exact prompt schema that produced any given rating.
     """
     me_torso = me.pos()
     foe_torso = foe.pos()

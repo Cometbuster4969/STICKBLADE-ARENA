@@ -445,11 +445,14 @@ def _run_one_tournament_match(t, round_n, slot, model_a, model_b):
     seed order)."""
     sharp = t["sharp"].split(",") if isinstance(t["sharp"], str) else list(t["sharp"])
     weapon = t.get("weapon") or "sword"
-    mid = store.create_match(model_a, model_b, sharp, blind=True, weapon=weapon)
-    # Same arena / mode for the whole tournament
-    MATCH_MODES[mid] = {"mode": t.get("mode", "macro"),
-                        "weapon": weapon,
-                        "arena":  t.get("arena", "normal")}
+    t_mode = t.get("mode", "macro")
+    t_arena = t.get("arena", "normal")
+    mid = store.create_match(model_a, model_b, sharp, blind=True,
+                             weapon=weapon, mode=t_mode, arena=t_arena)
+    # Same arena / mode for the whole tournament — MATCH_MODES is the
+    # in-memory routing dict for the sim worker; the persistent match
+    # row now also carries mode/arena for correct elo cell attribution.
+    MATCH_MODES[mid] = {"mode": t_mode, "weapon": weapon, "arena":  t_arena}
     # Tournaments are not user-voted, so we always use flip=False — the
     # bracket viewer cares about model identity, not blind canvas slots.
     MATCH_FLIP[mid] = False
@@ -559,7 +562,15 @@ class VoteReq(BaseModel):
 @app.get("/api/version")
 def version():
     from weapons import WEAPONS
-    return {"version": VERSION, "weapons": WEAPONS,
+    from brains import PROMPT_VERSION
+    # `prompt_version` is the evaluation-prompt schema version. Any semantic
+    # change to build_state() / SYSTEM_PROMPT / ACTIONS / response format
+    # bumps it. External dataset consumers, correlation studies, and paper
+    # citations should pin their analysis to a specific prompt_version
+    # because ratings across prompt versions are NOT comparable. See
+    # AGENTS.md §PROMPT_VERSION_LOG for the change ledger.
+    return {"version": VERSION, "prompt_version": PROMPT_VERSION,
+            "weapons": WEAPONS,
             "modes": ["macro", "joint"], "replay_format": 2,
             "admin_bypass": bool(os.environ.get("ADMIN_TOKEN"))}
 
@@ -715,7 +726,8 @@ def create_match(req: MatchReq, request: Request):
         or [WEAPON_ZONES[weapon][0]]
     mode = req.mode if req.mode in ("macro", "joint") else "macro"
     arena = req.arena if req.arena in ("normal", "ice", "low_gravity") else "normal"
-    mid = store.create_match(req.model_a, req.model_b, sharp, req.blind, weapon)
+    mid = store.create_match(req.model_a, req.model_b, sharp, req.blind,
+                             weapon, mode=mode, arena=arena)
     MATCH_MODES[mid] = {"mode": mode, "weapon": weapon, "arena": arena}
     # BYOK: stash the user-supplied key in-memory for the worker to
     # consume. Basic sanity check (OR keys start with 'sk-or-') so we
@@ -807,12 +819,91 @@ def vote(mid: str, req: VoteReq, request: Request):
     return res
 
 
+def _wilson_ci(wins: int, losses: int, draws: int, z: float = 1.96):
+    """95% Wilson score confidence interval for the true win-rate.
+
+    Why Wilson (not bootstrap) for leaderboard uncertainty:
+      * Closed-form, O(1) per row — cheap on every leaderboard load.
+      * Handles small N gracefully (Wald normal-approx implodes at N<30).
+      * Statistically defensible; standard in eval papers (e.g. LMSys
+        Arena's leaderboard error bars).
+
+    Draws are counted as half-wins per Elo convention (a draw between
+    equally-rated opponents contributes 0.5 to each). This matches the
+    K-factor update in storage._get_elo(): sa = 0.5 for draws.
+
+    Returns:
+        (rate, lo, hi) — point estimate + Wilson [lo, hi] on true rate,
+        all in [0, 1]. When N==0 returns (None, None, None).
+
+    Elo uncertainty from win-rate uncertainty: for a fixed opponent-pool
+    average rating R_opp, Elo(p) = R_opp + 400 * log10(p/(1-p)). So the
+    [lo, hi] on p maps to [Elo(lo), Elo(hi)] on rating. We don't do this
+    mapping here — instead we expose the raw win-rate CI in the payload
+    and let the frontend format it as ±X on Elo using its own choice of
+    R_opp (usually the leaderboard median).
+    """
+    n = wins + losses + draws
+    if n == 0:
+        return None, None, None
+    # Draws count as half-wins for both sides (Elo convention).
+    effective_wins = wins + 0.5 * draws
+    p_hat = effective_wins / n
+    denom = 1.0 + (z * z) / n
+    center = (p_hat + (z * z) / (2 * n)) / denom
+    half = (z / denom) * ((p_hat * (1 - p_hat) / n
+                           + (z * z) / (4 * n * n)) ** 0.5)
+    lo = max(0.0, center - half)
+    hi = min(1.0, center + half)
+    return p_hat, lo, hi
+
+
 @app.get("/api/leaderboard")
-def leaderboard(sharp: str | None = None, weapon: str | None = None):
-    rows = store.leaderboard(sharp, weapon)
+def leaderboard(sharp: str | None = None, weapon: str | None = None,
+                mode: str | None = None, arena: str | None = None):
+    """Leaderboard rows with Wilson-score 95%% CI on win-rate + prompt
+    version pinning. See _wilson_ci() for statistical rationale.
+
+    Tier-S commit 2: also filterable by mode (macro/joint) and arena
+    (normal/ice/low_gravity). Ratings segment per
+    (model, sharp, weapon, mode, arena) — averaging across mode or
+    arena was silent dishonesty (JOINT mode is a totally different
+    control regime; ice is totally different physics).
+
+    Each row includes:
+      * rating         — current Elo (K=32, start=1000)
+      * wins/losses/draws — vote counts per cell
+      * n              — total matches (convenience: w+l+d)
+      * win_rate       — point estimate, in [0, 1]  (None when N=0)
+      * win_rate_lo    — 95%% Wilson lower bound    (None when N=0)
+      * win_rate_hi    — 95%% Wilson upper bound    (None when N=0)
+      * prompt_version — the eval prompt schema that produced this Elo
+    """
+    from brains import PROMPT_VERSION
+    # Validate the enum-ish filters — no need to hit the storage layer
+    # with a garbage value, and 400ing bad input is cheaper than a wide
+    # empty result set later.
+    if mode is not None and mode not in ("macro", "joint"):
+        raise HTTPException(400, "mode must be 'macro' or 'joint'")
+    if arena is not None and arena not in ("normal", "ice", "low_gravity"):
+        raise HTTPException(400, "arena must be 'normal', 'ice', or 'low_gravity'")
+    rows = store.leaderboard(sharp, weapon, mode, arena)
     for r in rows:
         r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
         r["rating"] = round(r["rating"], 1)
+        w, l, d = int(r.get("wins", 0)), int(r.get("losses", 0)), int(r.get("draws", 0))
+        n = w + l + d
+        p_hat, lo, hi = _wilson_ci(w, l, d)
+        r["n"] = n
+        r["win_rate"]    = round(p_hat, 4) if p_hat is not None else None
+        r["win_rate_lo"] = round(lo, 4)    if lo    is not None else None
+        r["win_rate_hi"] = round(hi, 4)    if hi    is not None else None
+        # Pin every row to the current prompt schema. When we bump
+        # PROMPT_VERSION in future the leaderboard will need a soft
+        # cutover (annotate old rows) or a hard reset — but at that
+        # point every row here was earned under the CURRENT version,
+        # so tagging with today's version is truthful.
+        r["prompt_version"] = PROMPT_VERSION
     return rows
 
 
@@ -895,6 +986,26 @@ def list_tournaments():
             r["winner_name"] = C.ARENA_MODELS.get(r["winner_model"],
                                                   r["winner_model"])
     return rows
+
+
+@app.get("/api/stats/vote_rate")
+def stats_vote_rate(days: int = 7):
+    """Public vote-through rate — what fraction of completed matches
+    actually get voted on. Instrumentation for the "people run matches
+    but skip voting" hypothesis surfaced before the HN launch. Both
+    lifetime and last-N-day windows so we can see whether UI changes
+    (reveal-as-reward copy, streak card, prediction-accuracy display)
+    actually move the number.
+
+    Deliberately public: (a) it's aggregate-only, no PII, no per-match
+    detail beyond counts, (b) transparency about eval methodology is
+    the whole positioning of this project — "here's how many people
+    actually voted vs. just watched" is exactly the kind of
+    limitations-disclosure a research artifact should ship.
+
+    `days` clamped to [1, 90] to keep the Supabase count query bounded."""
+    days = max(1, min(int(days or 7), 90))
+    return store.vote_rate_stats(window_days=days)
 
 
 @app.get("/api/recent")

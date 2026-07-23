@@ -28,13 +28,22 @@ export function startKeepalive() {
 }
 
 /**
- * Leaderboard rows. Either filter is optional; pass both for the most
- * specific board (per-sharp-zone within a single weapon).
+ * Leaderboard rows. Any filter can be null/undefined = don't segment on
+ * that axis. When ALL are omitted the backend aggregates per-model across
+ * every cell (historic "overall" view).
+ *
+ * Tier-S commit 2: mode (macro | joint) and arena (normal | ice |
+ * low_gravity) are now first-class eval axes. Averaging across them
+ * was silent dishonesty — JOINT mode is a totally different control
+ * regime, ice arena is totally different physics. Backend validates
+ * enum values and 400s on garbage input.
  */
-export const getLeaderboard = (sharp, weapon) => {
+export const getLeaderboard = (sharp, weapon, mode, arena) => {
   const q = new URLSearchParams();
   if (sharp)  q.set("sharp",  sharp);
   if (weapon) q.set("weapon", weapon);
+  if (mode)   q.set("mode",   mode);
+  if (arena)  q.set("arena",  arena);
   const qs = q.toString();
   return api(`/leaderboard${qs ? `?${qs}` : ""}`);
 };

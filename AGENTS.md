@@ -600,6 +600,86 @@ assume you know what state the tree should be in.
 
 ---
 
+## 10.5. PROMPT_VERSION_LOG — the evaluation-prompt schema ledger
+
+**Why this section exists:** The exact contents of `stickblade/brains.py
+build_state()` + `SYSTEM_PROMPT` + the accepted response schema
+constitute the benchmark's evaluation prompt. Elo ratings across
+different prompt versions are NOT comparable — the models are answering
+a different question, so cross-version leaderboards are apples-to-oranges.
+
+Ratings on the leaderboard are pinned to `PROMPT_VERSION` (see
+`brains.py`). External dataset consumers, correlation studies, and paper
+citations should key off the prompt_version field in `/api/version` or
+in every `/api/leaderboard` row.
+
+### When to bump PROMPT_VERSION
+
+Bump on ANY of these:
+- Adding, removing, or renaming a field in `build_state()` output
+- Changing a unit or rounding granularity (e.g., int → float, px → world_units)
+- Adding, removing, or renaming an action in `ACTIONS` or `FOOTWORK`
+- Changing the required response format (JSON key names, nesting)
+- Changing the `SYSTEM_PROMPT` in a way that alters what the model is
+  asked to optimize (e.g., adding "prefer defensive play" changes strategy)
+- Changing weapon rules that models are TOLD about via zone_hint / zone_map
+
+**Do NOT bump for:**
+- Cosmetic code refactors that produce the identical output dict
+- Rewording docstrings, log messages, error strings
+- Adding/removing debug endpoints
+- Changing internal K-factor (that changes rating dynamics, not the
+  evaluation prompt — arguably a separate `ELO_VERSION` bump, but for
+  now we treat that as a physics/scoring change not a prompt change)
+
+### Cutover strategy when bumping
+
+Two options, pick per bump:
+
+**Hard reset** (clean cutover)
+```sql
+truncate table elo;  -- clean slate, all ratings start at 1000 under v2
+-- optionally: also truncate matches / votes to purge historical replays
+```
+- Use when the change is severe enough that keeping old data would mislead.
+- Loses all historical ratings — communicate loudly in README + on the site.
+
+**Soft cutover** (annotate, don't destroy)
+- Keep `elo` populated with v_old ratings; new votes accumulate under v_new
+- Requires: add a `prompt_version INTEGER` column to `elo` + include it
+  in the PK so v1 and v2 rows for the same (model, sharp, weapon) coexist.
+- UI can show a "vN ratings" toggle. Old data becomes browsable history.
+- More work but no data loss. Recommend when the change is incremental
+  (e.g., added a field but didn't remove any).
+
+### The log
+
+| Version | Date       | Change                                                                            | Cutover |
+| ------- | ---------- | --------------------------------------------------------------------------------- | ------- |
+| v1      | 2026-07-18 | Baseline: 5 weapons, 3 arenas, macro/joint modes, spatial state w/ facing_enemy   | —       |
+
+When you bump, add a row here BEFORE pushing the code change. Reviewers
+should be able to read this table and understand exactly what changed.
+
+### ELO CELL KEY changelog (separate from prompt version)
+
+The elo table's segmentation key has evolved. Ratings across key
+changes are technically comparable per-cell (values just live at
+different keys) but the "overall" aggregate view will shift.
+
+| Elo PK                                       | Landed          | Commit        |
+| -------------------------------------------- | --------------- | ------------- |
+| (model, sharp)                               | initial launch  | —             |
+| (model, sharp, weapon)                       | pre-CI era      | (added weapon)|
+| (model, sharp, weapon, mode, arena)          | 2026-07-18      | Tier-S #2     |
+
+On the Tier-S #2 promotion: pre-existing rows are backfilled as
+(mode='macro', arena='normal') because every production match up to
+that point was actually run under those defaults. No data loss, no
+rating reset — old ratings just live at their (macro, normal) cell.
+
+---
+
 ## 11. When in doubt
 
 - **Ask the user with concrete options**, not open-ended "what would you like?"
