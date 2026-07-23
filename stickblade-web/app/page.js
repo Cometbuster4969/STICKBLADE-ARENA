@@ -7,6 +7,7 @@ import WaitPanel from "@/components/WaitPanel";
 import ByokPanel from "@/components/ByokPanel";
 import OnboardingCard from "@/components/OnboardingCard";
 import ShareButton from "@/components/ShareButton";
+import FAQ from "@/components/FAQ";
 import { readByokKey, readByokEnabled } from "@/lib/byok";
 import { getModels, createMatch, getMatch, getReplay, postVote,
          getLeaderboard, startKeepalive } from "@/lib/api";
@@ -212,17 +213,59 @@ export default function FightPage() {
       <OnboardingCard />
       <section className="tagline">
         <h1>
-          Two LLM Swordsmen.<br />
-          <span className="accent">Physics Decides.</span>
+          Two LLMs make real API calls to<br />
+          <span className="accent">decide sword-fight moves.</span>
         </h1>
         <p>
-          You set the sharp zone
-          <span className="dot">·</span>
-          they fight blind
-          <span className="dot">·</span>
-          you vote without knowing which model is which.
+          You vote on who fought smarter.
+        </p>
+        <p style={{ fontSize: 12.5, color: "var(--dim)", fontStyle: "italic",
+                    marginTop: 2, maxWidth: 640 }}>
+          This is a research tool, not a game — each match is live inference,
+          not a scripted battle.{" "}
+          <a href="#how-it-works" style={{ color: "var(--gold, #d4b962)",
+                                            textDecoration: "underline",
+                                            textDecorationStyle: "dotted" }}>
+            How it works ↓
+          </a>
         </p>
       </section>
+
+      {/* --- Progressive-disclosure explainer --- inline `<details>` so
+          normies get one line + can expand for context. Curious readers
+          expand; the researcher audience doesn't need the expansion
+          because the hero already answered "what am I looking at". */}
+      <details id="how-it-works" style={{
+        margin: "6px auto 12px", maxWidth: 720, padding: "10px 14px",
+        border: "1px solid var(--line)", borderRadius: 6,
+        background: "rgba(255,255,255,0.015)", fontSize: 13.5,
+      }}>
+        <summary style={{ cursor: "pointer", color: "var(--text)",
+                          fontWeight: 600, letterSpacing: 0.3, listStyle: "none" }}>
+          ▸ What's actually happening here (30-sec read)
+        </summary>
+        <div style={{ marginTop: 10, color: "var(--text-2)", lineHeight: 1.55 }}>
+          <p style={{ marginBottom: 8 }}>
+            Two language models each control a stickman in a 2D physics
+            simulation. Every 3 seconds of simulated combat, each model
+            gets its current state (HP, position, opponent's last move,
+            weapon, arena) and picks its next action. They fight until
+            one dies or 24 turns pass.
+          </p>
+          <p style={{ marginBottom: 8 }}>
+            You watch, vote blind on who fought smarter, then find out
+            which model was which. Per-model Elo tracks it over time,
+            segmented by weapon, sharp-zone, control mode, and arena.
+          </p>
+          <p style={{ marginBottom: 0, color: "var(--dim)" }}>
+            <b>Why physics?</b> Text-only benchmarks (MMLU, GPQA,
+            Arena-Hard) can't test whether a model plans under physical
+            constraints. This does. <b>Why does it take a minute?</b>{" "}
+            Each turn is a real LLM API call (~5-15s of inference per model)
+            plus 3s of physics. It's slow because it's real, not pre-recorded.
+          </p>
+        </div>
+      </details>
 
       {/* ---------- Main grid ---------- */}
       <div className="row">
@@ -538,6 +581,14 @@ export default function FightPage() {
           )}
         </div>
       )}
+
+      {/* --- FAQ (bottom of the fight page, below reveal) ---
+          Real user questions from the friend-feedback session. Lives on
+          the fight page (not a separate /about) so first-time visitors
+          who scroll past the vote find answers without a route change.
+          A dedicated /about page can come later as the canonical
+          explainer to link from HN/Twitter/README. */}
+      <FAQ />
     </>
   );
 }

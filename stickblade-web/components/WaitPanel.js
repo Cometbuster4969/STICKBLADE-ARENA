@@ -36,8 +36,22 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady }) {
   const [status, setStatus] = useState("queued");
   const [h2h, setH2h] = useState(null);
   const [recent, setRecent] = useState([]);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const pollRef = useRef(null);
   const readyFiredRef = useRef(false);
+  const startedAtRef = useRef(Date.now());
+
+  // Elapsed-time ticker — 1Hz update so the wait feels alive even
+  // when the ticker log is silent between turns. Deliberately
+  // ELAPSED not REVERSE-COUNTDOWN: a countdown that hits 0:00 while
+  // the match is still running would panic the user. Elapsed +
+  // expected-range ("~60s typical") is the honest framing.
+  useEffect(() => {
+    const id = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // ------- Head-to-head: one-shot fetch when the match starts -------
   useEffect(() => {
@@ -96,23 +110,52 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady }) {
   const qpos  = live?.queue_pos;
   const turn  = live?.turn || 0;
 
+  // Phase label — human-readable state instead of raw "Simulating".
+  // Deliberately avoids the word "video" (implies scripted playback);
+  // uses "match" / "LLMs thinking" / "physics" to reinforce
+  // "this is real inference happening now" framing that came out
+  // of the friend-feedback session.
+  const phaseLabel = status === "queued"
+    ? "Queued — waiting for a worker"
+    : turn === 0
+      ? "Setting up arena · LLMs about to make first move"
+      : `Running match — LLMs deciding turn ${turn} / 24`;
+
+  const mmss = (s) => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+
   return (
     <div className="panel" style={{ padding: 16 }}>
-      <div className="panel-head" style={{ marginBottom: 10 }}>
+      <div className="panel-head" style={{ marginBottom: 6,
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            alignItems: "center",
+                                            flexWrap: "wrap", gap: 8 }}>
         <span className="panel-title">
-          <span className="tick" /> {status === "queued" ? "Queued" : "Simulating"}
-          {status === "running" && turn > 0 && (
-            <span style={{ color: "var(--dim)", marginLeft: 8, fontSize: 12 }}>
-              · turn {turn}
-            </span>
-          )}
+          <span className="tick" /> {phaseLabel}
         </span>
-        {status === "queued" && qpos != null && qpos > 0 && (
+        <span style={{ color: "var(--dim)", fontSize: 12, letterSpacing: 0.5,
+                        fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
+          {mmss(elapsedSec)} <span style={{ color: "var(--mute)" }}>/ ~1:00 typical</span>
+        </span>
+      </div>
+      {/* Short "why is this slow" hint — the #1 confusion point from
+          friend feedback. Only shown while running (not queued) to keep
+          the queued-panel focused on queue position. */}
+      {status !== "queued" && (
+        <div style={{ marginBottom: 10, fontSize: 12, color: "var(--dim)",
+                       fontStyle: "italic", lineHeight: 1.4 }}>
+          Each turn = one LLM API call per fighter (~5-15s of real inference)
+          + 3s of physics. That's why it's not instant — it's live model
+          decisions, not a pre-recorded animation.
+        </div>
+      )}
+      {status === "queued" && qpos != null && qpos > 0 && (
+        <div style={{ marginBottom: 10 }}>
           <span style={{ color: "var(--gold)", fontSize: 13, letterSpacing: 1 }}>
             {qpos} {qpos === 1 ? "fight" : "fights"} ahead of you
           </span>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* --- Trash-talk quips (visible as soon as they resolve, ~5-15s) --- */}
       {quips && (quips.a || quips.b) && (
@@ -147,6 +190,58 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady }) {
           </div>
         </div>
       )}
+
+      {/* --- Read-while-you-wait: about-this-benchmark disclosure ---
+          Collapsed by default. Deliberately placed in the wait panel
+          (not just on the landing page) because THIS is the moment
+          users have nothing else to do and the highest chance of
+          engaging with the explainer. From friend-feedback: normies
+          don't understand what they're looking at until they read
+          more; give them the read-more where they naturally pause. */}
+      <details style={{
+        marginTop: 14, padding: "10px 12px",
+        border: "1px solid var(--line)", borderRadius: 6,
+        background: "rgba(255,255,255,0.015)", fontSize: 13,
+      }}>
+        <summary style={{ cursor: "pointer", color: "var(--gold)",
+                          fontWeight: 700, fontSize: 11, letterSpacing: 2,
+                          textTransform: "uppercase", listStyle: "none" }}>
+          📖 About this benchmark (read while you wait)
+        </summary>
+        <div style={{ marginTop: 10, color: "var(--text-2)", lineHeight: 1.55 }}>
+          <p style={{ marginBottom: 8 }}>
+            <b>What this measures.</b> Traditional LLM benchmarks
+            (MMLU, GPQA, Arena-Hard) test text answering. This one tests
+            whether a model can plan under physical constraints — momentum,
+            reach, opponent positioning, weapon geometry. Same 29 models
+            you'd see on other leaderboards, evaluated on a different axis.
+          </p>
+          <p style={{ marginBottom: 8 }}>
+            <b>Why blind voting.</b> If you saw model IDs before voting
+            you'd anchor on brand. Blind = you rate the fighting behavior,
+            not the model name. Reveal happens after the vote.
+          </p>
+          <p style={{ marginBottom: 8 }}>
+            <b>Why the leaderboard has provisional flags.</b> Ratings
+            under N=10 matches are Elo-shaped noise (K=32 can swing
+            ±80 pts from 5 lucky matchups). We mark those honestly
+            instead of pretending small samples are stable.
+          </p>
+          <p style={{ marginBottom: 0, color: "var(--dim)", fontSize: 12 }}>
+            Featured on the{" "}
+            <a href="https://www.pymunk.org/en/latest/showcase.html#stickblade-arena"
+               target="_blank" rel="noreferrer"
+               style={{ color: "inherit", textDecoration: "underline" }}>
+              official pymunk showcase
+            </a>. Source on{" "}
+            <a href="https://github.com/Cometbuster4969/STICKBLADE-ARENA"
+               target="_blank" rel="noreferrer"
+               style={{ color: "inherit", textDecoration: "underline" }}>
+              GitHub
+            </a>.
+          </p>
+        </div>
+      </details>
 
       {/* --- Recent-duels ticker (something to click while waiting) --- */}
       {recent.length > 0 && (
@@ -209,8 +304,9 @@ function CombatTicker({ log, status }) {
     }}>
       {shown.length === 0 ? (
         <div style={{ color: "var(--dim)" }}>
-          {status === "queued" ? "waiting for a worker to pick up your match…"
-                                : "LLMs are thinking about the first move…"}
+          {status === "queued"
+            ? "waiting for a worker to pick up your match…"
+            : "waiting on the first API round-trip — each LLM is deciding its opening move…"}
         </div>
       ) : (
         shown.map((t) => <TickerLine key={t.turn} tick={t} />)

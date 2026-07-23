@@ -134,14 +134,21 @@ main {
   align-items: center;
   gap: 2px;
   text-transform: uppercase;
-  text-shadow: 0 0 24px rgba(255, 61, 92, 0.25);
+  /* Toned-down glow (was 24px @ 0.25) — the neon aesthetic reads
+     "arcade game" more than "research tool"; we keep the color
+     identity but dial the shadow radius + opacity way down so the
+     logo looks like a serious product wordmark. */
+  text-shadow: 0 0 10px rgba(255, 61, 92, 0.12);
 }
 .logo .blade {
   color: var(--red);
   position: relative;
+  /* Softer double-glow: was 6px 0.6 + 22px 0.45 (heavy neon).
+     Now 3px 0.35 + 9px 0.18 — visible but reads as accent,
+     not marquee lighting. */
   text-shadow:
-    0 0 6px rgba(255, 61, 92, 0.6),
-    0 0 22px rgba(255, 61, 92, 0.45);
+    0 0 3px rgba(255, 61, 92, 0.35),
+    0 0 9px rgba(255, 61, 92, 0.18);
 }
 .logo .blade::after {
   content: "";
@@ -150,7 +157,9 @@ main {
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--red), transparent);
   filter: blur(1px);
-  opacity: 0.8;
+  /* Was 0.8 opacity — that underline glow felt like a Vegas sign.
+     0.45 keeps the accent stripe but backs it off half a stop. */
+  opacity: 0.45;
 }
 .site-head nav {
   display: flex;
@@ -218,7 +227,10 @@ main {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 0 30px rgba(255, 61, 92, 0.35);
+  /* Was 30px @ 0.35 — that heavy tagline glow was the biggest
+     "this is a videogame" signal above the fold. Reduced to
+     12px @ 0.15 keeps a subtle rim without the arcade halo. */
+  text-shadow: 0 0 12px rgba(255, 61, 92, 0.15);
 }
 .tagline p {
   color: var(--text-2);
