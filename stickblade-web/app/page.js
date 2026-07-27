@@ -69,6 +69,11 @@ export default function FightPage() {
   const [customB, setCustomB] = useState("");
   const [sharp, setSharp] = useState(["tip"]);
   const [mode, setMode] = useState("macro");
+  // Tier-S #3: blindfolded variant. When true, backend strips derived
+  // spatial hints from state (facing_enemy, higher/lower/level,
+  // distance, my_height/enemy_height categoricals) so the model must
+  // derive them from raw torso/head coordinates. Separate elo cell.
+  const [blindfolded, setBlindfolded] = useState(false);
   const [weapon, setWeapon] = useState("sword");
   const [arena, setArena] = useState("normal");
 
@@ -139,7 +144,7 @@ export default function FightPage() {
       const body = {
         model_a: modelOf(selA, customA),
         model_b: modelOf(selB, customB),
-        sharp, blind: true, mode, weapon, arena,
+        sharp, blind: true, mode, weapon, arena, blindfolded,
       };
       if (readByokEnabled()) {
         const k = readByokKey();
@@ -334,6 +339,40 @@ export default function FightPage() {
                 onClick={() => setMode("joint")}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setMode("joint"); } }}>
                 🧠 JOINT
+              </div>
+            </div>
+          </div>
+
+          {/* --- Tier-S #3: Blindfolded variant toggle ---
+              Off by default. When on, backend strips derived spatial
+              hints (facing_enemy, higher/lower/level, distance, my_height
+              /enemy_height categoricals) from the state — model has to
+              derive them from raw torso coords. Separate elo cell so
+              ratings stay comparable. Research angle from Reviewer #4:
+              isolates 'understands 2D geometry' from 'reacts to
+              pre-parsed booleans'. */}
+          <div>
+            <label className="lbl">
+              Blindfolded variant
+              <span style={{ color: "var(--dim)", fontWeight: 400,
+                              marginLeft: 6, fontSize: 11 }}>
+                — research mode: forces raw-coord reasoning
+              </span>
+            </label>
+            <div className="zones">
+              <div className={"zone" + (!blindfolded ? " on" : "")}
+                role="button" tabIndex={0} aria-pressed={!blindfolded}
+                title="Standard state — categorical spatial hints included (baseline v1 prompt)"
+                onClick={() => setBlindfolded(false)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setBlindfolded(false); } }}>
+                🔍 Normal
+              </div>
+              <div className={"zone" + (blindfolded ? " on" : "")}
+                role="button" tabIndex={0} aria-pressed={blindfolded}
+                title="Strips facing_enemy + higher/lower/level + distance + my/enemy_height — model must derive from raw torso coords. Separate leaderboard cell."
+                onClick={() => setBlindfolded(true)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setBlindfolded(true); } }}>
+                🙈 Blindfolded
               </div>
             </div>
           </div>

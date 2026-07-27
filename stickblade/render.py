@@ -21,7 +21,10 @@ class FX:
         self.slowmo = 0.0
         self.flash = 0.0
 
-    def hit(self, p, dmg, sharp, lethal, part):
+    def hit(self, p, dmg, sharp, lethal, part, attacker=None):
+        # `attacker` is optional — combat.py started passing it so the
+        # replay recorder can compute per-fighter damage totals. Base
+        # FX ignores it; RecordingFX subclass reads it.
         x, y = p
         n = int(min(46, 6 + dmg * 1.6)) if sharp else 3
         for _ in range(n):

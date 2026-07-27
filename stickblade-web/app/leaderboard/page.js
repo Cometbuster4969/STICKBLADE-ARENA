@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useId, useState } from "react";
 import LeaderboardTable from "@/components/LeaderboardTable";
-import { getLeaderboard } from "@/lib/api";
+import ObjectiveLeaderboardTable from "@/components/ObjectiveLeaderboardTable";
+import { getLeaderboard, getLeaderboardObjective } from "@/lib/api";
 
 const ZONE_TABS_BY_WEAPON = {
   "":       [["", "Overall"], ["tip", "Tip"], ["edge", "Edge"], ["back_edge", "Back edge"], ["pommel", "Pommel"]],
@@ -15,21 +16,30 @@ const ZONE_TABS_BY_WEAPON = {
 export default function LeaderboardPage() {
   const [weapon, setWeapon] = useState("");
   const [sharp, setSharp] = useState("");
-  // Tier-S commit 2: mode + arena are first-class eval axes. "" = don't
-  // filter (aggregate across the axis when combined with other filters,
-  // or per-cell rows when at least one filter is set).
   const [mode, setMode] = useState("");
   const [arena, setArena] = useState("");
+  // Tier-S #3: blindfolded is the 5th eval axis. null = don't filter,
+  // false = only normal-mode matches, true = only blindfolded matches.
+  const [blindfolded, setBlindfolded] = useState(null);
+  // Tier-S #3: 'perceived' = human-vote Elo (default). 'objective' =
+  // proxy metrics (damage_per_turn, hit_rate, etc). Different table
+  // component per tab because the columns are totally different.
+  const [tab, setTab] = useState("perceived");
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
   const wId = useId();
 
   useEffect(() => {
-    getLeaderboard(sharp || undefined, weapon || undefined,
-                   mode || undefined, arena || undefined)
+    setErr("");
+    const bf = blindfolded == null ? undefined : blindfolded;
+    const fetcher = tab === "objective"
+      ? getLeaderboardObjective
+      : getLeaderboard;
+    fetcher(sharp || undefined, weapon || undefined,
+            mode || undefined, arena || undefined, bf)
       .then(setRows)
       .catch((e) => setErr(e.message));
-  }, [sharp, weapon, mode, arena]);
+  }, [tab, sharp, weapon, mode, arena, blindfolded]);
 
   // If the user switches weapon, drop the sharp filter so we don't request a
   // (weapon, sharp) combo that doesn't exist for the new weapon.
@@ -41,12 +51,32 @@ export default function LeaderboardPage() {
     <div style={{ width: "100%", maxWidth: 760 }}>
       <h2 style={{ margin: "6px 0 4px" }}>Leaderboard</h2>
       <p style={{ color: "var(--dim)", fontSize: 13, marginBottom: 12 }}>
-        Elo from blind human votes — tracked separately per weapon, sharp zone,
-        control mode, AND arena. A model that dominates macro-mode swordplay
-        may collapse in joint-mode or on the ice arena. The uncertainty
-        column shows the 95% Wilson CI on win-rate; rows under N=10 are
-        marked provisional (?) to prevent over-reading small-sample noise.
+        {tab === "perceived"
+          ? "Elo from blind human votes. Segmented per weapon, sharp zone, control mode, arena, and blindfolded variant. The '?' flag marks provisional ratings (N<10) so small-sample noise isn't over-read. Win% column shows the 95% Wilson CI."
+          : "Objective proxy metrics computed from the raw physics event stream — no human votes involved. Damage-per-turn is the total damage a model deals divided by turns played. Hit-rate is landed / attempted (defensive actions excluded). Fallback-rate is turns where the LLM timed out or returned malformed JSON."}
       </p>
+
+      {/* --- Perceived vs Objective tab toggle (Tier-S #3) --- */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14,
+                    borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
+        {[["perceived", "🗳 Perceived Skill (human vote)"],
+          ["objective", "📊 Objective Skill (proxy metrics)"]].map(([id, label]) => (
+          <button key={id}
+            onClick={() => setTab(id)}
+            style={{
+              cursor: "pointer",
+              padding: "6px 14px",
+              background: tab === id ? "var(--panel)" : "transparent",
+              border: `1px solid ${tab === id ? "var(--gold, #d4b962)" : "var(--line)"}`,
+              borderRadius: 4,
+              color: tab === id ? "var(--gold, #d4b962)" : "var(--text-2)",
+              fontWeight: tab === id ? 700 : 500,
+              fontSize: 13, letterSpacing: 0.3,
+            }}>
+            {label}
+          </button>
+        ))}
+      </div>
 
       <label htmlFor={wId} className="lbl">Weapon</label>
       <div className="zones" style={{ marginBottom: 12 }} id={wId}>
@@ -114,9 +144,45 @@ export default function LeaderboardPage() {
         ))}
       </div>
 
+      {/* --- Blindfolded filter (Tier-S #3) ---
+          Three-state: All / Normal-only / Blindfolded-only. Blindfolded
+          matches strip derived spatial hints so the model reasons from
+          raw coords — a totally different eval axis. Uses null (not "")
+          for the 'All' sentinel because false is a meaningful filter
+          value (only-normal rows). */}
+      <label className="lbl">
+        Spatial reasoning
+        <span style={{ color: "var(--dim)", fontWeight: 400, marginLeft: 6,
+                        fontSize: 11 }}>
+          — blindfolded matches strip pre-parsed hints, force raw-coord reasoning
+        </span>
+      </label>
+      <div className="zones" style={{ marginBottom: 16 }}>
+        {[[null, "All"],
+          [false, "🔍 Normal (with hints)"],
+          [true,  "🙈 Blindfolded (raw coords only)"]].map(([v, n]) => (
+          <div key={String(v)}
+            role="button" tabIndex={0} aria-pressed={blindfolded === v}
+            className={"zone" + (blindfolded === v ? " on" : "")}
+            title={v === true
+              ? "State strips facing_enemy + higher/lower/level + distance — model must derive from coords"
+              : v === false
+                ? "Standard state with pre-parsed spatial hints (baseline v1 prompt)"
+                : "Both blindfolded + normal averaged"}
+            onClick={() => setBlindfolded(v)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setBlindfolded(v); } }}>
+            {n}
+          </div>
+        ))}
+      </div>
+
       {err
         ? <div className="status">✖ {err}</div>
-        : <div className="panel"><LeaderboardTable rows={rows} /></div>}
+        : <div className="panel">
+            {tab === "objective"
+              ? <ObjectiveLeaderboardTable rows={rows} />
+              : <LeaderboardTable rows={rows} />}
+          </div>}
     </div>
   );
 }

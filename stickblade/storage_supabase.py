@@ -62,24 +62,25 @@ class SupabaseStorage:
 
     # ------------------------------------------------------------ matches
     def create_match(self, model_a, model_b, sharp, blind=True, weapon="sword",
-                     mode="macro", arena="normal"):
+                     mode="macro", arena="normal", blindfolded=False):
         mid = uuid.uuid4().hex[:12]
         body = {
             "id": mid, "created": time.time(),
             "model_a": model_a, "model_b": model_b,
             "sharp": ",".join(sharp), "weapon": weapon,
-            "mode": mode, "arena": arena,
+            "mode": mode, "arena": arena, "blindfolded": bool(blindfolded),
             "status": "queued",
             "blind": bool(blind), "voted": False, "flip": False,
         }
         try:
             self._rest("POST", "matches", body=body)
         except Exception:
-            # Older Supabase schema without weapon/flip/mode/arena columns:
-            # try again without them so the deploy doesn't break before the
-            # migration. record_vote() will fall back to (macro, normal) for
-            # any match created this way (fields are NULL, python COALESCEs).
-            for k in ("weapon", "flip", "mode", "arena"):
+            # Older Supabase schema without weapon/flip/mode/arena/
+            # blindfolded columns: retry without them so deploys don't
+            # break before the migration. record_vote() falls back to
+            # historic defaults (macro/normal/not-blindfolded) for any
+            # match created this way (NULL fields, python COALESCEs).
+            for k in ("weapon", "flip", "mode", "arena", "blindfolded"):
                 body.pop(k, None)
             self._rest("POST", "matches", body=body)
         return mid
@@ -108,11 +109,31 @@ class SupabaseStorage:
                 "method": method, "turns": turns}
         if commentary:
             body["commentary"] = commentary
+        # Tier S #3: proxy metrics from replay.meta.metrics -> match columns.
+        # Skipped entirely if the replay didn't include a metrics dict
+        # (older code paths / malformed replay). Individual keys sent
+        # only when present so an un-migrated Supabase schema doesn't
+        # 400 the PATCH; the graceful-fallback catch below strips them
+        # all if any column is unknown.
+        metrics = (replay.get("meta") or {}).get("metrics") or {}
+        metric_keys = [
+            "damage_dealt_a", "damage_dealt_b",
+            "hits_landed_a", "hits_landed_b",
+            "hits_attempted_a", "hits_attempted_b",
+            "fallback_turns_a", "fallback_turns_b",
+            "avg_distance",
+        ]
+        for k in metric_keys:
+            if k in metrics:
+                body[k] = metrics[k]
         try:
             self._rest("PATCH", "matches", params={"id": f"eq.{mid}"}, body=body)
         except Exception:
-            # commentary col may not exist on older schemas — retry without it
-            body.pop("commentary", None)
+            # Column not present on this schema (commentary OR any of the
+            # Tier-S-3 metrics). Retry with a minimal body so the finish
+            # still lands. Operator should re-run supabase_schema.sql.
+            for k in ["commentary"] + metric_keys:
+                body.pop(k, None)
             self._rest("PATCH", "matches", params={"id": f"eq.{mid}"}, body=body)
 
     def get_match(self, mid):
@@ -216,44 +237,50 @@ class SupabaseStorage:
         }
 
     # ------------------------------------------------------------ votes/elo
-    def _get_elo_row(self, model, sharp, weapon, mode="macro", arena="normal"):
-        """Tier-S commit 2: PK is now (model, sharp, weapon, mode, arena).
-        Callers that don't pass mode/arena default to (macro, normal),
-        which is what pre-migration data effectively was."""
+    def _get_elo_row(self, model, sharp, weapon, mode="macro", arena="normal",
+                     blindfolded=0):
+        """Tier-S #3: PK is (model, sharp, weapon, mode, arena, blindfolded).
+        Callers that don't pass mode/arena/blindfolded default to the
+        historic (macro, normal, 0) which is what pre-migration data was."""
         params = {"model": f"eq.{model}", "sharp": f"eq.{sharp}",
                   "weapon": f"eq.{weapon}",
-                  "mode": f"eq.{mode}", "arena": f"eq.{arena}"}
+                  "mode": f"eq.{mode}", "arena": f"eq.{arena}",
+                  "blindfolded": f"eq.{'true' if blindfolded else 'false'}"}
         rows = self._rest("GET", "elo", params=params)
         if rows:
             return dict(rows[0])
         row = {"model": model, "sharp": sharp, "weapon": weapon,
                "mode": mode, "arena": arena,
+               "blindfolded": bool(blindfolded),
                "rating": START_ELO, "wins": 0, "losses": 0, "draws": 0}
-        # Same rationale as the old comment: hard-fail loudly instead of
-        # silently corrupting cross-cell data. If POST fails, the operator
-        # needs to re-run supabase_schema.sql (with the new mode/arena
-        # migration block) before votes can flow again.
+        # Hard-fail loudly instead of silently corrupting cross-cell data.
+        # If POST fails, operator needs to re-run supabase_schema.sql
+        # (Tier-S-3 migration block) before votes can flow again.
         self._rest("POST", "elo", body=row,
                    prefer="resolution=merge-duplicates")
         return row
 
     def _set_elo_row(self, row):
-        # (model, sharp, weapon, mode, arena) are ALL required — they're
-        # the PK, and PATCHing without one would spray the update across
-        # every row that matches the partial key. Enforced by contract,
-        # not silently papered over. If this fires: re-run
-        # supabase_schema.sql; the migration is incomplete.
+        # (model, sharp, weapon, mode, arena, blindfolded) are ALL
+        # required — they're the PK. PATCHing without one would spray
+        # the update across every row matching the partial key. Enforced
+        # by contract. If this fires: re-run supabase_schema.sql; the
+        # Tier-S-3 migration is incomplete.
         for key in ("weapon", "mode", "arena"):
             if not row.get(key):
                 raise ValueError(
                     f"_set_elo_row: '{key}' is required (part of the elo PK); "
                     f"re-run supabase_schema.sql if this fires — the migration "
                     f"is incomplete.")
+        if "blindfolded" not in row:
+            raise ValueError("_set_elo_row: 'blindfolded' is required "
+                             "(part of the elo PK); re-run supabase_schema.sql")
         params = {"model":  f"eq.{row['model']}",
                   "sharp":  f"eq.{row['sharp']}",
                   "weapon": f"eq.{row['weapon']}",
                   "mode":   f"eq.{row['mode']}",
-                  "arena":  f"eq.{row['arena']}"}
+                  "arena":  f"eq.{row['arena']}",
+                  "blindfolded": f"eq.{'true' if row['blindfolded'] else 'false'}"}
         self._rest("PATCH", "elo", params=params,
             body={"rating": row["rating"], "wins": row["wins"],
                   "losses": row["losses"], "draws": row["draws"]})
@@ -266,17 +293,18 @@ class SupabaseStorage:
             return choice
         return "a" if choice == "b" else "b"
 
-    def _apply_elo_atomic(self, a, b, sharp, weapon, mode, arena, choice_model):
+    def _apply_elo_atomic(self, a, b, sharp, weapon, mode, arena,
+                          blindfolded, choice_model):
         """Call the apply_elo_vote() Postgres RPC in one atomic txn.
-        Returns (d_a, d_b) or raises if the RPC isn't installed.
-        Tier-S commit 2: signature now includes mode + arena so ratings
-        segment correctly. Requires the updated RPC — re-run the SQL in
+        Tier-S #3: signature now includes blindfolded (7 params before
+        k_factor/start_elo). Requires the updated RPC — re-run
         supabase_schema.sql after pulling this commit."""
         rows = self._rest(
             "POST", "rpc/apply_elo_vote",
             body={"a_model": a, "b_model": b,
                   "p_sharp": sharp, "p_weapon": weapon,
                   "p_mode": mode, "p_arena": arena,
+                  "p_blindfolded": bool(blindfolded),
                   "choice_model": choice_model,
                   "k_factor": K_FACTOR, "start_elo": START_ELO})
         if not rows:
@@ -284,21 +312,17 @@ class SupabaseStorage:
         row = rows[0] if isinstance(rows, list) else rows
         return float(row["d_a"]), float(row["d_b"])
 
-    def _apply_elo_fallback(self, a, b, sharp, weapon, mode, arena, choice_model):
-        """Read-modify-write path. Racy across processes, but this method
-        is only reached if the atomic RPC isn't installed on the Postgres
-        side. Wrapped by self._vote_lock in record_vote() so it's at least
-        safe within a single Python process."""
-        # Self-play (mirror match): can't gain rating vs yourself. Log a
-        # draw and return zero deltas so the leaderboard reflects the
-        # match without double-updating the same row (which would corrupt).
+    def _apply_elo_fallback(self, a, b, sharp, weapon, mode, arena,
+                            blindfolded, choice_model):
+        """Read-modify-write path. Only reached if the atomic RPC isn't
+        installed. Wrapped by self._vote_lock in record_vote()."""
         if a == b:
-            row = self._get_elo_row(a, sharp, weapon, mode, arena)
+            row = self._get_elo_row(a, sharp, weapon, mode, arena, blindfolded)
             row["draws"] += 1
             self._set_elo_row(row)
             return 0.0, 0.0
-        ra, rb = (self._get_elo_row(a, sharp, weapon, mode, arena),
-                  self._get_elo_row(b, sharp, weapon, mode, arena))
+        ra, rb = (self._get_elo_row(a, sharp, weapon, mode, arena, blindfolded),
+                  self._get_elo_row(b, sharp, weapon, mode, arena, blindfolded))
         ea = 1.0 / (1.0 + 10 ** ((rb["rating"] - ra["rating"]) / 400.0))
         sa = {"a": 1.0, "b": 0.0, "draw": 0.5}[choice_model]
         d_a = K_FACTOR * (sa - ea)
@@ -323,30 +347,26 @@ class SupabaseStorage:
             return {"already_voted": True, **self.reveal(mid)}
         sharp = m["sharp"]
         weapon = m.get("weapon") or "sword"
-        # Pull mode + arena from the match row — same rationale as SQLite:
-        # votes must route to the cell the match was played under.
-        # Pre-commit-2 matches (NULL mode/arena) fall back to macro/normal.
+        # Pull mode + arena + blindfolded from the match row so votes
+        # route to the SAME elo cell the match was played under. Pre-
+        # migration matches (NULL fields) fall back to historic defaults.
         mode = m.get("mode") or "macro"
         arena = m.get("arena") or "normal"
+        blindfolded = int(bool(m.get("blindfolded") or 0))
         flip = bool(m.get("flip"))
         a, b = m["model_a"], m["model_b"]
         choice_model = self._unflip_choice(choice, flip)
         self._rest("POST", "votes", body={
             "id": uuid.uuid4().hex[:12], "match_id": mid,
             "created": time.time(), "choice": choice})
-        # Prefer the atomic Postgres RPC (safe across processes).
-        # Fall back to REST + in-process lock if the RPC isn't installed
-        # yet — that gates concurrency inside this Python instance but
-        # can still lose updates if the backend runs multiple workers.
-        # After first success we cache _rpc_ok so we skip the retry cost.
         d_a = d_b = None
         if self._rpc_ok is not False:
             try:
                 d_a, d_b = self._apply_elo_atomic(a, b, sharp, weapon,
-                                                  mode, arena, choice_model)
+                                                  mode, arena, blindfolded,
+                                                  choice_model)
                 self._rpc_ok = True
             except Exception as e:
-                # RPC missing / bad signature / etc — log once and downgrade.
                 if self._rpc_ok is None:
                     print(f"[storage] apply_elo_vote RPC unavailable ({e}); "
                           f"falling back to REST + in-process lock. "
@@ -355,7 +375,8 @@ class SupabaseStorage:
         if d_a is None:
             with self._vote_lock:
                 d_a, d_b = self._apply_elo_fallback(a, b, sharp, weapon,
-                                                    mode, arena, choice_model)
+                                                    mode, arena, blindfolded,
+                                                    choice_model)
         self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
                    body={"voted": True})
         return {"elo_change": {a: round(d_a, 1), b: round(d_b, 1)},
@@ -374,17 +395,107 @@ class SupabaseStorage:
             "commentary": m.get("commentary") or "",
         }
 
-    def leaderboard(self, sharp=None, weapon=None, mode=None, arena=None):
-        """Mirror of SQLite leaderboard. Any of (sharp, weapon, mode, arena)
-        can be None to skip that dimension. When ALL four are None the
-        result aggregates across every cell per-model (historic 'overall'
-        view). See storage.py:LocalStorage.leaderboard for rationale."""
+    def objective_leaderboard(self, sharp=None, weapon=None, mode=None,
+                              arena=None, blindfolded=None):
+        """Mirror of SQLite objective_leaderboard. Pulls done matches
+        with non-null proxy metrics via PostgREST, rolls up per-model
+        in Python. See storage.py:LocalStorage.objective_leaderboard
+        for definitions of damage_per_turn / hit_rate / fallback_rate.
+
+        Bounded to 10k rows per query — well above any realistic done-
+        match count under HN-frontpage load. If we ever exceed that
+        we'll paginate; for now the simple path is fine."""
+        params = {
+            "status": "eq.done",
+            "damage_dealt_a": "not.is.null",
+            "select": ("model_a,model_b,winner_side,turns,"
+                       "damage_dealt_a,damage_dealt_b,"
+                       "hits_landed_a,hits_landed_b,"
+                       "hits_attempted_a,hits_attempted_b,"
+                       "fallback_turns_a,fallback_turns_b,"
+                       "avg_distance"),
+            "limit": "10000",
+        }
+        if sharp:  params["sharp"]  = f"eq.{sharp}"
+        if weapon: params["weapon"] = f"eq.{weapon}"
+        if mode:   params["mode"]   = f"eq.{mode}"
+        if arena:  params["arena"]  = f"eq.{arena}"
+        if blindfolded is not None:
+            params["blindfolded"] = f"eq.{'true' if blindfolded else 'false'}"
+        try:
+            rows = self._rest("GET", "matches", params=params)
+        except Exception:
+            # Un-migrated schema (no proxy-metric columns): return empty.
+            return []
+        agg = {}
+        for r in rows:
+            t = int(r.get("turns") or 0)
+            avg_d = float(r.get("avg_distance") or 0.0)
+            for side, model in (("a", r["model_a"]), ("b", r["model_b"])):
+                m = agg.setdefault(model, {
+                    "model": model, "matches": 0, "turns": 0,
+                    "damage": 0.0, "hits_landed": 0, "hits_attempted": 0,
+                    "fallback": 0, "distance_sum": 0.0,
+                    "wins": 0, "losses": 0, "draws": 0,
+                })
+                m["matches"] += 1
+                m["turns"] += t
+                m["damage"] += float(r.get(f"damage_dealt_{side}") or 0.0)
+                m["hits_landed"] += int(r.get(f"hits_landed_{side}") or 0)
+                m["hits_attempted"] += int(r.get(f"hits_attempted_{side}") or 0)
+                m["fallback"] += int(r.get(f"fallback_turns_{side}") or 0)
+                m["distance_sum"] += avg_d
+            if (r.get("winner_side") or "").lower() == "draw":
+                agg[r["model_a"]]["draws"] += 1
+                agg[r["model_b"]]["draws"] += 1
+            else:
+                da = float(r.get("damage_dealt_a") or 0.0)
+                db = float(r.get("damage_dealt_b") or 0.0)
+                if da > db:
+                    agg[r["model_a"]]["wins"]   += 1
+                    agg[r["model_b"]]["losses"] += 1
+                elif db > da:
+                    agg[r["model_b"]]["wins"]   += 1
+                    agg[r["model_a"]]["losses"] += 1
+                else:
+                    agg[r["model_a"]]["draws"] += 1
+                    agg[r["model_b"]]["draws"] += 1
+        out = []
+        for m in agg.values():
+            t = m["turns"] or 1
+            att = m["hits_attempted"] or 1
+            n = m["matches"] or 1
+            out.append({
+                "model": m["model"],
+                "matches":         m["matches"],
+                "damage_per_turn": round(m["damage"] / t, 2),
+                "hit_rate":        round(m["hits_landed"] / att, 3),
+                "fallback_rate":   round(m["fallback"] / t, 3),
+                "avg_distance":    round(m["distance_sum"] / n, 1),
+                "total_damage":    round(m["damage"], 1),
+                "hits_landed":     m["hits_landed"],
+                "hits_attempted":  m["hits_attempted"],
+                "wins":            m["wins"],
+                "losses":          m["losses"],
+                "draws":           m["draws"],
+            })
+        out.sort(key=lambda x: -x["damage_per_turn"])
+        return out
+
+    def leaderboard(self, sharp=None, weapon=None, mode=None, arena=None,
+                    blindfolded=None):
+        """Mirror of SQLite leaderboard. Any of (sharp, weapon, mode,
+        arena, blindfolded) can be None to skip that dimension. When
+        ALL five are None the result aggregates per-model across every
+        cell. Tier-S #3: blindfolded is the 5th eval axis."""
         params = {"order": "rating.desc"}
         if sharp:  params["sharp"]  = f"eq.{sharp}"
         if weapon: params["weapon"] = f"eq.{weapon}"
         if mode:   params["mode"]   = f"eq.{mode}"
         if arena:  params["arena"]  = f"eq.{arena}"
-        if sharp or weapon or mode or arena:
+        if blindfolded is not None:
+            params["blindfolded"] = f"eq.{'true' if blindfolded else 'false'}"
+        if sharp or weapon or mode or arena or blindfolded is not None:
             rows = self._rest("GET", "elo", params=params)
             return [dict(r) for r in rows]
         # No filters => aggregate per-model across every cell.
@@ -394,7 +505,7 @@ class SupabaseStorage:
             a = agg.setdefault(r["model"], {
                 "model": r["model"],
                 "sharp": "ALL", "weapon": "ALL",
-                "mode": "ALL", "arena": "ALL",
+                "mode": "ALL", "arena": "ALL", "blindfolded": False,
                 "rating": [], "wins": 0, "losses": 0, "draws": 0})
             a["rating"].append(r["rating"])
             a["wins"] += r["wins"]; a["losses"] += r["losses"]; a["draws"] += r["draws"]

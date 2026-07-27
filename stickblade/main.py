@@ -58,7 +58,8 @@ class Match:
     PH_THINK, PH_SIM, PH_BANNER, PH_OVER = "THINKING", "SIM", "BANNER", "OVER"
 
     def __init__(self, p1_kind, p2_kind, sharp, fx, log_path=None,
-                 mode="macro", weapon="sword", arena="normal", api_key=None):
+                 mode="macro", weapon="sword", arena="normal", api_key=None,
+                 blindfolded=False):
         from weapons import WEAPONS, WEAPON_ZONES
         self.weapon = weapon if weapon in WEAPONS else "sword"
         # keep only zones valid for this weapon; default to first zone
@@ -69,6 +70,9 @@ class Match:
         self.mode = mode if mode in ("macro", "joint") else "macro"
         # ---- arena modifier ----
         self.arena = arena if arena in ("normal", "ice", "low_gravity") else "normal"
+        # Tier S #3: blindfolded variant — build_state() strips derived
+        # spatial hints, forcing the model to reason from raw coords.
+        self.blindfolded = bool(blindfolded)
         self.space = pymunk.Space()
         if self.arena == "low_gravity":
             self.space.gravity = (C.GRAVITY[0], C.GRAVITY[1] * 0.35)  # moon-ish
@@ -137,8 +141,10 @@ class Match:
             if abs(dx) > 2 and (1 if dx > 0 else -1) != f.facing:
                 f.turn_around()
         self.turn += 1
-        s1 = build_state(self.f1, self.f2, self.turn, C.MAX_TURNS, self.last_events, arena=self.arena)
-        s2 = build_state(self.f2, self.f1, self.turn, C.MAX_TURNS, self.last_events, arena=self.arena)
+        s1 = build_state(self.f1, self.f2, self.turn, C.MAX_TURNS, self.last_events,
+                         arena=self.arena, blindfolded=self.blindfolded)
+        s2 = build_state(self.f2, self.f1, self.turn, C.MAX_TURNS, self.last_events,
+                         arena=self.arena, blindfolded=self.blindfolded)
         self.pending = {}
 
         def work():

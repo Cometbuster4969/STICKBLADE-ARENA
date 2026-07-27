@@ -118,7 +118,11 @@ class CombatSystem:
                 "zone": zone, "part": part, "speed": round(rel_v),
                 "damage": round(dmg, 1), "sharp": sharp, "lethal": lethal,
             })
-            self.fx.hit(p, dmg, sharp, lethal, part)
+            # Pass attacker name to FX so the replay recorder can track
+            # per-fighter damage totals (used by the objective-skill
+            # leaderboard). fx.hit() ignores the extra kwarg on the
+            # base FX class; RecordingFX subclass reads it.
+            self.fx.hit(p, dmg, sharp, lethal, part, attacker=attacker.name)
         return handler
 
     def _damage(self, zone, part, speed, sharp):

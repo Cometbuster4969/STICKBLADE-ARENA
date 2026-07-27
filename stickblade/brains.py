@@ -114,7 +114,8 @@ def _vel(body):
     return [int(round(v.x)), int(round(v.y))]
 
 
-def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
+def build_state(me, foe, turn, max_turns, last_events, arena="normal",
+                blindfolded=False):
     """Game state handed to the LLM each turn.
 
     Now includes full spatial awareness: torso + head positions (and velocities)
@@ -124,6 +125,18 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
     needed for an arrow shot, etc.). All values rounded to ints so the JSON
     payload stays small.
 
+    ---- BLINDFOLDED MODE (Tier S #3) ----
+    When `blindfolded=True`, the following pre-computed spatial hints are
+    STRIPPED from the state:
+        - relative.enemy_is        (categorical: right/left/in_front)
+        - relative.enemy_height_relative  (categorical: higher/lower/level)
+        - relative.facing_enemy    (boolean)
+    The raw absolute positions + velocities + facing scalars remain, so
+    the model has to compute these categorical judgments from coords
+    itself. This isolates 'can the model do 2D spatial reasoning' from
+    'can the model react to pre-parsed booleans'. Blindfolded matches
+    occupy their own elo cell — never averaged with normal matches.
+
     ---- PROMPT VERSIONING ----
     The exact contents of this state (which fields, what units, what
     parseable hints) IS the benchmark's evaluation prompt. Any semantic
@@ -131,6 +144,10 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
     granularity) makes historical Elo INCOMPARABLE to future Elo — the
     models are answering a different question, so cross-version ratings
     are apples-to-oranges.
+
+    Blindfolded mode does NOT bump PROMPT_VERSION because it's an
+    additive VARIANT (opt-in per match, separate elo cell) not a
+    replacement. Normal-mode matches see the same state as v1 baseline.
 
     When you change the meaning of what `build_state()` returns:
       1. Bump PROMPT_VERSION below (v1 -> v2 -> v3).
@@ -211,9 +228,15 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
         "turn": turn, "turns_left": max_turns - turn,
         "arena": arena,                       # normal | ice | low_gravity
         "my_hp": round(me.hp, 1), "enemy_hp": round(foe.hp, 1),
-        "distance": round(d),
-        "my_height": "knocked_down" if me_torso.y < me.stand_torso_y - 30 else "standing",
-        "enemy_height": "knocked_down" if foe_torso.y < foe.stand_torso_y - 30 else "standing",
+        # In blindfolded mode we skip `distance` (derivable from torso
+        # coords) and the my_height/enemy_height categorical labels
+        # (derivable from y vs stand_torso_y). Model must compute these
+        # from raw positions.
+        **({} if blindfolded else {
+            "distance": round(d),
+            "my_height": "knocked_down" if me_torso.y < me.stand_torso_y - 30 else "standing",
+            "enemy_height": "knocked_down" if foe_torso.y < foe.stand_torso_y - 30 else "standing",
+        }),
         "enemy_last_action": foe.last_action,
         "my_last_action": me.last_action,
         "enemy_sword_tip_distance_to_me": round((foe.tip_pos() - me_torso).length),
@@ -236,17 +259,22 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal"):
             "velocity": foe_vel,
         },
         # Relative geometry (enemy minus me, signed in world coords).
+        # In blindfolded mode we drop the categorical hints ("enemy_is",
+        # "enemy_height_relative", "facing_enemy") and keep only raw
+        # deltas. The model has to derive left/right/higher/lower/facing
+        # from dx/dy itself. See docstring "BLINDFOLDED MODE".
         "relative": {
             "dx": int(round(dx)),
             "dy": int(round(dy)),
             "head_dx": int(round(head_dx)),
             "head_dy": int(round(head_dy)),
             "head_to_head_distance": int(round(head_dist)),
-            # quick categorical hints so even tiny models can use this:
-            "enemy_is": ("right" if dx > 8 else "left" if dx < -8 else "in_front"),
-            "enemy_height_relative": (
-                "higher" if dy > 18 else "lower" if dy < -18 else "level"),
-            "facing_enemy": bool(facing_enemy),
+            **({} if blindfolded else {
+                "enemy_is": ("right" if dx > 8 else "left" if dx < -8 else "in_front"),
+                "enemy_height_relative": (
+                    "higher" if dy > 18 else "lower" if dy < -18 else "level"),
+                "facing_enemy": bool(facing_enemy),
+            }),
         },
         # Ranged combat helpers (mostly useful for bow / flail leads).
         "ranged_hint": {

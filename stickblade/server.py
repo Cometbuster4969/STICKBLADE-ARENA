@@ -272,6 +272,7 @@ def run_simulation(mid):
                       mode=mm.get("mode", "macro"),
                       weapon=mm.get("weapon", "sword"),
                       arena=mm.get("arena", "normal"),
+                      blindfolded=mm.get("blindfolded", False),
                       api_key=byok)
         # blind mode: hide model identity in the replay itself
         if m["blind"]:
@@ -543,6 +544,12 @@ class MatchReq(BaseModel):
     mode: str = Field(default="macro", max_length=8)    # macro | joint
     weapon: str = Field(default="sword", max_length=8)  # sword | dagger | spear | flail | bow
     arena: str = Field(default="normal", max_length=16) # normal | ice | low_gravity
+    # Tier S #3: blindfolded variant. When true, build_state() strips
+    # derived spatial hints (categorical enemy_is/enemy_height_relative/
+    # facing_enemy + my_height/enemy_height/distance) so the model must
+    # reason from raw torso/head coordinates. Separate elo cell — never
+    # averaged with normal ratings.
+    blindfolded: bool = False
     # BYOK — optional per-match OpenRouter API key. Sent from the user's
     # localStorage only when they've opted in via the "🔑 Use my key"
     # toggle. Server behavior:
@@ -726,9 +733,12 @@ def create_match(req: MatchReq, request: Request):
         or [WEAPON_ZONES[weapon][0]]
     mode = req.mode if req.mode in ("macro", "joint") else "macro"
     arena = req.arena if req.arena in ("normal", "ice", "low_gravity") else "normal"
+    blindfolded = bool(req.blindfolded)
     mid = store.create_match(req.model_a, req.model_b, sharp, req.blind,
-                             weapon, mode=mode, arena=arena)
-    MATCH_MODES[mid] = {"mode": mode, "weapon": weapon, "arena": arena}
+                             weapon, mode=mode, arena=arena,
+                             blindfolded=blindfolded)
+    MATCH_MODES[mid] = {"mode": mode, "weapon": weapon, "arena": arena,
+                        "blindfolded": blindfolded}
     # BYOK: stash the user-supplied key in-memory for the worker to
     # consume. Basic sanity check (OR keys start with 'sk-or-') so we
     # don't accept obvious garbage; anything else with the sk- prefix
@@ -860,15 +870,17 @@ def _wilson_ci(wins: int, losses: int, draws: int, z: float = 1.96):
 
 @app.get("/api/leaderboard")
 def leaderboard(sharp: str | None = None, weapon: str | None = None,
-                mode: str | None = None, arena: str | None = None):
+                mode: str | None = None, arena: str | None = None,
+                blindfolded: bool | None = None):
     """Leaderboard rows with Wilson-score 95%% CI on win-rate + prompt
     version pinning. See _wilson_ci() for statistical rationale.
 
-    Tier-S commit 2: also filterable by mode (macro/joint) and arena
-    (normal/ice/low_gravity). Ratings segment per
-    (model, sharp, weapon, mode, arena) — averaging across mode or
-    arena was silent dishonesty (JOINT mode is a totally different
-    control regime; ice is totally different physics).
+    Filterable by sharp / weapon / mode / arena / blindfolded. Ratings
+    segment per (model, sharp, weapon, mode, arena, blindfolded) —
+    Tier-S #3 added blindfolded as the 5th eval axis. Blindfolded
+    matches strip derived spatial hints from the state, forcing raw-
+    coord reasoning — they're literally a different question and
+    averaging with normal-mode Elo would be dishonest.
 
     Each row includes:
       * rating         — current Elo (K=32, start=1000)
@@ -887,7 +899,7 @@ def leaderboard(sharp: str | None = None, weapon: str | None = None,
         raise HTTPException(400, "mode must be 'macro' or 'joint'")
     if arena is not None and arena not in ("normal", "ice", "low_gravity"):
         raise HTTPException(400, "arena must be 'normal', 'ice', or 'low_gravity'")
-    rows = store.leaderboard(sharp, weapon, mode, arena)
+    rows = store.leaderboard(sharp, weapon, mode, arena, blindfolded)
     for r in rows:
         r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
         r["rating"] = round(r["rating"], 1)
@@ -985,6 +997,36 @@ def list_tournaments():
         if r.get("winner_model"):
             r["winner_name"] = C.ARENA_MODELS.get(r["winner_model"],
                                                   r["winner_model"])
+    return rows
+
+
+@app.get("/api/leaderboard/objective")
+def leaderboard_objective(sharp: str | None = None, weapon: str | None = None,
+                          mode: str | None = None, arena: str | None = None,
+                          blindfolded: bool | None = None):
+    """Objective-skill leaderboard — per-model rollup of proxy metrics
+    (damage_per_turn, hit_rate, fallback_rate, avg_distance) computed
+    from the raw match event stream. Independent of human votes; every
+    completed match contributes regardless of vote status.
+
+    Powers the 'Objective Skill' tab alongside 'Perceived Skill' (the
+    human-vote Elo leaderboard). Decouples ranking from the small-N
+    vote pool — a model with 100 matches and 5 votes still has full
+    objective stats.
+
+    Filters mirror /api/leaderboard (same 5 axes). Blindfolded matches
+    have their own objective leaderboard for the same reason they have
+    their own Elo cell: they're literally a different question.
+
+    Rows sorted by damage_per_turn desc by default; frontend can re-sort.
+    """
+    if mode is not None and mode not in ("macro", "joint"):
+        raise HTTPException(400, "mode must be 'macro' or 'joint'")
+    if arena is not None and arena not in ("normal", "ice", "low_gravity"):
+        raise HTTPException(400, "arena must be 'normal', 'ice', or 'low_gravity'")
+    rows = store.objective_leaderboard(sharp, weapon, mode, arena, blindfolded)
+    for r in rows:
+        r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
     return rows
 
 

@@ -38,14 +38,32 @@ export function startKeepalive() {
  * regime, ice arena is totally different physics. Backend validates
  * enum values and 400s on garbage input.
  */
-export const getLeaderboard = (sharp, weapon, mode, arena) => {
+export const getLeaderboard = (sharp, weapon, mode, arena, blindfolded) => {
   const q = new URLSearchParams();
   if (sharp)  q.set("sharp",  sharp);
   if (weapon) q.set("weapon", weapon);
   if (mode)   q.set("mode",   mode);
   if (arena)  q.set("arena",  arena);
+  if (blindfolded != null) q.set("blindfolded", String(Boolean(blindfolded)));
   const qs = q.toString();
   return api(`/leaderboard${qs ? `?${qs}` : ""}`);
+};
+
+/**
+ * Objective-skill leaderboard — Tier-S #3.
+ * Rolls up proxy metrics (damage_per_turn, hit_rate, fallback_rate,
+ * avg_distance) from the raw match event stream. Independent of the
+ * human-vote Elo path. Same 5-axis filters as getLeaderboard.
+ */
+export const getLeaderboardObjective = (sharp, weapon, mode, arena, blindfolded) => {
+  const q = new URLSearchParams();
+  if (sharp)  q.set("sharp",  sharp);
+  if (weapon) q.set("weapon", weapon);
+  if (mode)   q.set("mode",   mode);
+  if (arena)  q.set("arena",  arena);
+  if (blindfolded != null) q.set("blindfolded", String(Boolean(blindfolded)));
+  const qs = q.toString();
+  return api(`/leaderboard/objective${qs ? `?${qs}` : ""}`);
 };
 
 export const getRecent = () => api("/recent");

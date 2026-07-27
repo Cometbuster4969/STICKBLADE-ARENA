@@ -37,9 +37,10 @@ class RecordingFX(FX):
         super().__init__()
         self.rec = recorder
 
-    def hit(self, p, dmg, sharp, lethal, part):
-        super().hit(p, dmg, sharp, lethal, part)
-        self.rec.add_event("hit", p, dmg=dmg, sharp=sharp, lethal=lethal, part=part)
+    def hit(self, p, dmg, sharp, lethal, part, attacker=None):
+        super().hit(p, dmg, sharp, lethal, part, attacker=attacker)
+        self.rec.add_event("hit", p, dmg=dmg, sharp=sharp, lethal=lethal,
+                           part=part, attacker=attacker)
 
     def clash(self, p):
         super().clash(p)
@@ -71,11 +72,19 @@ class ReplayRecorder:
         self.match = match
 
     # ------------------------------------------------------------ capture
-    def add_event(self, kind, p, dmg=0, sharp=False, lethal=False, part=""):
-        self.events.append({"f": len(self.frames), "k": kind,
-                            "x": round(p[0], 1), "y": round(p[1], 1),
-                            "d": round(dmg, 1), "s": int(bool(sharp)),
-                            "l": int(bool(lethal)), "part": part})
+    def add_event(self, kind, p, dmg=0, sharp=False, lethal=False, part="",
+                  attacker=None):
+        # `attacker` is fighter name ("Fighter A" / "Fighter B") — used
+        # by the proxy-metrics rollup in build() to partition damage
+        # per-side. Optional so existing callers (clash, etc.) keep
+        # working; only 'hit' events actually populate it.
+        ev = {"f": len(self.frames), "k": kind,
+              "x": round(p[0], 1), "y": round(p[1], 1),
+              "d": round(dmg, 1), "s": int(bool(sharp)),
+              "l": int(bool(lethal)), "part": part}
+        if attacker is not None:
+            ev["by"] = attacker    # short key, JSON payload stays small
+        self.events.append(ev)
 
     def tick(self):
         """Call once per 60fps loop iteration, after match.update()."""
@@ -131,6 +140,12 @@ class ReplayRecorder:
                                    m.f2.name: round(m.f2.hp, 1)}}
         winner_txt = m.winner or (f"{result['winner']} ahead" if result["winner"]
                                   else "unfinished")
+        # Tier S #3: compute proxy metrics from stored events + thoughts +
+        # frames. These are OBJECTIVE (physics-derived, not vote-derived)
+        # so the objective-skill leaderboard can rank models without
+        # needing the small-N human vote pool. Cheap: single pass over
+        # events (~dozens per match) + one pass over thoughts (~24).
+        metrics = self._proxy_metrics()
         return {
             "v": 2,
             "meta": {
@@ -149,10 +164,114 @@ class ReplayRecorder:
                 # how many turns used a scripted fallback brain (LLM error/timeout)
                 "fallback_turns": self.fallback_turns,
                 "total_turns": m.turn,
+                # Tier S #3: objective proxy metrics per fighter, computed
+                # from the event stream. Powers the objective-skill
+                # leaderboard alongside human-vote Elo. See _proxy_metrics()
+                # for definitions.
+                "metrics": metrics,
             },
             "frames": self.frames,
             "events": self.events,
             "thoughts": self.thoughts,
+        }
+
+    # ---------------------------------------------- proxy metrics rollup
+    def _proxy_metrics(self):
+        """Roll up objective per-fighter metrics from stored events +
+        thoughts + frames. All computed once at build() time — cheap,
+        deterministic, replayable from the stored data.
+
+        Definitions (locked in Tier S #3, document changes here if
+        they evolve):
+          damage_dealt_{a,b}   sum of `d` on hit events where by==A/B
+          hits_landed_{a,b}    count of hit events with damage > 0
+                               where by==A/B
+          hits_attempted_{a,b} count of turns where that fighter's
+                               action is a strike (not guard/ready)
+          fallback_turns_{a,b} count of turns where that fighter used
+                               scripted-fallback brain (LLM timed
+                               out / errored / returned malformed JSON)
+          avg_distance         mean over sampled frames of torso-torso
+                               distance in pixels
+        """
+        m = self.match
+        a_name = m.f1.name
+        b_name = m.f2.name
+        # Actions that DON'T count as attempted attacks. Anything else
+        # is a strike/swing/shot attempt (whether it lands or not).
+        DEFENSIVE_ACTIONS = {"guard_high", "guard_low", "ready"}
+
+        d_a = d_b = 0.0
+        h_a = h_b = 0
+        for ev in self.events:
+            if ev.get("k") != "hit":
+                continue
+            by = ev.get("by")
+            dmg = float(ev.get("d", 0))
+            if dmg <= 0:
+                continue
+            if by == a_name:
+                d_a += dmg;  h_a += 1
+            elif by == b_name:
+                d_b += dmg;  h_b += 1
+
+        att_a = att_b = 0
+        fb_a = fb_b = 0
+        # Walk the match log directly for authoritative per-side action
+        # + fallback data (self.thoughts is a UI convenience mirror; the
+        # raw log has per-side reply dicts with _fallback flags).
+        for t in getattr(m, "log", []):
+            a_reply = t.get(a_name, {}) or {}
+            b_reply = t.get(b_name, {}) or {}
+            a_action = a_reply.get("action")
+            b_action = b_reply.get("action")
+            if a_action and a_action not in DEFENSIVE_ACTIONS:
+                att_a += 1
+            if b_action and b_action not in DEFENSIVE_ACTIONS:
+                att_b += 1
+            if a_reply.get("_fallback"):
+                fb_a += 1
+            if b_reply.get("_fallback"):
+                fb_b += 1
+
+        # Avg torso-torso distance across sampled frames. Frame layout
+        # from tick(): first 4 slots are meta, then per-fighter body
+        # positions in BODY_ORDER (+ optional FLAIL_EXTRA). Torso is
+        # the first body in BODY_ORDER per ragdoll.BODY_ORDER — index
+        # 4 (f1 torso x), 7 (f1 torso y from BODY_ORDER order), 4+len*3
+        # for f2. Safer: import BODY_ORDER and compute the offsets
+        # explicitly so this doesn't rot if the frame schema changes.
+        from ragdoll import BODY_ORDER
+        try:
+            torso_idx = BODY_ORDER.index("torso")
+        except ValueError:
+            torso_idx = 0   # if 'torso' isn't in BODY_ORDER anymore, fallback
+        stride = len(BODY_ORDER) + (5 if m.weapon == "flail" else 0)  # FLAIL_EXTRA=5
+        f1_torso_off = 4 + torso_idx * 3
+        f2_torso_off = 4 + stride * 3 + torso_idx * 3
+        total_d = 0.0
+        n_samples = 0
+        for row in self.frames:
+            # Skip frames with fewer floats than expected (partial rows
+            # from early match teardown — belt and braces, cheap).
+            if len(row) <= f2_torso_off + 1:
+                continue
+            x1, y1 = row[f1_torso_off], row[f1_torso_off + 1]
+            x2, y2 = row[f2_torso_off], row[f2_torso_off + 1]
+            total_d += ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+            n_samples += 1
+        avg_distance = round(total_d / n_samples, 1) if n_samples else 0.0
+
+        return {
+            "damage_dealt_a":   round(d_a, 1),
+            "damage_dealt_b":   round(d_b, 1),
+            "hits_landed_a":    h_a,
+            "hits_landed_b":    h_b,
+            "hits_attempted_a": att_a,
+            "hits_attempted_b": att_b,
+            "fallback_turns_a": fb_a,
+            "fallback_turns_b": fb_b,
+            "avg_distance":     avg_distance,
         }
 
     def save_json(self, path):

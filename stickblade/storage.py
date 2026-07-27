@@ -47,6 +47,11 @@ class LocalStorage:
                 -- don't set them behave exactly as before the migration.
                 mode TEXT DEFAULT 'macro',
                 arena TEXT DEFAULT 'normal',
+                -- Tier S #3: blindfolded variant. When true, build_state()
+                -- strips derived spatial booleans (facing_enemy, higher/
+                -- lower/level) and forces the model to reason from raw
+                -- coords. Separate rating cell = separate eval axis.
+                blindfolded INTEGER DEFAULT 0,
                 status TEXT,            -- queued | running | done | error
                 winner_side TEXT,       -- a | b | draw | NULL  (canvas-side: a=green, b=blue)
                 method TEXT,
@@ -55,28 +60,43 @@ class LocalStorage:
                 blind INTEGER DEFAULT 1,
                 voted INTEGER DEFAULT 0,
                 flip INTEGER DEFAULT 0, -- 1 = model_a was rendered as Fighter B (blue)
-                commentary TEXT         -- post-fight 2-sentence commentary/roast
+                commentary TEXT,        -- post-fight 2-sentence commentary/roast
+                -- Tier S #3: automated proxy metrics computed from the
+                -- replay event stream at finish_match() time. Powers the
+                -- objective-skill leaderboard alongside human-vote Elo.
+                -- All NULL if the replay didn't include a metrics dict
+                -- (older code, malformed replay). See recorder._proxy_metrics.
+                damage_dealt_a   REAL,
+                damage_dealt_b   REAL,
+                hits_landed_a    INTEGER,
+                hits_landed_b    INTEGER,
+                hits_attempted_a INTEGER,
+                hits_attempted_b INTEGER,
+                fallback_turns_a INTEGER,
+                fallback_turns_b INTEGER,
+                avg_distance     REAL
             );
             CREATE TABLE IF NOT EXISTS votes (
                 id TEXT PRIMARY KEY,
                 match_id TEXT, created REAL,
                 choice TEXT              -- a | b | draw
             );
-            -- Elo is segmented per (model, sharp, weapon, mode, arena). Prior
-            -- schema had (model, sharp, weapon) — the mode/arena migration
-            -- below promotes the PK for existing installs. Rows created
-            -- before the migration are treated as (macro, normal), which
-            -- is what production had been running all along.
+            -- Elo is segmented per (model, sharp, weapon, mode, arena,
+            -- blindfolded). PK evolution documented in AGENTS.md §10.5
+            -- ELO CELL KEY changelog. Pre-migration rows land at the
+            -- (macro, normal, 0) defaults which is what every historical
+            -- match was actually run under.
             CREATE TABLE IF NOT EXISTS elo (
                 model TEXT,
                 sharp TEXT,
                 weapon TEXT DEFAULT 'sword',
                 mode TEXT DEFAULT 'macro',
                 arena TEXT DEFAULT 'normal',
+                blindfolded INTEGER DEFAULT 0,
                 rating REAL,
                 wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0,
                 draws INTEGER DEFAULT 0,
-                PRIMARY KEY (model, sharp, weapon, mode, arena)
+                PRIMARY KEY (model, sharp, weapon, mode, arena, blindfolded)
             );
             CREATE TABLE IF NOT EXISTS tournaments (
                 id            TEXT PRIMARY KEY,
@@ -107,6 +127,7 @@ class LocalStorage:
             """)
             # ------ idempotent migrations (so existing DBs pick up new cols)
             for ddl in [
+                # Tier S #1 → #2 legacy
                 "ALTER TABLE matches ADD COLUMN weapon TEXT DEFAULT 'sword'",
                 "ALTER TABLE matches ADD COLUMN flip   INTEGER DEFAULT 0",
                 "ALTER TABLE matches ADD COLUMN commentary TEXT",
@@ -115,37 +136,51 @@ class LocalStorage:
                 "ALTER TABLE elo     ADD COLUMN weapon TEXT DEFAULT 'sword'",
                 "ALTER TABLE elo     ADD COLUMN mode   TEXT DEFAULT 'macro'",
                 "ALTER TABLE elo     ADD COLUMN arena  TEXT DEFAULT 'normal'",
+                # Tier S #3: blindfolded variant + proxy metric columns
+                "ALTER TABLE matches ADD COLUMN blindfolded      INTEGER DEFAULT 0",
+                "ALTER TABLE matches ADD COLUMN damage_dealt_a   REAL",
+                "ALTER TABLE matches ADD COLUMN damage_dealt_b   REAL",
+                "ALTER TABLE matches ADD COLUMN hits_landed_a    INTEGER",
+                "ALTER TABLE matches ADD COLUMN hits_landed_b    INTEGER",
+                "ALTER TABLE matches ADD COLUMN hits_attempted_a INTEGER",
+                "ALTER TABLE matches ADD COLUMN hits_attempted_b INTEGER",
+                "ALTER TABLE matches ADD COLUMN fallback_turns_a INTEGER",
+                "ALTER TABLE matches ADD COLUMN fallback_turns_b INTEGER",
+                "ALTER TABLE matches ADD COLUMN avg_distance     REAL",
+                "ALTER TABLE elo     ADD COLUMN blindfolded      INTEGER DEFAULT 0",
             ]:
                 try:
                     c.execute(ddl)
                 except sqlite3.OperationalError:
                     pass  # column already there
-            # ------ PK promotion on `elo`: (model,sharp,weapon) -> +(mode,arena)
-            # SQLite can't ALTER a PK. If the existing `elo` PK doesn't
-            # include mode+arena, we rebuild the table (create-copy-swap)
-            # inside a txn so a crash mid-migration doesn't leave a broken
-            # schema. Detection: look at pragma index list to see if the
-            # existing PK includes 'mode'.
+            # ------ PK promotion on `elo`
+            # PK evolution (see AGENTS.md §10.5 ELO CELL KEY changelog):
+            #   original: (model, sharp)
+            #   Tier S #1: (model, sharp, weapon)                   [pre-CI era]
+            #   Tier S #2: (model, sharp, weapon, mode, arena)      [prior commit]
+            #   Tier S #3: (model, sharp, weapon, mode, arena, blindfolded)  [this]
+            # SQLite can't ALTER a PK. If the existing PK isn't the full
+            # 6-tuple, rebuild the table (create-copy-swap) inside a txn.
             try:
                 cols = c.execute("PRAGMA table_info(elo)").fetchall()
                 pk_cols = {row["name"] for row in cols if row["pk"]}
-                needs_promotion = "mode" not in pk_cols or "arena" not in pk_cols
+                needs_promotion = ("mode" not in pk_cols or "arena" not in pk_cols
+                                   or "blindfolded" not in pk_cols)
             except sqlite3.OperationalError:
                 needs_promotion = False
             if needs_promotion:
                 # Backfill NULLs on any pre-existing rows so the composite
-                # PK is well-defined (COALESCE isn't cheap; explicit UPDATE
-                # runs once at migration time).
-                c.execute("UPDATE elo SET mode  = COALESCE(mode,  'macro')")
-                c.execute("UPDATE elo SET arena = COALESCE(arena, 'normal')")
-                c.execute("UPDATE elo SET weapon= COALESCE(weapon,'sword')")
-                # Recreate table with the correct PK, copy data, swap in.
-                # NOTE: use individual c.execute() calls (NOT executescript)
+                # PK is well-defined (explicit UPDATE runs once at
+                # migration time — no per-vote COALESCE cost).
+                c.execute("UPDATE elo SET mode        = COALESCE(mode,        'macro')")
+                c.execute("UPDATE elo SET arena       = COALESCE(arena,       'normal')")
+                c.execute("UPDATE elo SET weapon      = COALESCE(weapon,      'sword')")
+                c.execute("UPDATE elo SET blindfolded = COALESCE(blindfolded, 0)")
+                # Recreate table with the full 6-key PK, copy data, swap in.
+                # NOTE: individual c.execute() calls (NOT executescript)
                 # because executescript() issues an implicit COMMIT that
                 # conflicts with sqlite3's connection-level implicit txn
-                # under `with self._conn() as c:`. The visible symptom was
-                # the copied rows disappearing after the DROP. Individual
-                # execute() calls run in the same txn cleanly.
+                # under `with self._conn() as c:`. Learned in Tier S #2.
                 c.execute("""
                     CREATE TABLE elo_new (
                         model TEXT,
@@ -153,48 +188,49 @@ class LocalStorage:
                         weapon TEXT DEFAULT 'sword',
                         mode TEXT DEFAULT 'macro',
                         arena TEXT DEFAULT 'normal',
+                        blindfolded INTEGER DEFAULT 0,
                         rating REAL,
                         wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0,
                         draws INTEGER DEFAULT 0,
-                        PRIMARY KEY (model, sharp, weapon, mode, arena)
+                        PRIMARY KEY (model, sharp, weapon, mode, arena, blindfolded)
                     )
                 """)
                 c.execute("""
                     INSERT INTO elo_new
-                        (model, sharp, weapon, mode, arena, rating, wins, losses, draws)
+                        (model, sharp, weapon, mode, arena, blindfolded,
+                         rating, wins, losses, draws)
                     SELECT
                         model, sharp, weapon,
-                        COALESCE(mode,  'macro'),
-                        COALESCE(arena, 'normal'),
+                        COALESCE(mode,        'macro'),
+                        COALESCE(arena,       'normal'),
+                        COALESCE(blindfolded, 0),
                         rating, wins, losses, draws
                     FROM elo
                 """)
                 c.execute("DROP TABLE elo")
                 c.execute("ALTER TABLE elo_new RENAME TO elo")
-                # Force commit here so the rebuild is durable even if the
-                # outer `with self._conn() as c:` context's implicit COMMIT
-                # runs into weirdness with a mix of executescript + DDL
-                # (Python sqlite3's txn semantics get confusing when a
-                # single connection issues both script + statements).
-                # Explicit commit = zero ambiguity, migration lands.
+                # Explicit commit: defense-in-depth against Python
+                # sqlite3's txn tracker getting confused after mixed DDL.
                 c.commit()
 
     # ----------------------------------------------------------- matches
     def create_match(self, model_a, model_b, sharp, blind=True, weapon="sword",
-                     mode="macro", arena="normal"):
-        """Insert a new match. `mode` and `arena` default to the pre-Tier-S-
-        commit-2 defaults (macro control, normal arena) so any caller that
-        hasn't been updated behaves exactly as before. New callers should
-        pass the actual mode/arena so votes route to the correct elo cell.
+                     mode="macro", arena="normal", blindfolded=False):
+        """Insert a new match. mode/arena/blindfolded default to the
+        historic defaults (macro control, normal arena, not blindfolded)
+        so any caller that hasn't been updated behaves exactly as before.
+        New callers pass explicit values so votes route to the correct
+        elo cell.
         """
         mid = uuid.uuid4().hex[:12]
         with self._lock, self._conn() as c:
             c.execute(
                 "INSERT INTO matches (id, created, model_a, model_b, sharp,"
-                " weapon, mode, arena, status, blind)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " weapon, mode, arena, blindfolded, status, blind)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (mid, time.time(), model_a, model_b, ",".join(sharp),
-                 weapon, mode, arena, "queued", int(blind)))
+                 weapon, mode, arena, int(bool(blindfolded)),
+                 "queued", int(blind)))
         return mid
 
     def set_flip(self, mid, flip: bool):
@@ -213,11 +249,28 @@ class LocalStorage:
         path = os.path.join(self.replay_dir, mid + ".json")
         with open(path, "w") as f:
             json.dump(replay, f, separators=(",", ":"))
+        # Tier S #3: extract proxy metrics from replay.meta.metrics
+        # and persist as top-level columns on `matches`. Kept optional
+        # (COALESCE-safe) so a replay build that didn't include metrics
+        # (older code paths, malformed replays) doesn't crash the finish.
+        m = (replay.get("meta") or {}).get("metrics") or {}
         with self._lock, self._conn() as c:
             c.execute(
                 "UPDATE matches SET status='done', winner_side=?, method=?,"
-                " turns=?, commentary=? WHERE id=?",
-                (winner_side, method, turns, commentary, mid))
+                " turns=?, commentary=?,"
+                " damage_dealt_a=?, damage_dealt_b=?,"
+                " hits_landed_a=?, hits_landed_b=?,"
+                " hits_attempted_a=?, hits_attempted_b=?,"
+                " fallback_turns_a=?, fallback_turns_b=?,"
+                " avg_distance=?"
+                " WHERE id=?",
+                (winner_side, method, turns, commentary,
+                 m.get("damage_dealt_a"),   m.get("damage_dealt_b"),
+                 m.get("hits_landed_a"),    m.get("hits_landed_b"),
+                 m.get("hits_attempted_a"), m.get("hits_attempted_b"),
+                 m.get("fallback_turns_a"), m.get("fallback_turns_b"),
+                 m.get("avg_distance"),
+                 mid))
 
     def get_match(self, mid):
         with self._conn() as c:
@@ -325,18 +378,19 @@ class LocalStorage:
         }
 
     # ----------------------------------------------------------- voting / elo
-    def _get_elo(self, c, model, sharp, weapon, mode="macro", arena="normal"):
+    def _get_elo(self, c, model, sharp, weapon, mode="macro", arena="normal",
+                 blindfolded=0):
         """Fetch or lazily-create the elo row for a specific eval cell.
-        Cell key is (model, sharp, weapon, mode, arena) — see Tier-S
-        commit 2 rationale in AGENTS.md §10.5."""
+        Cell key is (model, sharp, weapon, mode, arena, blindfolded)
+        — Tier S #3 extension of the #2 key. See AGENTS.md §10.5."""
         r = c.execute("SELECT rating FROM elo WHERE model=? AND sharp=?"
-                      " AND weapon=? AND mode=? AND arena=?",
-                      (model, sharp, weapon, mode, arena)).fetchone()
+                      " AND weapon=? AND mode=? AND arena=? AND blindfolded=?",
+                      (model, sharp, weapon, mode, arena, blindfolded)).fetchone()
         if r:
             return r["rating"]
-        c.execute("INSERT INTO elo (model, sharp, weapon, mode, arena, rating)"
-                  " VALUES (?,?,?,?,?,?)",
-                  (model, sharp, weapon, mode, arena, START_ELO))
+        c.execute("INSERT INTO elo (model, sharp, weapon, mode, arena,"
+                  " blindfolded, rating) VALUES (?,?,?,?,?,?,?)",
+                  (model, sharp, weapon, mode, arena, blindfolded, START_ELO))
         return START_ELO
 
     @staticmethod
@@ -358,12 +412,14 @@ class LocalStorage:
             return {"already_voted": True, **self.reveal(mid)}
         sharp = m["sharp"]
         weapon = m.get("weapon") or "sword"
-        # Pull mode + arena from the match row so votes route to the SAME
-        # elo cell that the match was played under. Pre-Tier-S-commit-2
-        # matches (no mode/arena set) fall back to the historic defaults
-        # via COALESCE-in-Python; that's what those matches actually were.
+        # Pull mode + arena + blindfolded from the match row so votes
+        # route to the SAME elo cell the match was played under. Pre-
+        # migration matches (NULL fields) fall back to historic
+        # defaults — macro/normal/not-blindfolded — because that's what
+        # every historical match actually was.
         mode = m.get("mode") or "macro"
         arena = m.get("arena") or "normal"
+        blindfolded = int(m.get("blindfolded") or 0)
         flip = bool(m.get("flip"))
         a, b = m["model_a"], m["model_b"]
         # translate canvas vote -> model_a/model_b axis
@@ -376,15 +432,15 @@ class LocalStorage:
             # delta must be zero (you can't beat yourself) and W/L would
             # double-update the same row and clobber. Log as a single draw.
             if a == b:
-                self._get_elo(c, a, sharp, weapon, mode, arena)   # ensure row exists
+                self._get_elo(c, a, sharp, weapon, mode, arena, blindfolded)
                 c.execute("UPDATE elo SET draws=draws+1 "
                           "WHERE model=? AND sharp=? AND weapon=?"
-                          " AND mode=? AND arena=?",
-                          (a, sharp, weapon, mode, arena))
+                          " AND mode=? AND arena=? AND blindfolded=?",
+                          (a, sharp, weapon, mode, arena, blindfolded))
                 c.execute("UPDATE matches SET voted=1 WHERE id=?", (mid,))
                 return {"elo_change": {a: 0.0}, **self.reveal(mid)}
-            ra, rb = (self._get_elo(c, a, sharp, weapon, mode, arena),
-                      self._get_elo(c, b, sharp, weapon, mode, arena))
+            ra, rb = (self._get_elo(c, a, sharp, weapon, mode, arena, blindfolded),
+                      self._get_elo(c, b, sharp, weapon, mode, arena, blindfolded))
             ea = 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
             sa = {"a": 1.0, "b": 0.0, "draw": 0.5}[choice_model]
             ra2 = ra + K_FACTOR * (sa - ea)
@@ -395,9 +451,10 @@ class LocalStorage:
             # Bandit flags all of these as B608 SQL injection but they aren't;
             # B608 is globally skipped in .bandit for this reason.
             wa, la, da = ("wins", "losses", "draws")
-            W = "model=? AND sharp=? AND weapon=? AND mode=? AND arena=?"
-            ax = (a, sharp, weapon, mode, arena)
-            bx = (b, sharp, weapon, mode, arena)
+            W = ("model=? AND sharp=? AND weapon=? AND mode=? AND arena=?"
+                 " AND blindfolded=?")
+            ax = (a, sharp, weapon, mode, arena, blindfolded)
+            bx = (b, sharp, weapon, mode, arena, blindfolded)
             if choice_model == "a":
                 c.execute(f"UPDATE elo SET rating=?, {wa}={wa}+1 WHERE {W}", (ra2, *ax))
                 c.execute(f"UPDATE elo SET rating=?, {la}={la}+1 WHERE {W}", (rb2, *bx))
@@ -503,18 +560,142 @@ class LocalStorage:
                       " WHERE tournament_id=? AND round=? AND slot=?",
                       (winner_model, tid, round_n, slot))
 
-    def leaderboard(self, sharp=None, weapon=None, mode=None, arena=None):
-        """Leaderboard filter. Any of (sharp, weapon, mode, arena) can be
-        None; None = don't filter on that dimension. When ALL four are
-        None the query aggregates across every cell per-model (the
-        historic 'overall' view). Any non-None combination returns the
-        raw rows matching those filters.
+    def objective_leaderboard(self, sharp=None, weapon=None, mode=None,
+                              arena=None, blindfolded=None):
+        """Objective-skill leaderboard — aggregates per-model proxy
+        metrics across all completed matches (whether voted on or not).
+        Independent of the human-vote Elo path. See Tier-S #3.
 
-        Tier-S commit 2: previously segmented by (sharp, weapon) only.
-        Now supports (sharp, weapon, mode, arena) segmentation — mode
-        and arena are legitimate eval axes (macro vs joint = totally
-        different control regime; ice vs normal = totally different
-        physics), and averaging across them was silent dishonesty."""
+        For each model, computes:
+          matches            total done matches this model played
+          damage_per_turn    total damage dealt / total turns played
+          hit_rate           hits_landed / hits_attempted (in [0, 1])
+          fallback_rate      fallback_turns / total_turns (lower = better)
+          avg_distance       mean of match-level avg_distance
+          wins/losses/draws  from winner_side (only when voted, so N may
+                             be lower than `matches`)
+
+        Since a match has two fighters, each done match contributes to
+        BOTH models' stats — model_a gets *_a fields, model_b gets *_b.
+        Excludes matches where the metric column is NULL (pre-Tier-S-3
+        matches don't have these fields populated).
+
+        Filters mirror the vote-based leaderboard for consistency."""
+        with self._conn() as c:
+            where = ["status='done'", "damage_dealt_a IS NOT NULL"]
+            params = []
+            if sharp:  where.append("sharp=?");  params.append(sharp)
+            if weapon: where.append("weapon=?"); params.append(weapon)
+            if mode:   where.append("mode=?");   params.append(mode)
+            if arena:  where.append("arena=?");  params.append(arena)
+            if blindfolded is not None:
+                where.append("blindfolded=?")
+                params.append(int(bool(blindfolded)))
+            # 'where' is hardcoded strings only; user values through `params`.
+            # Bandit B608 false positive, globally skipped.
+            rows = c.execute(
+                "SELECT model_a, model_b, winner_side, turns,"
+                " damage_dealt_a, damage_dealt_b,"
+                " hits_landed_a, hits_landed_b,"
+                " hits_attempted_a, hits_attempted_b,"
+                " fallback_turns_a, fallback_turns_b,"
+                " avg_distance"
+                " FROM matches WHERE " + " AND ".join(where),
+                params).fetchall()
+        # Roll up per-model
+        agg = {}
+        for r in rows:
+            r = dict(r)
+            t = int(r["turns"] or 0)
+            avg_d = float(r["avg_distance"] or 0.0)
+            for side, model in (("a", r["model_a"]), ("b", r["model_b"])):
+                m = agg.setdefault(model, {
+                    "model": model, "matches": 0, "turns": 0,
+                    "damage": 0.0, "hits_landed": 0, "hits_attempted": 0,
+                    "fallback": 0, "distance_sum": 0.0,
+                    "wins": 0, "losses": 0, "draws": 0,
+                })
+                m["matches"] += 1
+                m["turns"] += t
+                m["damage"] += float(r[f"damage_dealt_{side}"] or 0.0)
+                m["hits_landed"] += int(r[f"hits_landed_{side}"] or 0)
+                m["hits_attempted"] += int(r[f"hits_attempted_{side}"] or 0)
+                m["fallback"] += int(r[f"fallback_turns_{side}"] or 0)
+                m["distance_sum"] += avg_d
+                # Convert canvas-side winner into model_a/model_b outcome.
+                # Note: `winner_side` is canvas-side ("a"/"b"/"draw"),
+                # and flip mapping isn't in this row. We DON'T unflip
+                # here because objective metrics aren't tied to the
+                # canvas-side vote — model_a always plays the model_a
+                # role from the sim perspective. The winner_side maps
+                # through flip in the storage vote path; for objective
+                # W/L we treat winner_side as canvas which corresponds
+                # to sim slot after flip resolution... this is the same
+                # ambiguity the head_to_head query handles. Simplest
+                # honest approach: only count W/L when winner_side is
+                # NOT draw, and attribute the win to whichever side's
+                # damage was higher. That's tautological to physics but
+                # matches "who actually killed whom" which is what
+                # objective means.
+                pass
+            # Attribute W/L by higher damage-dealt this match (physics-
+            # authoritative, ignores flip / vote canvas mapping which
+            # objective metrics shouldn't depend on).
+            if (r["winner_side"] or "").lower() == "draw":
+                agg[r["model_a"]]["draws"] += 1
+                agg[r["model_b"]]["draws"] += 1
+            else:
+                da = float(r["damage_dealt_a"] or 0.0)
+                db = float(r["damage_dealt_b"] or 0.0)
+                if da > db:
+                    agg[r["model_a"]]["wins"]   += 1
+                    agg[r["model_b"]]["losses"] += 1
+                elif db > da:
+                    agg[r["model_b"]]["wins"]   += 1
+                    agg[r["model_a"]]["losses"] += 1
+                # equal damage on a non-draw match = physics tie; count draw
+                else:
+                    agg[r["model_a"]]["draws"] += 1
+                    agg[r["model_b"]]["draws"] += 1
+        # Finalize derived metrics
+        out = []
+        for m in agg.values():
+            t = m["turns"] or 1
+            att = m["hits_attempted"] or 1
+            n = m["matches"] or 1
+            out.append({
+                "model": m["model"],
+                "matches":         m["matches"],
+                "damage_per_turn": round(m["damage"] / t, 2),
+                "hit_rate":        round(m["hits_landed"] / att, 3),
+                "fallback_rate":   round(m["fallback"] / t, 3),
+                "avg_distance":    round(m["distance_sum"] / n, 1),
+                "total_damage":    round(m["damage"], 1),
+                "hits_landed":     m["hits_landed"],
+                "hits_attempted":  m["hits_attempted"],
+                "wins":            m["wins"],
+                "losses":          m["losses"],
+                "draws":           m["draws"],
+            })
+        # Default sort: damage_per_turn desc. Frontend can re-sort.
+        out.sort(key=lambda x: -x["damage_per_turn"])
+        return out
+
+    def leaderboard(self, sharp=None, weapon=None, mode=None, arena=None,
+                    blindfolded=None):
+        """Leaderboard filter. Any of (sharp, weapon, mode, arena,
+        blindfolded) can be None to skip that dimension. When ALL five
+        are None the query aggregates across every cell per-model
+        (historic 'overall' view).
+
+        Tier-S #3: blindfolded added as 5th eval axis. The blindfolded
+        variant strips derived spatial booleans from state — it's a
+        different question the model is answering, so its Elo is not
+        comparable to normal-mode Elo. Segmenting keeps the leaderboard
+        honest.
+
+        `blindfolded` filter accepts True/False/None (Python) or 1/0/None
+        (int). We coerce to int here so callers can pass either shape."""
         with self._conn() as c:
             where, params = [], []
             if sharp:
@@ -525,18 +706,19 @@ class LocalStorage:
                 where.append("mode=?"); params.append(mode)
             if arena:
                 where.append("arena=?"); params.append(arena)
+            if blindfolded is not None:
+                where.append("blindfolded=?"); params.append(int(bool(blindfolded)))
             if where:
-                # 'where' only ever contains hardcoded strings ("sharp=?",
-                # "weapon=?", "mode=?", "arena=?"); user values go through
-                # the `params` tuple (parameterized). Bandit flags this as
-                # B608 — globally skipped in .bandit for that reason.
+                # 'where' only ever contains hardcoded strings; user values
+                # flow through `params`. Bandit B608 false positive, skipped
+                # globally in .bandit.
                 rows = c.execute(
                     "SELECT * FROM elo WHERE " + " AND ".join(where) +
                     " ORDER BY rating DESC", params).fetchall()
             else:
                 rows = c.execute(
                     "SELECT model, 'ALL' as sharp, 'ALL' as weapon,"
-                    " 'ALL' as mode, 'ALL' as arena,"
+                    " 'ALL' as mode, 'ALL' as arena, 0 as blindfolded,"
                     " AVG(rating) as rating,"
                     " SUM(wins) as wins, SUM(losses) as losses,"
                     " SUM(draws) as draws FROM elo GROUP BY model"
