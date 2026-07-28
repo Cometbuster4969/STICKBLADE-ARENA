@@ -102,6 +102,14 @@ ARENA_MODELS = {
     # ---- no API needed ----
     "mock:duelist":                               "Mock Duelist (no API)",
     "mock:berserker":                             "Mock Berserker (no API)",
+    # ---- non-LLM baseline bots (Tier-A #2) ----
+    # Fixed-behavior reference opponents. Scale-independent y-axis
+    # for the leaderboard: "GPT-OSS 120B beats ScriptedPro 78% of matches"
+    # is a much more portable claim than a raw Elo number.
+    "bot:random":                                 "🎲 Random Bot (baseline)",
+    "bot:greedy":                                 "⚡ Greedy Attacker (baseline)",
+    "bot:distance":                               "📏 Distance Bot (baseline)",
+    "bot:pro":                                    "🏆 Scripted Pro (baseline)",
 }
 
 # ---------------- Colors (Toribash-ish dark arena) ----------------

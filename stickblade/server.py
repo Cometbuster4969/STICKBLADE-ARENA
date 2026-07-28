@@ -1030,6 +1030,72 @@ def leaderboard_objective(sharp: str | None = None, weapon: str | None = None,
     return rows
 
 
+@app.get("/api/export")
+def export_matches(
+    since: float | None = None,
+    until: float | None = None,
+    limit: int = 10000,
+    fmt: str = "json",
+    include_votes: bool = True,
+):
+    """Tier-A #3: bulk dataset export. Powers the eventual daily HF
+    Datasets snapshot (huggingface.co/datasets/Pioneer37/stickblade-
+    matches). Also directly usable by researchers who want to grab a
+    reproducible slice for offline analysis.
+
+    Query params:
+      * `since` / `until` — unix epoch bounds on matches.created.
+        Omit for unbounded. Both bounded = closed interval.
+      * `limit` — hard cap [1, 50000]. Default 10000.
+      * `fmt` — 'json' (default: {matches:[...], count, exported_at,
+        prompt_version, since, until}) OR 'jsonl' (one match per
+        line, streaming-friendly, ideal for HF Datasets ingestion).
+      * `include_votes` — attach anonymous vote objects per match.
+        Default true. Set false for lighter payload.
+
+    Deliberately excludes replay JSON blobs (per-match multi-MB;
+    fetch individually via /api/replay/{mid} using the ids surfaced
+    here). Includes: model_a/b, sharp, weapon, mode, arena,
+    blindfolded, status, winner_side, method, turns, commentary,
+    proxy metrics (damage/hits/fallback/avg_distance per side),
+    prompt_version tag.
+
+    No PII: no IPs, no user ids, no BYOK residue. Votes are
+    anonymous (id + match_id + created + choice only). Same
+    exposure profile as /api/leaderboard.
+
+    Rate-limited by the same middleware as other endpoints. If
+    someone hammers it we'll add a dedicated slower bucket, not
+    yet needed at 200 monthly visitors.
+    """
+    lim = max(1, min(int(limit or 10000), 50000))
+    if fmt not in ("json", "jsonl"):
+        raise HTTPException(400, "fmt must be 'json' or 'jsonl'")
+    rows = store.export_matches(since=since, until=until, limit=lim,
+                                include_votes=bool(include_votes))
+    if fmt == "jsonl":
+        # Streaming-friendly one-line-per-match. HF Datasets ingests
+        # this directly with `load_dataset("json", data_files=url)`.
+        import json as _json
+        from fastapi.responses import PlainTextResponse
+        body = "\n".join(_json.dumps(r, separators=(",", ":")) for r in rows)
+        return PlainTextResponse(
+            body, media_type="application/x-ndjson",
+            headers={"Content-Disposition":
+                     'attachment; filename="stickblade-matches.jsonl"'})
+    # Default JSON wrapper — carries metadata alongside the array so
+    # dataset consumers can pin their analysis to a specific export.
+    import time as _time
+    from brains import PROMPT_VERSION
+    return {
+        "count": len(rows),
+        "exported_at": _time.time(),
+        "prompt_version": PROMPT_VERSION,
+        "since": since, "until": until, "limit": lim,
+        "matches": rows,
+    }
+
+
 @app.get("/api/stats/vote_rate")
 def stats_vote_rate(days: int = 7):
     """Public vote-through rate — what fraction of completed matches

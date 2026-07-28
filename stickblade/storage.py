@@ -291,6 +291,69 @@ class LocalStorage:
                 " ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+    def export_matches(self, since=None, until=None, limit=10000,
+                       include_votes=True):
+        """Tier-A #3: bulk export of completed matches for the dataset
+        dump. Powers /api/export and the eventual daily HF Datasets
+        snapshot (huggingface.co/datasets/Pioneer37/stickblade-matches).
+
+        Returns a list of match dicts, each augmented with:
+          * `prompt_version` — pinned per-match from PROMPT_VERSION at
+            finish time, so cross-version leaderboard slices stay honest
+          * `votes` — list of votes on this match (if include_votes)
+
+        Filters:
+          * `since` / `until` — unix epoch bounds on matches.created;
+            None means unbounded on that side
+          * `limit` — hard cap to keep the query bounded even under
+            HN-frontpage load. 10k is well above any realistic daily
+            volume; if we ever hit it we paginate
+
+        No PII in matches (model IDs, sharp zones, weapon, arena, mode,
+        blindfolded, timings, proxy metrics, winner, commentary). Votes
+        are anonymous (id + match_id + created + choice — no IP, no
+        user id, we don't track those).
+
+        Deliberately DOES NOT include replay JSON blobs — those live in
+        the replays/ storage bucket and are per-match multi-MB. Exposing
+        them via this endpoint would balloon the response and OOM the
+        HF Space. Consumers who want a specific replay call the existing
+        /api/replay/{mid} endpoint per-id after seeing the match in the
+        export.
+        """
+        from brains import PROMPT_VERSION
+        where = ["status='done'"]
+        params = []
+        if since is not None:
+            where.append("created >= ?"); params.append(float(since))
+        if until is not None:
+            where.append("created <= ?"); params.append(float(until))
+        params.append(int(limit))
+        with self._conn() as c:
+            # Same B608 comment as elsewhere — 'where' is hardcoded
+            # strings, user values through params tuple. Bandit-skipped
+            # globally in .bandit for this reason.
+            rows = [dict(r) for r in c.execute(
+                "SELECT * FROM matches WHERE " + " AND ".join(where) +
+                " ORDER BY created ASC LIMIT ?", params).fetchall()]
+            if include_votes and rows:
+                mids = tuple(r["id"] for r in rows)
+                # sqlite3 IN () with a tuple needs len() placeholders
+                placeholders = ",".join("?" * len(mids))
+                vrows = [dict(v) for v in c.execute(
+                    f"SELECT id, match_id, created, choice FROM votes"
+                    f" WHERE match_id IN ({placeholders})", mids).fetchall()]
+                by_mid = {}
+                for v in vrows:
+                    by_mid.setdefault(v["match_id"], []).append(v)
+                for r in rows:
+                    r["votes"] = by_mid.get(r["id"], [])
+                    r["prompt_version"] = PROMPT_VERSION
+            else:
+                for r in rows:
+                    r["prompt_version"] = PROMPT_VERSION
+        return rows
+
     def vote_rate_stats(self, window_days=7):
         """Compute vote-through rate: what fraction of completed matches
         get voted on? Powers the /api/stats/vote_rate endpoint that lets

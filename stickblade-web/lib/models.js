@@ -42,6 +42,10 @@ export const DISPLAY_NAMES = {
   // No-API mocks
   "mock:duelist":                                 "Mock Duelist (no API)",
   "mock:berserker":                               "Mock Berserker (no API)",
+  "bot:random":                                   "🎲 Random Bot (baseline)",
+  "bot:greedy":                                   "⚡ Greedy Attacker (baseline)",
+  "bot:distance":                                 "📏 Distance Bot (baseline)",
+  "bot:pro":                                      "🏆 Scripted Pro (baseline)",
 };
 
 /**

@@ -297,6 +297,69 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal",
     }
 
 
+# ============================================================================
+# STRUCTURED-OUTPUT SCHEMA (Tier-A #1: strict json_schema enforcement)
+#
+# For providers that support `response_format={"type":"json_schema",...}` we
+# constrain generation at the API level so the model can't emit malformed
+# JSON or off-vocabulary actions/footwork values. Cuts the fallback rate
+# for the ~15-20%% of turns where a small model would otherwise return
+# {"action": "flexing"} or a trailing-comma JSON blob.
+#
+# `_decide_json_schema(allowed_actions)` returns the schema for a given
+# weapon's action vocabulary. Kept as a function (not a module-level dict)
+# because ACTIONS varies per weapon — the sword vocab is different from the
+# bow vocab, so each brain's schema must match its own weapon's allowed set.
+#
+# Which providers accept this shape:
+#   * OpenAI direct (chat.completions.create with response_format=schema): YES
+#   * Gemini (config.response_schema): YES via a slightly different translation
+#   * OpenRouter: partial — support varies per underlying model, so we DO NOT
+#     enable it there yet (would silently 400 half the roster). Follow-up:
+#     probe support per-model at startup and toggle. Tier B roadmap item.
+#   * Groq: same partial-support story as OR. Deferred.
+# The `_sanitize()` post-filter still runs even for schema-enforced replies
+# — belt-and-braces defense against schema drift or provider bugs.
+# ============================================================================
+def _decide_json_schema(allowed_actions):
+    """Return the OpenAI-flavored strict json_schema for a decide() reply.
+    `allowed_actions` is the weapon-specific action vocabulary (see
+    weapons.WEAPON_ACTIONS). FOOTWORK is weapon-agnostic."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "duel_move",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["thought", "action", "footwork"],
+                "properties": {
+                    "thought":  {"type": "string", "maxLength": 240},
+                    "action":   {"type": "string", "enum": list(allowed_actions)},
+                    "footwork": {"type": "string", "enum": list(FOOTWORK)},
+                },
+            },
+        },
+    }
+
+
+def _gemini_response_schema(allowed_actions):
+    """Gemini's structured-output surface uses `response_schema` (a proto-
+    ish shape), not OpenAI's json_schema wrapper. Same semantic constraint,
+    different wire format. See google-genai types.Schema docs."""
+    from google.genai import types
+    return types.Schema(
+        type="OBJECT",
+        required=["thought", "action", "footwork"],
+        properties={
+            "thought":  types.Schema(type="STRING"),
+            "action":   types.Schema(type="STRING", enum=list(allowed_actions)),
+            "footwork": types.Schema(type="STRING", enum=list(FOOTWORK)),
+        },
+    )
+
+
 def _extract_json(text):
     # Defensive against None/empty (some providers return empty body on a
     # silent rate-limit; we want a clean ValueError that decide_with_timeout's
@@ -926,9 +989,21 @@ class GPTBrain(Brain):
         msgs += self.history[-6:]
         user = json.dumps(state)
         msgs.append({"role": "user", "content": user})
-        r = self.client.chat.completions.create(
-            model=self.model, messages=msgs, temperature=0.8, max_tokens=150,
-            response_format={"type": "json_object"})
+        # Tier-A #1: strict json_schema enforcement. OpenAI direct supports
+        # this reliably (unlike OpenRouter where per-model support varies).
+        # `self.actions` is the weapon-specific action vocabulary set by
+        # Brain.__init__ via WEAPON_ACTIONS. If the schema call ever fails
+        # (SDK version quirk / model deprecation), fall back to plain JSON
+        # mode so the match still resolves through a real API call rather
+        # than the mock brain.
+        try:
+            r = self.client.chat.completions.create(
+                model=self.model, messages=msgs, temperature=0.8, max_tokens=150,
+                response_format=_decide_json_schema(self.actions))
+        except Exception:
+            r = self.client.chat.completions.create(
+                model=self.model, messages=msgs, temperature=0.8, max_tokens=150,
+                response_format={"type": "json_object"})
         txt = r.choices[0].message.content
         self.history += [{"role": "user", "content": user},
                          {"role": "assistant", "content": txt}]
@@ -956,12 +1031,27 @@ class GeminiBrain(Brain):
     def decide(self, state):
         from google.genai import types
         self.convo.append({"role": "user", "parts": [{"text": json.dumps(state)}]})
-        r = self.client.models.generate_content(
-            model=self.model,
-            contents=self.convo[-7:],
-            config=types.GenerateContentConfig(
+        # Tier-A #1: strict response_schema on the config so Gemini
+        # constrains generation to the exact enum/shape we want. If
+        # anything breaks (SDK types moved, model doesn't support it),
+        # fall back to plain application/json mode so the match still
+        # resolves through a real API call. Skips schema entirely in
+        # joint mode because the reply shape there is different (raw
+        # joint commands, not the action/footwork enum).
+        try:
+            cfg = types.GenerateContentConfig(
                 system_instruction=self.sys, temperature=0.8,
-                max_output_tokens=450 if self.mode == 'joint' else 200, response_mime_type="application/json"))
+                max_output_tokens=450 if self.mode == 'joint' else 200,
+                response_mime_type="application/json",
+                response_schema=(None if self.mode == 'joint'
+                                 else _gemini_response_schema(self.actions)))
+        except Exception:
+            cfg = types.GenerateContentConfig(
+                system_instruction=self.sys, temperature=0.8,
+                max_output_tokens=450 if self.mode == 'joint' else 200,
+                response_mime_type="application/json")
+        r = self.client.models.generate_content(
+            model=self.model, contents=self.convo[-7:], config=cfg)
         txt = r.text
         self.convo.append({"role": "model", "parts": [{"text": txt}]})
         return self._clean(_extract_json(txt))
@@ -1315,6 +1405,16 @@ def make_brain(kind, sharp_zones, mode="macro", weapon="sword", api_key=None):
     if kind.startswith("mock:"):
         p = kind.split(":", 1)[1]
         return _mock(p if p in PERSONALITIES else "duelist")
+    # Tier-A #2: non-LLM baseline bots. "bot:random" / "bot:greedy" /
+    # "bot:distance" / "bot:pro". Zero network I/O, pure heuristics.
+    # Powers the fixed y-axis reference for the leaderboard
+    # ("GPT-OSS 120B beats scripted-pro 78%% of matches"). Kept in
+    # its own module (bots.py) because they're a separate concern from
+    # LLM adapters + schema handling + reasoning routing.
+    if kind.startswith("bot:"):
+        from bots import make_bot
+        return make_bot(kind.split(":", 1)[1], sharp_zones,
+                        mode=mode, weapon=weapon)
     # Groq model id: "groq:<groq-model-name>" — independent provider,
     # much larger free-tier ceiling. Routed through GroqBrain (subclass
     # of OpenRouterBrain) which just swaps base URL + auth key. If

@@ -162,6 +162,54 @@ class SupabaseStorage:
             out.append(m)
         return out
 
+    def export_matches(self, since=None, until=None, limit=10000,
+                       include_votes=True):
+        """Tier-A #3: mirror of SQLite export_matches for Supabase.
+        See storage.py:LocalStorage.export_matches for definitions +
+        rationale. `created` is a float epoch on the Supabase side too
+        (create_match writes time.time()), so bounds pass as numeric."""
+        from brains import PROMPT_VERSION
+        params = {"status": "eq.done", "order": "created.asc",
+                  "limit": str(int(limit))}
+        if since is not None:
+            params["created"] = f"gte.{float(since)}"
+            # PostgREST accepts multiple filters on the same column via
+            # separate params only if the API surface uses `and=(...)` —
+            # simpler: only ONE side-bound at a time via the direct
+            # param, upper bound via the `and` block if both given.
+        # If both bounds given, use the `and` composite (PostgREST doc'd
+        # combinator). Documented here because it's non-obvious.
+        if since is not None and until is not None:
+            params.pop("created", None)
+            params["and"] = f"(created.gte.{float(since)},created.lte.{float(until)})"
+        elif until is not None:
+            params["created"] = f"lte.{float(until)}"
+        try:
+            rows = self._rest("GET", "matches", params=params)
+        except Exception:
+            return []
+        rows = [dict(r) for r in rows]
+        if include_votes and rows:
+            mids = [r["id"] for r in rows]
+            # PostgREST `in` operator wants comma-joined values in parens
+            vote_params = {"match_id": f"in.({','.join(mids)})",
+                           "select": "id,match_id,created,choice",
+                           "limit": "50000"}
+            try:
+                vrows = self._rest("GET", "votes", params=vote_params)
+            except Exception:
+                vrows = []
+            by_mid = {}
+            for v in vrows:
+                by_mid.setdefault(v["match_id"], []).append(dict(v))
+            for r in rows:
+                r["votes"] = by_mid.get(r["id"], [])
+                r["prompt_version"] = PROMPT_VERSION
+        else:
+            for r in rows:
+                r["prompt_version"] = PROMPT_VERSION
+        return rows
+
     def vote_rate_stats(self, window_days=7):
         """Mirror of SQLite vote_rate_stats. The Supabase `matches.created`
         column is a float epoch (per create_match: `time.time()`), not

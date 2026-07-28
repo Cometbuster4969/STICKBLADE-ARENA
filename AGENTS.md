@@ -26,6 +26,19 @@ tree as `origin/main`, everything downstream is fiction.
 When claiming "line X is unchanged" or "file Y still has bug Z" — quote the
 actual current line content. If you can't, don't make the claim.
 
+**Also mandatory at session start:** read [TIMELINE.md](./TIMELINE.md).
+That's the single source of truth for what's shipped, what's queued in
+the roadmap, what's been deliberately killed and why. Skipping it means
+you'll re-propose ideas we already decided against, or claim credit for
+features that shipped weeks ago.
+
+**Also mandatory at session end:** if you shipped anything, discussed a
+new roadmap item, or killed an idea — update TIMELINE.md before the
+session closes. The commit log is authoritative for *what* changed;
+TIMELINE.md is authoritative for *why*, *what's next*, and *what we
+decided not to do*. See TIMELINE.md's "How to update this file" section
+for the format rules.
+
 ---
 
 ## 0.5. Anti-sycophancy protocol — NON-NEGOTIABLE

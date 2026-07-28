@@ -237,11 +237,14 @@ class ReplayRecorder:
         # Avg torso-torso distance across sampled frames. Frame layout
         # from tick(): first 4 slots are meta, then per-fighter body
         # positions in BODY_ORDER (+ optional FLAIL_EXTRA). Torso is
-        # the first body in BODY_ORDER per ragdoll.BODY_ORDER — index
-        # 4 (f1 torso x), 7 (f1 torso y from BODY_ORDER order), 4+len*3
-        # for f2. Safer: import BODY_ORDER and compute the offsets
-        # explicitly so this doesn't rot if the frame schema changes.
-        from ragdoll import BODY_ORDER
+        # the first body in BODY_ORDER — index 4 (f1 torso x),
+        # 4+torso_idx*3 for f1, 4+stride*3+torso_idx*3 for f2.
+        # BODY_ORDER is defined at the top of THIS file (recorder.py),
+        # not in ragdoll. The original "from ragdoll import BODY_ORDER"
+        # was a copy-paste error introduced in Tier-S #3 (commit d66daff)
+        # that broke every match on prod — status ended in 'error' with
+        # "cannot import name 'BODY_ORDER' from 'ragdoll'". Fixed by
+        # using the module-level constant that's already in scope.
         try:
             torso_idx = BODY_ORDER.index("torso")
         except ValueError:
