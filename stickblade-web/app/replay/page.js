@@ -2,6 +2,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ReplayPlayer from "@/components/ReplayPlayer";
+import TurnTranscript from "@/components/TurnTranscript";
 import { getMatch, getReplay, postVote } from "@/lib/api";
 
 function ReplayInner() {
@@ -30,6 +31,10 @@ function ReplayInner() {
   return (
     <div style={{ width: "100%" }}>
       <ReplayPlayer replay={replay} />
+      {/* Tier-A UX fix: persistent turn-by-turn transcript below canvas.
+          Data source: replay.thoughts + replay.events (already fetched
+          via getReplay above). Blind-safe; matches wait-panel ticker. */}
+      <TurnTranscript replay={replay} />
       {canVote && (
         <div className="vote-row">
           <button className="vote-a" onClick={() => vote("a")}>
@@ -53,10 +58,29 @@ function ReplayInner() {
         const bModel = src.canvas_b_model || src.model_b;
         const names = src.names || {};
         const name = (m) => names[m] || m;
+        const winner = src.engine_winner_side || src.winner_side;
+        const method = src.method;
         return (
           <div className="panel reveal">
             🎭 Fighter A was <b>{name(aModel)}</b>
             {" · "}Fighter B was <b>{name(bModel)}</b>
+            {winner && method && (
+              <div style={{ marginTop: 8, fontSize: 13, color: "var(--text-2)" }}>
+                engine result: {winner === "draw"
+                  ? "draw"
+                  : `Fighter ${winner.toUpperCase()} won`} by {method}
+                {(method === "points" || method === "incomplete_points") && (
+                  <span style={{ color: "var(--dim)", fontSize: 12, marginLeft: 4 }}>
+                    (time-cap reached, higher HP wins — no knockout)
+                  </span>
+                )}
+                {method === "incomplete_draw" && (
+                  <span style={{ color: "var(--dim)", fontSize: 12, marginLeft: 4 }}>
+                    (time-cap reached, HP roughly equal — no clear winner)
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         );
       })()}

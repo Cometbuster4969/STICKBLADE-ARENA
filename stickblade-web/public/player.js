@@ -649,6 +649,23 @@ bPlay.onclick = ()=>{
   bPlay.textContent = playing?"⏸ Pause":"▶ Play"; };
 document.getElementById("bRestart").onclick = ()=>{ gotoFrame(0,true); playing=true; bPlay.textContent="⏸ Pause"; };
 scrub.oninput = ()=>{ gotoFrame(parseInt(scrub.value), true); };
+// Tier-A UI: <TurnTranscript> component fires `replay-seek` CustomEvents
+// so the "⏵ jump" button on each transcript row scrubs the replay to
+// that turn's start frame. Registered here (not in a React component)
+// so both the /replay route and the fight page's inline replay pick
+// it up without needing to plumb a ref through. Listener is idempotent
+// per player init because destroy() flips `alive` and the handler
+// bails out.
+const _seekHandler = (e) => {
+  if (!alive) return;
+  const f = e && e.detail && Number.isFinite(e.detail.frame) ? e.detail.frame : null;
+  if (f === null) return;
+  gotoFrame(f, true);
+  // Keep the current play state — if user paused to read, don't force
+  // them back to playing; if they were watching, keep the replay running
+  // from the new frame.
+};
+window.addEventListener("replay-seek", _seekHandler);
 document.addEventListener("keydown",(e)=>{
   if (!alive) return;
   if (e.target && (e.target.tagName==="INPUT"||e.target.tagName==="SELECT")) return;
@@ -657,7 +674,16 @@ document.addEventListener("keydown",(e)=>{
   if (e.code==="ArrowLeft")  { gotoFrame(cursor-1,true); }
 });
 requestAnimationFrame(loop);
-  window.__sbPlayer = { destroy(){ alive = false; },
+  window.__sbPlayer = {
+    destroy(){
+      alive = false;
+      // Remove the transcript seek listener so a subsequent player
+      // init doesn't accumulate stale handlers (each initPlayer call
+      // registers one). Belt-and-braces — the `if (!alive) return`
+      // guard inside the handler already makes stale ones no-op,
+      // but explicit cleanup is cleaner.
+      try { window.removeEventListener("replay-seek", _seekHandler); } catch (_) {}
+    },
     isAlive(){ return alive; }, showError };
   return window.__sbPlayer;
 }

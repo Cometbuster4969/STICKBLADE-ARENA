@@ -302,11 +302,21 @@ def run_simulation(mid):
             print(f"[quip] failed: {e}")
         # Budget SIM frames only — LLM thinking time must not eat the match.
         # Hard wall-clock ceiling protects against a hung brain.
-        # 3 min is generous — a normal 24-turn match with two real LLMs
-        # completes in 60-120s. Was 45 min (leftover debug value) which
-        # meant a single hung brain could block the worker queue for
-        # nearly an hour, DoS'ing every queued match behind it.
-        deadline = _t.time() + 3 * 60
+        # Per-weapon deadline. Melee (sword/dagger/spear/flail) completes
+        # in 60-120s for a normal 24-turn match with two real LLMs.
+        # Bow matches are structurally slower: fighters fight at
+        # ~450px distance (kite range), arrows miss more than melee
+        # swings, and gravity + wind lead to more turns before a hit
+        # lands. Live data: a 5-turn bow match hit the 3-min cap at
+        # 74 vs 59 HP and got decided "on points" — user perceives
+        # this as "match stopped mid-way" (see replay 1d0a73faf1d6,
+        # 2026-07-28). Bumping bow to 5 min buys enough headroom for
+        # a full 24-turn ranged exchange without breaking the queue-
+        # DoS protection that 3-min was designed to prevent.
+        # Was flat 3*60 (leftover debug value was 45*60, fixed in
+        # 561a8ba).
+        deadline_seconds = 5 * 60 if match.weapon == "bow" else 3 * 60
+        deadline = _t.time() + deadline_seconds
         sim_frames = 0
         # Live wait-screen ticker: publish each turn to LIVE_STATE the moment
         # it finalizes (hits appended). Rule: match.log[i] is finalized once

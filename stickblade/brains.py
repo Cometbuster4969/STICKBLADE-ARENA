@@ -418,42 +418,40 @@ def _trim(text, max_words=25):
 # rotates (see tools/verify_models.py).
 
 _BUDDY_POOLS = {
-    # Large / slow / strong. Ordered by preference: OpenRouter vanilla
-    # first (fast + cheap), then cross-provider Groq buddies (independent
-    # infrastructure — the whole point of adding Groq was to have a real
-    # failover when OR throttles or goes down), then OR reasoning models
-    # as the last-resort intra-provider option.
+    # Large / slow / strong. Ordered by preference. Every entry is a
+    # live model as of the 2026-07-28 roster sync (see config.py for
+    # the removal ledger — dead :free slugs are gone from both).
+    # Groq entries are cross-provider (independent infrastructure from
+    # OpenRouter) so they're the best failover when OR throttles.
     "large": [
-        "nousresearch/hermes-3-llama-3.1-405b:free",
-        "qwen/qwen3-coder:free",
-        # Cross-provider: Groq's gpt-oss-120b, different upstream from
-        # OR's OpenInference hosting — hits when OR itself is down.
+        # Cross-provider first: Groq's gpt-oss-120b, different upstream
+        # from OR's OpenInference hosting — hits when OR itself is down.
         "groq:openai/gpt-oss-120b",
         "groq:moonshotai/kimi-k2-instruct",
-        "openai/gpt-oss-120b:free",
         "nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
     ],
     # Mid / balanced (fast enough for 15s budget). Groq's llama-3.3-70b
-    # is a direct twin of OR's version but runs on Groq's LPU (~10x faster)
-    # with a 288x larger daily quota — best mid-tier failover we have.
+    # runs on Groq's LPU (~10x faster than OR paid) with a 288x larger
+    # daily quota — best mid-tier failover we have. OR :free 70B twin
+    # was yanked 2026-07-28; Groq's is now the only 70B option.
     "mid": [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "groq:llama-3.3-70b-versatile",        # cross-provider twin
+        "groq:llama-3.3-70b-versatile",        # cross-provider LPU-hosted 70B
         "groq:qwen/qwen3-32b",
-        "qwen/qwen3-next-80b-a3b-instruct:free",
         "groq:meta-llama/llama-4-scout-17b-16e-instruct",
         "google/gemma-4-31b-it:free",
         "google/gemma-4-26b-a4b-it:free",
         "openai/gpt-oss-20b:free",
+        "nvidia/nemotron-3-nano-30b-a3b:free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     ],
     # Small / fast (good for snap-shot scenarios where speed matters).
     # Groq's llama-3.1-8b-instant is the fastest LLM on the internet
     # right now — sub-second responses even under load.
     "small": [
         "groq:llama-3.1-8b-instant",           # fastest option, cross-provider
-        "meta-llama/llama-3.2-3b-instruct:free",
-        "liquid/lfm-2.5-1.2b-instruct:free",
         "nvidia/nemotron-nano-9b-v2:free",
+        "cohere/north-mini-code:free",
     ],
 }
 
@@ -836,6 +834,18 @@ class Brain:
             # model and jump to the first buddy (idx 2) immediately.
             if idx == 0 and "reasoning_burnout" in last_err and len(attempts) > 2:
                 # Drop attempt #2 (same-model retry); buddies stay queued.
+                attempts.pop(1)
+
+            # FAST-FAIL on "unavailable for free" (OpenRouter yanked the
+            # :free suffix off this model). Same rationale as
+            # reasoning_burnout above: retrying with more time won't
+            # restore the free slug; only path forward is a buddy from
+            # a different family. Saves ~20s per turn when a user picks
+            # a slug that OR has rotated off free since our roster last
+            # synced. Roster curation (config.py) also catches this at
+            # the source, but this fast-fail belt-and-braces the case
+            # where OR yanks a slug between roster syncs.
+            if idx == 0 and "unavailable for free" in last_err and len(attempts) > 2:
                 attempts.pop(1)
 
             # Tiny backoff between attempts so we don't immediately re-hit a

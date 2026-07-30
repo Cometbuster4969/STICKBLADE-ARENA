@@ -86,7 +86,20 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady }) {
           if (s.status === "done") {
             if (!readyFiredRef.current) {
               readyFiredRef.current = true;
-              onReady?.(matchId);
+              // Fix (turn-wise output not visible): don't immediately
+              // unmount the wait panel the moment status flips to done.
+              // Fast matches (Groq, ~30s wall clock) previously showed
+              // the ticker for ~1.5s then vanished — users never got
+              // to read the last few turns before the replay took over.
+              // 2.5s "settle" pause lets users see the final ticker
+              // state + the "match complete" message, then hand off to
+              // ReplayPlayer. Also gives the backend's _delayed_clear
+              // (3s post-done) time to run so a mid-transition poll
+              // doesn't 404 on live-state.
+              setTimeout(() => {
+                if (cancelled) return;
+                onReady?.(matchId);
+              }, 2500);
             }
             return;
           }
@@ -115,11 +128,13 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady }) {
   // uses "match" / "LLMs thinking" / "physics" to reinforce
   // "this is real inference happening now" framing that came out
   // of the friend-feedback session.
-  const phaseLabel = status === "queued"
-    ? "Queued — waiting for a worker"
-    : turn === 0
-      ? "Setting up arena · LLMs about to make first move"
-      : `Running match — LLMs deciding turn ${turn} / 24`;
+  const phaseLabel = status === "done"
+    ? "✓ Match complete — loading replay…"
+    : status === "queued"
+      ? "Queued — waiting for a worker"
+      : turn === 0
+        ? "Setting up arena · LLMs about to make first move"
+        : `Running match — LLMs deciding turn ${turn} / 24`;
 
   const mmss = (s) => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
 

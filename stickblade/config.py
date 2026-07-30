@@ -64,25 +64,44 @@ ARENA_MODELS = {
     # Cross-checked against https://openrouter.ai/api/v1/models — every id below
     # was on the live free roster the day this was committed. If a fight 404s,
     # the free pool has rotated; refresh by running tools/verify_models.py.
-    "meta-llama/llama-3.3-70b-instruct:free":     "Llama 3.3 70B",
-    "meta-llama/llama-3.2-3b-instruct:free":      "Llama 3.2 3B",
-    "qwen/qwen3-next-80b-a3b-instruct:free":      "Qwen3 Next 80B",
-    "qwen/qwen3-coder:free":                      "Qwen3 Coder 480B",
-    "openai/gpt-oss-120b:free":                   "GPT-OSS 120B",
+    # ---- OpenRouter :free tier (verified alive 2026-07-28) ----
+    # OR periodically rotates :free suffixes off flagship models. Every
+    # slug below was live-probed via /api/debug/openrouter_ping and
+    # returned HTTP 200 (or 429 = alive-but-throttled, which is still
+    # a working state — retry loop handles it). Do NOT re-add yanked
+    # slugs without probing first; every one that 404s costs users
+    # ~20s of retry-ladder time before falling to a buddy.
+    #
+    # REMOVED 2026-07-28 (all confirmed dead via live probe):
+    #   meta-llama/llama-3.3-70b-instruct:free       -> yanked to paid
+    #   meta-llama/llama-3.2-3b-instruct:free        -> yanked to paid
+    #   qwen/qwen3-next-80b-a3b-instruct:free        -> yanked to paid
+    #   qwen/qwen3-coder:free                        -> yanked to paid
+    #   openai/gpt-oss-120b:free                     -> yanked to paid
+    #   nousresearch/hermes-3-llama-3.1-405b:free    -> yanked to paid
+    #   cognitivecomputations/dolphin-mistral-24b... -> yanked to paid
+    #   poolside/laguna-m.1:free                     -> 404 (removed)
+    #   poolside/laguna-xs.2:free                    -> 404 (slug renamed to -xs-2.1)
+    #   liquid/lfm-2.5-1.2b-instruct:free            -> 404 (removed)
+    # Those users who still want them: use BYOK panel with an OR key
+    # that has paid access. The free pool no longer offers them.
+    #
+    # ADDED 2026-07-28 (verified alive):
+    #   nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free  (multimodal reasoning)
+    #   openrouter/free                                     (special auto-router)
+    #   poolside/laguna-xs-2.1:free                         (correct slug for what was laguna-xs.2)
     "openai/gpt-oss-20b:free":                    "GPT-OSS 20B",
     "google/gemma-4-31b-it:free":                 "Gemma 4 31B",
     "google/gemma-4-26b-a4b-it:free":             "Gemma 4 26B A4B",
-    "nousresearch/hermes-3-llama-3.1-405b:free":  "Hermes 3 405B",
     "nvidia/nemotron-3-super-120b-a12b:free":     "Nemotron 3 Super 120B",
     "nvidia/nemotron-3-ultra-550b-a55b:free":     "Nemotron 3 Ultra 550B",
     "nvidia/nemotron-3-nano-30b-a3b:free":        "Nemotron 3 Nano 30B",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": "Nemotron 3 Nano Omni Reasoning",
     "nvidia/nemotron-nano-9b-v2:free":            "Nemotron Nano 9B",
-    # nex-agi/nex-n2-pro:free — pulled by OpenRouter (404 as of 2026-06-30)
-    "poolside/laguna-m.1:free":                   "Poolside Laguna M.1",
-    "poolside/laguna-xs.2:free":                  "Poolside Laguna XS.2",
     "cohere/north-mini-code:free":                "Cohere North Mini Code",
-    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free": "Dolphin Venice 24B",
-    "liquid/lfm-2.5-1.2b-instruct:free":          "LiquidAI LFM2.5 1.2B",
+    "poolside/laguna-xs-2.1:free":                "Poolside Laguna XS 2.1",
+    "openrouter/free":                            "OpenRouter Auto-Router",
+    # nex-agi/nex-n2-pro:free — pulled by OpenRouter (404 as of 2026-06-30)
     # ---- paid (cheap, billed via OpenRouter credits) ----
     "openai/gpt-4o-mini":                         "GPT-4o mini",
     # anthropic/claude-3.5-haiku — pulled by OpenRouter (404 as of 2026-06-30)

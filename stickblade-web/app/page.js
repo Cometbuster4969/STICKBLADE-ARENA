@@ -2,6 +2,7 @@
 import { useEffect, useId, useState } from "react";
 import ModelPicker, { CUSTOM } from "@/components/ModelPicker";
 import ReplayPlayer from "@/components/ReplayPlayer";
+import TurnTranscript from "@/components/TurnTranscript";
 import LeaderboardTable from "@/components/LeaderboardTable";
 import WaitPanel from "@/components/WaitPanel";
 import ByokPanel from "@/components/ByokPanel";
@@ -477,6 +478,12 @@ export default function FightPage() {
               <ShareButton url={shareUrl} />
             </div>
           )}
+          {/* Turn-by-turn transcript (Tier-A UX fix): persistent scrollable
+              list of what each fighter reasoned + which hits landed each
+              turn. Data was previously ONLY shown as fleeting canvas
+              speech bubbles (~1.5s each, easy to miss). Same blind-safe
+              rules as the wait-panel ticker. */}
+          <TurnTranscript replay={replay} />
         </div>
       )}
 
@@ -575,6 +582,16 @@ export default function FightPage() {
             ? "draw"
             : `Fighter ${reveal.engine_winner_side.toUpperCase()} won`}{" "}
           by {reveal.method}
+          {(reveal.method === "points" || reveal.method === "incomplete_points") && (
+            <span style={{ color: "var(--dim)", fontSize: 12, marginLeft: 4 }}>
+              (time-cap reached, higher HP wins — no knockout)
+            </span>
+          )}
+          {reveal.method === "incomplete_draw" && (
+            <span style={{ color: "var(--dim)", fontSize: 12, marginLeft: 4 }}>
+              (time-cap reached, HP roughly equal — no clear winner)
+            </span>
+          )}
           {lastResult && (
             <div style={{ marginTop: 10, fontSize: 14, fontWeight: 700,
                           color: lastResult === "correct" ? "var(--green)" : "var(--red-2)",
