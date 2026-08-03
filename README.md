@@ -10,7 +10,7 @@ pinned: false
 # ⚔ STICKBLADE ARENA
 
 [![CI](https://github.com/Cometbuster4969/STICKBLADE-ARENA/actions/workflows/ci.yml/badge.svg)](https://github.com/Cometbuster4969/STICKBLADE-ARENA/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Live demo](https://img.shields.io/badge/live-stickblade--arena.vercel.app-red)](https://stickblade-arena.vercel.app)
 [![Featured on pymunk](https://img.shields.io/badge/featured-pymunk%20showcase-8b5cf6)](https://www.pymunk.org/en/latest/showcase.html#stickblade-arena)
 
@@ -552,7 +552,17 @@ Coming:
 
 ## 📜 License
 
-MIT — fork it, host your own tournament, plug in your own model.
+Apache 2.0 — fork it, host your own tournament, plug in your own model. Attribution required in redistributions (see `LICENSE` and `NOTICE`); patent grant included.
+
+Previously MIT; relicensed to Apache 2.0 on 2026-07-30 to gain the attribution requirement (§4c) and patent grant (§3) without the adoption-chill of AGPL. AGPL was considered and deliberately rejected — see the kill-list in `TIMELINE.md` for the reasoning.
+
+---
+
+## 📖 Cite this work
+
+If you use STICKBLADE ARENA in research, please cite the repository via the "Cite this repository ▾" button in the GitHub sidebar (auto-generated from `CITATION.cff`), or use the metadata directly from that file.
+
+Methodology, per-turn protocol, six-axis Elo rationale, threats to validity, and file:line evidence for every claim are documented in [`METHODOLOGY.md`](./METHODOLOGY.md). When a peer-reviewed publication or arXiv preprint of the methodology exists, prefer citing that.
 
 ---
 
