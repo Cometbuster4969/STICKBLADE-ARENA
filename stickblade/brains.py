@@ -437,11 +437,13 @@ _BUDDY_POOLS = {
     # was yanked 2026-07-28; Groq's is now the only 70B option.
     "mid": [
         "groq:llama-3.3-70b-versatile",        # cross-provider LPU-hosted 70B
-        "groq:qwen/qwen3-32b",
-        "groq:meta-llama/llama-4-scout-17b-16e-instruct",
+        # groq:qwen/qwen3-32b and groq:meta-llama/llama-4-scout-17b-16e-instruct
+        # were removed here after Groq 404'd both. See config.py comment block
+        # for the deprecation ledger.
         "google/gemma-4-31b-it:free",
         "google/gemma-4-26b-a4b-it:free",
         "openai/gpt-oss-20b:free",
+        "groq:openai/gpt-oss-20b",
         "nvidia/nemotron-3-nano-30b-a3b:free",
         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     ],
@@ -630,8 +632,8 @@ _PROVIDER_HOST = {
     # we actually care about.
     "groq:llama-3.3-70b-versatile":                 "groq",
     "groq:llama-3.1-8b-instant":                    "groq",
-    "groq:meta-llama/llama-4-scout-17b-16e-instruct": "groq",
-    "groq:qwen/qwen3-32b":                          "groq",
+    # Removed 2026-07-XX: Groq deprecated llama-4-scout + qwen3-32b (both
+    # 404 from Groq API). See config.py for the ledger.
     "groq:openai/gpt-oss-120b":                     "groq",
     "groq:openai/gpt-oss-20b":                      "groq",
     "groq:deepseek-r1-distill-llama-70b":           "groq",

@@ -1,0 +1,19 @@
+STICKBLADE ARENA
+Copyright 2026 STICKBLADE ARENA contributors
+
+This product is a physics-grounded LLM evaluation benchmark. Source
+methodology is documented in METHODOLOGY.md; timeline of authorship
+and design decisions is recorded in TIMELINE.md.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+A copy of the License is included in the LICENSE file at the root
+of this repository, and is available at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Attribution requirement (per Apache 2.0 §4c):
+Redistributions and derivative works must retain this NOTICE file and
+the copyright notice above. If you use STICKBLADE ARENA in academic
+work, please cite via CITATION.cff (see repository root; GitHub renders
+a "Cite this repository" widget from that file).

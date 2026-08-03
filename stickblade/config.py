@@ -112,8 +112,12 @@ ARENA_MODELS = {
     # target when OpenRouter throttles.
     "groq:llama-3.3-70b-versatile":               "Llama 3.3 70B (Groq)",
     "groq:llama-3.1-8b-instant":                  "Llama 3.1 8B (Groq, fast)",
-    "groq:meta-llama/llama-4-scout-17b-16e-instruct": "Llama 4 Scout 17B (Groq)",
-    "groq:qwen/qwen3-32b":                        "Qwen3 32B (Groq)",
+    # REMOVED 2026-07-XX: groq deprecated these — both 404 from Groq API,
+    # confirmed via live match probe. Per Groq's docs deprecation page,
+    # llama-4-scout + qwen3-32b are being wound down; migrate to
+    # openai/gpt-oss-{20b,120b} + moonshotai/kimi-k2 which stay live.
+    #   groq:meta-llama/llama-4-scout-17b-16e-instruct  -> 404
+    #   groq:qwen/qwen3-32b                             -> 404
     "groq:openai/gpt-oss-120b":                   "GPT-OSS 120B (Groq)",
     "groq:openai/gpt-oss-20b":                    "GPT-OSS 20B (Groq)",
     "groq:deepseek-r1-distill-llama-70b":         "DeepSeek R1 Distill 70B (Groq)",

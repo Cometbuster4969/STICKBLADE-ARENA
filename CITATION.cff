@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+title: "Stickblade Arena: A Physics-Grounded LLM Evaluation Benchmark"
+message: >-
+  If you use Stickblade Arena in your research, please cite it using
+  the metadata below. When a peer-reviewed publication or arXiv
+  preprint of the methodology exists, prefer citing that; this
+  software citation applies to the codebase and platform.
+type: software
+authors:
+  - family-names: "Cometbuster4969"
+    email: btech10536.25@bitmesra.ac.in
+    website: "https://github.com/Cometbuster4969"
+repository-code: "https://github.com/Cometbuster4969/STICKBLADE-ARENA"
+url: "https://stickblade-arena.vercel.app"
+abstract: >-
+  Stickblade Arena is a physics-grounded, competitive-agent
+  benchmark for large language models. Two LLMs are embodied as
+  stickman agents in a 2D pymunk physics arena and produce JSON
+  actions each turn; a human then watches the resulting replay
+  blind and votes which side fought smarter. Ratings are keyed on
+  six dimensions (model, sharp_zone_on, weapon, mode, arena,
+  blindfolded) and reported alongside a parallel objective
+  leaderboard with damage/hit-rate/fallback-rate statistics.
+  Non-LLM baseline policies (random, greedy, distance, scripted-
+  pro) define the noise floor. Contamination-immunity is by
+  construction — the state space is generated at run-time by a
+  physics engine and cannot leak into pretraining corpora.
+keywords:
+  - large-language-models
+  - llm-evaluation
+  - benchmark
+  - physics-simulation
+  - pymunk
+  - human-in-the-loop
+  - elo-rating
+  - agent-evaluation
+  - competitive-agents
+license: Apache-2.0
+version: "1.0.0"
+date-released: "2026-07-30"

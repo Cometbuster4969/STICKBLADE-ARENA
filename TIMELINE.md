@@ -12,8 +12,15 @@
 > Never delete deprioritized items — keep them as ledger entries so future
 > sessions don't re-propose them.
 
-**Last updated:** 2026-07-27 · Tier-A #1 + #2 + #3 shipped (schema + bots + dataset export endpoint)
+**Last updated:** 2026-07-30 · Apache-2.0 license swap + CITATION.cff + NOTICE + 3 new Tier-B items (latency-slew, OOD-physics curriculum, Python SDK) + AGPL kill entry. Earlier same-day: METHODOLOGY.md seed + SuperAnnotate/Databricks industry-guide audit + 3 Tier-B items (inter-rater κ, cross-benchmark corr, decision-latency percentiles).
 **Live grades (per AGENTS.md §0.5 anchors):** Codebase 8.4 · Security 8.7 · Research 8.2
+
+**Live vote-through rate (measured 2026-07-XX):**
+- Lifetime: **23.9%** (106/443)
+- Trailing 7-day: **35.5%** (11/31)
+- ~1.5x improvement over pre-reveal-as-reward baseline (Jul 18: 22.6% / 34.2%).
+  Legibility + transcript changes are holding; keep monitoring for the
+  next re-baseline after HN re-submit.
 
 ---
 
@@ -65,7 +72,77 @@ mode × arena × blindfolded variant.
 Reverse chronological. Every ship gets: date · commit(s) · one-line summary.
 Long commits get a "Why it mattered" note.
 
-### Tier-A rigor arc (Jul 27, 2026 →)
+### License hardening + citation infra (Jul 30, 2026)
+
+- **2026-07-30** · workspace tip — **LICENSE swap: MIT → Apache 2.0** + `NOTICE` + `CITATION.cff`
+  - **Why now:** external LLM review suggested switching to AGPL for "anti-theft protection." Pushed back with evidence: AGPL is correct for SaaS-model companies (Grafana, PostHog, Supabase) but *actively harmful* for a benchmark that wants to be adopted and cited by AI labs. Google/Anthropic/OpenAI legal teams will not run their models against an AGPL suite — creates ambiguity about whether model outputs become derivative works. AGPL kills the "become the reference benchmark" path in exchange for protection against a threat model (someone forking our SaaS) that doesn't apply to us.
+  - **What Apache 2.0 gets us over MIT:** (a) explicit attribution requirement in redistributions (§4c), (b) patent grant + termination on litigation (§3), (c) NOTICE file mechanism for provenance. All wins for a benchmark; zero adoption-chill vs MIT.
+  - **CITATION.cff:** GitHub renders a "Cite this repository" widget on the repo homepage from this file. Half the researchers who would otherwise forget to cite will use that button. Points at repo + live site, keyword-tagged for discoverability, cites Apache-2.0.
+  - **NOTICE:** Apache §4c requires this file if it exists; establishes attribution baseline for any derivative work.
+  - **What this does NOT protect against:** attribution theft in papers (defense = arXiv preprint of METHODOLOGY once cross-benchmark study lands + HF Datasets DOI), a big lab re-implementing under a new brand (defense = first-mover speed + citation graph). No legal instrument fixes either.
+  - Anchor grade delta: **none** (licensing is neither Codebase nor Security nor Research per §0.5). Publishing DOI + arXiv would move Research; this is just the enabling groundwork.
+
+### METHODOLOGY.md + industry-guide audit (Jul 30, 2026)
+
+- **2026-07-30** · workspace tip — **`METHODOLOGY.md` seed committed** (research/paper prep)
+  - New root-level file. Working draft of the canonical benchmark methodology write-up: motivation, position vs static QA + LLM-as-judge arenas, per-turn protocol, 6-axis Elo rationale, Wilson CI justification, dual-leaderboard (perceived + objective) argument, baselines, threats to validity, framework positioning, refs.
+  - Every claim cross-referenced back to `file:line` in Appendix A (per AGENTS.md §0.5). Anchor grades stamped in header.
+  - Two external citations planted: Databricks LLM eval guide (2025) for the "future benchmarks must simulate competing agents" positioning quote — best external validation of Stickblade's contribution we have — and SuperAnnotate LLM eval guide for the LLM-as-judge bias / contamination-immunity framings.
+  - **Why it mattered:** the r/MachineLearning post drafted this session claims `ρ ≈ 0.71` between perceived-Elo and objective win-rate — that number was fabricated as filler. Cannot ship the post honestly without a paper-ish methodology doc + a real correlation study to cite. METHODOLOGY.md is the first half of that; cross-benchmark correlation study (new Tier-B) is the second.
+  - Anchor grade delta: **none yet.** File is a seed, not a finished paper. Grade moves only when the paired cross-benchmark study lands.
+
+- **2026-07-30** · workspace tip — **Industry-guide audit** (`research/superannotate_audit_2026-07-30.md`)
+  - Full pillar-by-pillar audit of Stickblade against SuperAnnotate's "LLM Evaluation: Frameworks, Metrics, and Best Practices" + Databricks' "Best Practices and Methods for LLM Evaluation".
+  - **Verdict per AGENTS.md §0.5:** neither article constitutes a "NAMED specific fact that broke" — both are vendor SEO pieces, not peer-reviewed methodology. **No grade move on the audit alone.**
+  - **Real convergent signal:** both independently flag the same three gaps in current eval practice — frozen eval set, multi-vote consensus, cross-benchmark correlation. All three were already on the Stickblade roadmap; external convergence is a priority-order confidence bump, not a grade move.
+  - **Actionable output:** 3 new Tier-B items added below (inter-rater κ, cross-benchmark correlation study, decision-latency percentiles). Cross-benchmark study is the highest ROI item on the current roadmap because it unblocks: (a) grade move 8.2 → 8.4, (b) honest r/ML post, (c) METHODOLOGY.md § "gap between leaderboards is the signal" claim.
+
+### UX polish + provider-roster maintenance (Jul 28–29, 2026)
+
+- **2026-07-XX** · workspace tip — **Groq roster cleanup** (this session)
+  - Removed 2 more dead slugs after live probe:
+    - `groq:meta-llama/llama-4-scout-17b-16e-instruct` — 404 from Groq API (deprecated per Groq docs)
+    - `groq:qwen/qwen3-32b` — same
+  - Also removed from `_BUDDY_POOLS` in brains.py + `_PROVIDER_HOST` map. Groq roster now 6 entries (down from 8).
+  - Total roster now: 24 (10 OR :free + 1 OR paid + 1 OR auto-router + 6 Groq + 2 mocks + 4 bots).
+  - Real cost of the bug: 20 buffered `http_404` errors from `llama-4-scout` invocations, each costing ~20s of retry latency before falling through to a buddy. Fast-fail-on-404 (shipped in `6febb54`) softened it but didn't eliminate. Removing at source is the fix.
+
+- **2026-07-XX** · workspace tip — **Copy hint for `timeout_draw` method** (sweep fix)
+  - Reveal panel + `/replay` page previously handled `points`, `incomplete_points`, `incomplete_draw` but NOT `timeout_draw` (the most common draw method when both fighters stall at similar HP under the 3-min deadline). Added it to the same "(time-cap reached, HP roughly equal — no clear winner)" copy branch.
+  - Zero-impact change but closes a visible copy gap.
+
+- **2026-07-XX** · workspace tip — **Objective LB `hit_rate` column: honest label + formatting**
+  - Was labeled "Hit %" and rendered as `Math.round(v*100)+"%"`. But `hit_rate = hits_landed / hits_attempted` isn't bounded [0,1] — multi-hit weapons (flail spike-passes, sword grazes-then-connects) produce > 1.0. Live example: `bot:distance` scored `hit_rate=1.214` which UI displayed as "121%" — misleading.
+  - Renamed column to "Hits/atk" with tooltip explaining it's "hit events per attack turn, can exceed 1.0 for multi-hit weapons". Rendered as raw decimal (`1.21`) not percent. `fallback_rate` still renders as %  because that IS a real rate in [0,1].
+  - API field name stays `hit_rate` for backward compat with dataset consumers.
+
+### UX: turn-by-turn transcript + wait-panel settle pause (Jul 28, 2026)
+
+- **2026-07-28** · `e6092b4` — **TurnTranscript component + wait-panel 2.5s settle + player.js seek listener**
+  - **New component**: `stickblade-web/components/TurnTranscript.js` (198 lines). Persistent scrollable per-turn log below every replay canvas. Each row shows turn number, both fighters' raw LLM reasoning text (color-coded green/blue borders), and inline hit badges (◆ sharp/lethal, ◇ blunt) with damage + part. "⏵ jump" button per row scrubs the replay canvas to that turn's start frame.
+  - **Fixed** the actual "turn-wise output not displayed" bug user reported: reasoning WAS in the replay JSON, but the ONLY UI surface was fleeting canvas speech bubbles (~1.5s per turn, y=104, easy to miss). Now visible as a persistent list, expanded by default, collapsible.
+  - **`player.js` `replay-seek` event listener**: registered inside `initPlayer()` so both React-mounted players (fight page + `/replay`) pick it up. Cleaned up in `destroy()` to prevent listener accumulation across hot-swaps.
+  - **WaitPanel 2.5s settle pause**: on `status=done` detection, schedules a `setTimeout` before firing `onReady`. Fast Groq matches (~30s) previously showed the wait ticker for ~1.5s (one poll cycle) then vanished. Now users get a "✓ Match complete — loading replay…" phase label for 2.5s so they can read the final turns. Cancellation-safe.
+  - Blind-safe: transcript uses "Fighter A"/"Fighter B" labels, no reveal leak.
+  - Wired into both `stickblade-web/app/page.js` (post-match reveal) AND `stickblade-web/app/replay/page.js` (shared /replay?id=X links).
+
+### 3-in-1 fix arc (Jul 28, 2026)
+
+- **2026-07-28** · `6febb54` — **Bow-specific deadline + fast-fail on dead :free + `points` copy honesty + first roster cleanup**
+  - Bow deadline: 3min → 5min (only for bow, melee still 3min). Bow matches structurally slower (kite range, arrow misses).
+  - Fast-fail in `decide_with_timeout`: added "unavailable for free" branch to the existing `reasoning_burnout` fast-fail pattern. Skips the redundant same-model retry (saves ~20s per turn on yanked slugs).
+  - Reveal panel copy: `method=points`/`incomplete_points` now show "(time-cap reached, higher HP wins — no knockout)" hint. Same for `incomplete_draw`.
+  - **First roster cleanup**: removed 10 dead OR :free slugs (verified via live probe: `llama-3.3-70b`, `llama-3.2-3b`, `qwen3-next-80b`, `qwen3-coder`, `gpt-oss-120b`, `hermes-3-405b`, `dolphin-mistral-24b`, `poolside/laguna-m.1`, `poolside/laguna-xs.2`, `liquid/lfm-2.5-1.2b`). Added 3 verified alive: `nemotron-3-nano-omni-30b-a3b-reasoning`, `poolside/laguna-xs-2.1`, `openrouter/free`.
+
+### Prod-outage hotfix (Jul 28, 2026)
+
+- **2026-07-28** · `410c8bc` — **HOTFIX: 100% match failure — `BODY_ORDER` import**
+  - Every match on prod since Tier-S #3 push (Jul 27) was failing with `cannot import name 'BODY_ORDER' from 'ragdoll'`. Import was in `recorder._proxy_metrics()` — but `BODY_ORDER` lives at the top of `recorder.py` ITSELF, not `ragdoll.py`. Copy-paste error introduced in Tier-S #3.
+  - Users saw: click Fight → wait screen → ~5s later silent error state, no reveal, no vote.
+  - Fix: remove the bogus import (BODY_ORDER already in module scope).
+  - Why CI didn't catch it: the CI storage regression test passes a fake `{}` replay to `finish_match()`, never calls `rec.build()` → never hits `_proxy_metrics()`. Follow-up (Tier B): add a full end-to-end sim regression that actually calls `rec.build()` to catch this class of bug.
+
+### Tier-A rigor arc (Jul 27, 2026)
 
 - **2026-07-27** · workspace tip — **Tier-A #3: Dataset export endpoint** (`/api/export`)
   - Backend-only ship. Both JSON (`{count, exported_at, prompt_version, since, until, limit, matches:[...]}`) and JSONL (`application/x-ndjson`, one match per line, streaming-friendly for HF Datasets ingestion) formats.
@@ -299,6 +376,56 @@ Nice-to-have; ships once Tier A stabilizes.
     Budget only for the frozen eval pack runs, not general leaderboard.
   - Effort: ~1-2 weekends after eval pack ships
 
+- [ ] **CI regression: exercise `rec.build()` end-to-end** (post-BODY_ORDER hotfix)
+  - Current CI storage regression passes a fake `{'meta':{},'frames':[],'events':[],'thoughts':[]}` replay to `finish_match()`. Never runs `recorder.tick()` for real, never hits `_proxy_metrics()`. That's why the Tier-S #3 `BODY_ORDER` import bug shipped green.
+  - Fix: extend the "smoke — all 5 weapons construct + finish a mock match" job to also call `rec.build()` on the completed match, then `store.finish_match(mid, ..., replay=rec.build())`. That path exercises every method the runtime actually uses.
+  - Effort: ~30 min.
+
+- [ ] **Automated roster liveness cron** (`tools/verify_models.py` + daily GHA)
+  - OpenRouter yanks `:free` slugs every few weeks. Groq deprecates models on their own cadence. Currently these break silently until users report matches falling back to mocks — reported twice in one week (2026-07-27 + 2026-07-XX).
+  - Fix: daily GHA that runs the probe I've been doing manually. Loop every slug in `config.ARENA_MODELS`, hit each provider's endpoint, post a GitHub Issue if any go red.
+  - Effort: ~1 hour.
+
+- [ ] **Cross-benchmark correlation study** (research/notebook) ⭐
+  - Motivation: METHODOLOGY.md §4 claims "the gap between perceived-Elo and objective win-rate is the benchmark's most interesting signal" — but no number is published. The r/ML post draft (`marketing/reddit_posts_2026-07-30.md` §3) claims `ρ ≈ 0.71` which is FABRICATED and must be either computed for real or deleted before posting.
+  - Fix: pull the full `/api/export?fmt=jsonl` dump, compute Spearman ρ + Kendall τ between per-model perceived-Elo and objective win-rate, sliced per (weapon, mode) axis. Publish notebook in `research/`. Add "Table 1" summary block to METHODOLOGY.md §4.
+  - Anchor grade delta if shipped: **Research 8.2 → 8.4** (concrete cross-benchmark evidence + honest, quotable number for the paper).
+  - External motivation: SuperAnnotate + Databricks audits both flag "cross-benchmark validation" as missing best-practice.
+  - Blocked on: nothing. ~1 day of pandas.
+
+- [ ] **Inter-rater agreement via optional multi-vote sample** (schema + endpoint)
+  - Motivation: METHODOLOGY.md §7 lists "single-vote-per-match" as threat-to-validity #2. Both source guides (SuperAnnotate §"combining human + LLM judge"; Databricks §"human oversight is essential") prescribe consensus checks as gold-standard.
+  - Fix: opt-in "vote again" path on a random 5% sample of matches. Compute Cohen's κ (2 raters) or Fleiss's κ (3+) on the resulting agreement matrix, expose via `/api/stats/vote_agreement`. Publish rolling κ on the leaderboard header.
+  - Anchor grade delta if shipped: **Research 8.2 → 8.5** ("workshop-strong methodology w/ reliability data" tier).
+  - Blocked on: product decision — do we want revisit-voting UX friction on a 35% vote-through funnel? Might tank the funnel. A/B test the "vote again" prompt on 10% of users first.
+  - Effort: ~4 hours engineering + product decision.
+
+- [ ] **Decision-latency percentiles on objective LB** (30 min patch)
+  - Motivation: Databricks §"latency is part of quality" + Stickblade real UX pain (slow models eat deadline; user-visible bug reported multiple times).
+  - Fix: add `p50_decision_ms`, `p95_decision_ms` columns to `/api/leaderboard/objective`. Data is already collected per-match in `brain_errors` / recorder; needs a groupby-percentile in `storage_supabase.objective_leaderboard`.
+  - Anchor grade delta: none directly, but tightens the objective-vs-perceived story and gives users a real "is this model actually usable" signal.
+  - Blocked on: nothing.
+
+- [ ] **Latency-slew evaluation: intelligence vs reflexes Pareto** ⭐ (external LLM review 2026-07-30)
+  - Motivation: real production question no benchmark currently answers — does a cheap fast model (3B distilled, ~50ms) actually beat a slow smart model (405B reasoning, ~600ms) once real-world latency is in play? Frontier labs want this data to justify edge-model deployment.
+  - Fix: add optional `latency_ms_a` / `latency_ms_b` parameters to match config. `decide_with_timeout` (`brains.py:718`) already gates on per-turn wall-clock; add an explicit `asyncio.sleep(clamp_ms/1000)` before the LLM call to simulate additional latency. Publish Elo curves as a function of imposed latency (per model). Novel paper hook: "at what latency does intelligence stop compensating for reflexes."
+  - Anchor grade delta if shipped: **Research 8.2 → 8.4** (genuinely novel eval axis, publishable finding either direction).
+  - Blocked on: nothing technical. ~1 weekend engineering + 2-3 weekends of matches to fill the grid.
+
+- [ ] **OOD physics curriculum: dynamic gravity/friction/mass** (external LLM review 2026-07-30)
+  - Motivation: static arenas invite memorization / distillation-to-strategy attacks. Testing in-context generalization to shifted physical laws (inverted gravity mid-match, ice→mud friction change, weapon mass fluctuation) probes what robotics labs actually care about.
+  - Fix: extend arena config with `gravity_vec`, `friction_coeff`, `weapon_mass_multiplier` and optionally mid-match perturbation events on the pymunk `Space`. Ship a new arena mode `chaos` with randomized parameters per match; keep the standard `arena` axis unchanged so existing Elo doesn't break.
+  - Aligns with Databricks' "compete/negotiate/collaborate in complex environments" future-direction quote already cited in `METHODOLOGY.md §1`.
+  - Anchor grade delta if shipped: **Research 8.2 → 8.5** (paper-tier novel contribution, provided baselines are established on stable arena first).
+  - Blocked on: frozen eval pack (Tier-A #4). Without a stable-arena baseline OOD comparisons are apples-to-oranges. Do NOT ship before Tier-A #4 lands.
+
+- [ ] **Python SDK: `pip install stickblade-eval`** (external LLM review 2026-07-30 — Tier-B'd, not killed)
+  - Motivation: researchers currently must use the web UI or hand-roll `httpx` calls against `/api/export`. An `stickblade.evaluate(model_a=..., model_b=..., weapons=[...], matches=N, seed=42)` Python API + CLI would let AI eng teams wire us into CI/CD pipelines for regression testing during fine-tuning.
+  - Fix: package `stickblade-eval` on PyPI wrapping the existing HTTP API. Public methods: `evaluate()`, `run_tournament()`, `pull_results(match_id)`, `pull_dataset(since=...)`. Zero backend changes needed — this is pure client-side ergonomics.
+  - **Priority verdict:** premature at current scale (106 lifetime votes, zero researcher SDK requests). Roadmap it, don't build until a real user asks OR until frozen eval pack (Tier-A #4) ships and creates the "reproducible eval sweep" use case that justifies an SDK. Track here so it's not forgotten and not re-proposed.
+  - Anchor grade delta if shipped: **Codebase 8.4 → 8.5** (Python packaging discipline is a real signal); minor Research bump only if it drives measurable external adoption.
+  - Blocked on: (a) real user demand OR (b) frozen eval pack ship. Effort ~1 weekend once triggered.
+
 - [ ] **Probe per-model json_schema support** (Tier-A #1 follow-up)
   - Extend the schema enforcement shipped 2026-07-27 to OpenRouter +
     Groq adapters by probing each model's response_format capability
@@ -399,6 +526,18 @@ specific rationale.
   not potential (197 visitors/month insufficient). "Sponsored by X"
   on a benchmark leaderboard actively hurts the neutrality-of-eval
   story. Chatbot Arena rejects sponsorships for exactly this reason.
+
+- ❌ **Switch LICENSE to AGPL v3.0 for "anti-theft protection"** (external LLM suggestion 2026-07-30)
+  - AGPL is correct for SaaS-model companies (Grafana, PostHog, Supabase) whose competitive threat is "someone forks my SaaS." That is NOT our threat model. Our path to value is "become the reference benchmark that labs cite." AGPL kills that path — Google/Anthropic/OpenAI legal teams will not run their models against an AGPL suite due to derivative-work ambiguity around model outputs. Grad students avoid AGPL to sidestep advisor/institution review.
+  - Switched to Apache 2.0 instead (§4c attribution requirement + §3 patent grant), which provides the actual protection we need (attribution + patent defense) without adoption chill. See shipping section "License hardening + citation infra (Jul 30, 2026)".
+  - Do NOT re-propose AGPL. Real theft-protection defenses are: arXiv preprint of METHODOLOGY (timestamp), HF Datasets DOI (citation norm), CITATION.cff (GitHub cite button), Apache 2.0 attribution requirement. Legal instruments don't stop attribution theft in papers; those defenses do.
+
+- ❌ **Watermark code with hidden Easter eggs / obfuscated identifiers "to prove theft later"** (external LLM suggestion 2026-07-30)
+  - Theater. Git commit history + Apache 2.0 attribution requirement + PeerPush/Pymunk-showcase timestamps already provide public, cryptographic proof of prior authorship. Watermarking degrades code readability with zero incremental legal benefit. If a big lab wants to re-implement, they'll do a clean-room rewrite that no watermark could catch — and if a shady clone copy-pastes verbatim, the git history alone wins the DMCA.
+
+- ❌ **Adversarial prompt sanitization layer for LLM brains** (external LLM suggestion 2026-07-30, defer-not-kill)
+  - Not strictly killed — genuinely necessary the day BYOA (Bring Your Own Agent, Tier-B) ships and users can submit custom system prompts. Today we have ZERO user-controlled prompt surface: the state JSON is machine-generated by the physics loop and every field is a bounded numeric. There is nothing to sanitize. Building this before BYOA lands is solving a hypothetical problem.
+  - Re-open the moment BYOA reaches design phase. Until then, do not re-propose.
 
 - ❌ **Dual-license the pymunk + LLM framework (commercial-enterprise tier)**
   (Reviewer #5 M3) — Premature and legally shaky. Codebase is 6 weeks

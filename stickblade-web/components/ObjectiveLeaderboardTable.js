@@ -20,7 +20,8 @@ import { useState } from "react";
 const COLUMNS = [
   { key: "matches",         label: "N",     help: "Total completed matches (both sides)" },
   { key: "damage_per_turn", label: "Dmg/turn", help: "Total damage dealt divided by total turns played" },
-  { key: "hit_rate",        label: "Hit %", help: "Landed hits ÷ attempted hits (defensive actions excluded)" },
+  { key: "hit_rate",        label: "Hits/atk",
+    help: "Hit events per attack turn. Can exceed 1.0 for multi-hit weapons (flail spike-passes, sword grazes that also connect). Defensive actions (guard/ready) excluded from denominator." },
   { key: "fallback_rate",   label: "Fallback %", help: "Turns where LLM timed out or returned bad JSON. Lower = better." },
   { key: "avg_distance",    label: "Avg dist", help: "Mean torso-torso distance across match (px). Roughly: aggressive vs kite-y." },
   { key: "wins",            label: "W",     help: "Match wins (by damage-dealt, physics-authoritative)" },
@@ -54,8 +55,16 @@ export default function ObjectiveLeaderboardTable({ rows }) {
 
   const fmt = (k, v) => {
     if (v == null) return "—";
-    if (k === "hit_rate" || k === "fallback_rate")
+    // fallback_rate IS a real rate in [0,1] — show as %.
+    // hit_rate is actually "hit events per attack turn" and can exceed
+    // 1.0 for multi-hit weapons (flail, close-range sword grazes).
+    // Rendering it as a percent (>100%) misleads users into thinking
+    // it's an accuracy stat. Show as raw decimal instead — e.g. 1.21
+    // reads as "1.2 hits per attack" which is honest.
+    if (k === "fallback_rate")
       return `${Math.round(v * 100)}%`;
+    if (k === "hit_rate")
+      return Number(v).toFixed(2);
     if (k === "damage_per_turn" || k === "avg_distance")
       return Number(v).toFixed(1);
     return v;
