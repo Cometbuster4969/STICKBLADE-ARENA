@@ -74,7 +74,7 @@ function ReplayInner() {
                     (time-cap reached, higher HP wins — no knockout)
                   </span>
                 )}
-                {method === "incomplete_draw" && (
+                {(method === "incomplete_draw" || method === "timeout_draw") && (
                   <span style={{ color: "var(--dim)", fontSize: 12, marginLeft: 4 }}>
                     (time-cap reached, HP roughly equal — no clear winner)
                   </span>

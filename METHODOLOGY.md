@@ -121,6 +121,16 @@ The reason for two leaderboards is that they answer different questions:
 
 The gap between them is the benchmark's most interesting signal. For example, in bow matches humans reward "smart waiting for cooldown" that does not show up in raw damage. Formal cross-benchmark correlation analysis is Tier-B work (see `TIMELINE.md` — cross-benchmark correlation study).
 
+### 4.1 Empirical status (2026-08-04)
+
+The cross-benchmark correlation study was first executed on the 2026-08-04 snapshot (467 matches, 106 votes) and is written up in `research/cross_benchmark_correlation_report_2026-08-04.md`. Result: **the study is underpowered at current scale.** Only 2 of the 24 roster models meet the joint threshold of `perceived_n ≥ 5` (rated matches) AND `objective_n ≥ 5` (completed matches), which is the minimum needed for either metric to have moved off its prior. A meaningful Spearman ρ cannot be computed from 2 data points.
+
+Reporting a single-side-filtered ρ from this dataset (e.g. filtering only on `perceived_n ≥ 5` yields ρ = −0.899 for LLMs, p = 0.015) would be dishonest — the striking negative correlation is entirely explained by objective-side small-sample noise, where a model with one lucky win shows as `objective_win_rate = 1.0` against models with dozens of rated matches. The reproducible notebook makes this failure mode explicit.
+
+**What unblocks a defensible number:** the Tier-A #4 frozen 100-matchup eval pack. A 100-match pack across 10 shared models (10 matches per model per axis) would push the joint filter above threshold for enough models to compute a real ρ with a defensible 95% bootstrap CI. This is the next research milestone.
+
+Publishing this null / underpowered finding *before* the eval pack lands is deliberate, per `AGENTS.md §0.5`: reporting negative results is how the anti-sycophancy protocol proves it isn't performative.
+
 ---
 
 ## 5. Baselines and Roster

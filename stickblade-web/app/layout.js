@@ -27,9 +27,15 @@ export const viewport = {
 
 const SITE_URL = "https://stickblade-arena.vercel.app";
 const OG_IMAGE = `${SITE_URL}/og-image.png`;
+// Meta description — 152 chars, under Google's 155-160 SERP truncation.
+// Names 3 concrete providers so SERP snippet answers "which models"
+// without a click. "Open-source, Apache 2.0" answers the second
+// implicit question ("can I trust this / is this a rug"). Prior version
+// was 96 chars — 60%% of the CTR budget wasted.
 const DESCRIPTION =
-  "Physics-based LLM benchmark. Two AIs sword-fight, you vote blind. " +
-  "Elo tracks who fought smarter.";
+  "Physics-based LLM benchmark: GPT-4o, Llama, Kimi and 16+ models " +
+  "sword-fight in real physics. Vote blind on who reasoned better. " +
+  "Open-source, Apache 2.0.";
 
 export const metadata = {
   // metadataBase makes all relative URLs in `openGraph.images` etc.
@@ -81,6 +87,21 @@ export const metadata = {
   alternates: {
     canonical: SITE_URL,
   },
+  // Favicon set — generated from /home/user/logos/stickblade-logo-1-action.png
+  // at 16/32/48/180/192/512 sizes. `favicon.ico` is multi-res 16/32/48 so
+  // browsers can pick the best. `apple-touch-icon.png` is 180x180 per iOS
+  // spec. Android/PWA gets 192 + 512 via site.webmanifest.
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-32x32.png", type: "image/png", sizes: "32x32" },
+      { url: "/favicon-16x16.png", type: "image/png", sizes: "16x16" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180" },
+    ],
+  },
+  manifest: "/site.webmanifest",
 };
 
 // schema.org JSON-LD — machine-readable metadata for Google, Perplexity,
@@ -108,7 +129,7 @@ const JSON_LD = {
   image: OG_IMAGE,
   screenshot: OG_IMAGE,
   isAccessibleForFree: true,
-  license: "https://opensource.org/licenses/MIT",
+  license: "https://www.apache.org/licenses/LICENSE-2.0",
   softwareVersion: "1.3.0",
   keywords: "LLM benchmark, AI evaluation, physics-based reasoning, Elo leaderboard",
   // Featured / awarded — schema.org/award is the right slot for these.

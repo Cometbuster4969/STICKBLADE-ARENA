@@ -12,7 +12,7 @@
 > Never delete deprioritized items — keep them as ledger entries so future
 > sessions don't re-propose them.
 
-**Last updated:** 2026-07-30 · Apache-2.0 license swap + CITATION.cff + NOTICE + 3 new Tier-B items (latency-slew, OOD-physics curriculum, Python SDK) + AGPL kill entry. Earlier same-day: METHODOLOGY.md seed + SuperAnnotate/Databricks industry-guide audit + 3 Tier-B items (inter-rater κ, cross-benchmark corr, decision-latency percentiles).
+**Last updated:** 2026-08-04 · Cross-benchmark correlation study shipped (null / underpowered finding — kills fabricated ρ ≈ 0.71 claim; grade unchanged). Earlier 2026-07-30: Apache-2.0 license swap + CITATION.cff + NOTICE + 3 Tier-B items + AGPL kill; and METHODOLOGY.md seed + SuperAnnotate/Databricks audit + 3 Tier-B items.
 **Live grades (per AGENTS.md §0.5 anchors):** Codebase 8.4 · Security 8.7 · Research 8.2
 
 **Live vote-through rate (measured 2026-07-XX):**
@@ -67,10 +67,170 @@ mode × arena × blindfolded variant.
 
 ---
 
+## Pending push (workspace ahead of GitHub)
+
+> Live-tracked list of changes committed in the workspace but not yet on
+> GitHub `main`. Verified byte-for-byte against `raw.githubusercontent.com`
+> whenever this section is updated. When you push from your laptop and
+> `curl` confirms the file is live, move the entry to the shipping
+> timeline below and delete it from here.
+>
+> **Why this section exists:** the workspace and laptop are separate
+> clones. This session used a `patches/` folder as a transfer format but
+> that added a step that could go stale. Since the user pushes directly
+> from their laptop, this log is the canonical "what still needs to
+> ship" tracker. Do not push anything not listed here.
+>
+> **Last verified against live GitHub:** 2026-08-04
+
+### Currently pending
+
+| Priority | File | What & Why | Ready? |
+|---|---|---|---|
+| 🔴 SECURITY | `.github/workflows/ci.yml` | Aikido supply-chain scan flagged `lycheeverse/lychee-action@v2` as a floating third-party ref. Pinned to SHA `e7477775783ea5526144ba13e8db5eec57747ce8` (= v2.9.0, verified via GitHub API). One-line change. | ✅ YES |
+| 🟡 UX BUG | `stickblade-web/app/replay/page.js` | Missing `timeout_draw` in the draw-copy branch (parallel to `page.js` which already has the fix). One-line change. Users on `/replay?id=...` links see wrong copy on time-cap draws. | ✅ YES |
+| 🟢 DOCS | `METHODOLOGY.md` | Adds § 4.1 Empirical status with honest cross-benchmark study results (null, underpowered). | ✅ YES |
+| 🟢 DESIGN | `design/chatbot_widget.md` | New folder + file. Full design blueprint for post-Tier-A-#4 "Ask the Arena" chatbot widget. Retrieval-over-docs (not free-form gen), floating widget bottom-right, strict system prompt with 5 prompt-injection defense layers, rate limits, cost caps, explicit exclusion list for private docs (applications/, study/), kill-switch flag. NOT to be built until Tier-A #4 frozen eval pack ships. | ✅ YES |
+| 🟢 SEO | `stickblade-web/app/layout.js` | 3 fixes: (a) meta description 96 → 152 chars (uses full Google SERP budget, names concrete model providers), (b) JSON-LD license MIT → Apache 2.0 (drift from July license swap), (c) added `icons` + `manifest` metadata for favicon set. | ✅ YES |
+| 🟢 SEO | `stickblade-web/public/llms.txt` + `llms-full.txt` | Fixed stale roster count. Both files said "29 free models" — actual live roster is 24 total (18 LLMs + 4 bots + 2 mocks). Updated to accurate breakdown per provider, with pointer to live `/api/models` as authoritative source. | ✅ YES |
+| 🟢 SEO | `stickblade-web/public/favicon.ico`, `favicon-16/32/48.png`, `apple-touch-icon.png`, `android-chrome-192/512.png`, `site.webmanifest` | New. Full favicon set generated from `/home/user/logos/stickblade-logo-1-action.png`. Fixes 404s on `/favicon.ico`, `/apple-touch-icon.png`, `/manifest.json` that showed up in real-audit against the site. | ✅ YES |
+| 🟢 DOCS | `applications/` (6 files) | New folder. 5 grant/accelerator application drafts (HF CPU grant, Snorkel Open Benchmarks, India research programs via BIT-Mesra faculty co-sign, LTFF, Buildspace) + README. Every file has same 6-part structure: reality check + deadline + steps + ready-to-send draft + reusable template + after-you-submit. Deadlines verified 2026-08-04. Honest about odds and framing traps. | ✅ YES |
+| 🟢 DOCS | `study/` (21 files) | New folder. Interview + demo prep guide. README + 20 numbered topic files across 3 tiers (must-know / should-know / skim). Every topic ties back to file:line in the codebase and has "what they'll ask" + "30-second answer" sections. | ✅ YES |
+| 🟢 DOCS | `TIMELINE.md` | This file — updated with Aug 4 shipping entries + this pending-push section. | ✅ YES (self-referential) |
+| 🟢 RESEARCH | `research/cross_benchmark_correlation.py` | Executable notebook. Spearman + Kendall + bootstrap CIs. | ✅ YES |
+| 🟢 RESEARCH | `research/cross_benchmark_correlation_report_2026-08-04.md` | Findings write-up. Publishes null result openly. | ✅ YES |
+| 🟢 RESEARCH | `research/export_snapshot_2026-08-04.json` | 467 matches, checked in for reproducibility. | ✅ YES |
+| 🟢 RESEARCH | `research/lb_perceived_snapshot_2026-08-04.json` | 36 rows. | ✅ YES |
+| 🟢 RESEARCH | `research/lb_objective_snapshot_2026-08-04.json` | 22 rows. | ✅ YES |
+| 🟢 RESEARCH | `research/superannotate_audit_2026-07-30.md` | Industry-guide audit vs Stickblade. Prior session. | ✅ YES |
+| 🟢 DOCS | `marketing/reddit_posts_2026-07-30.md` | 4 launch-post drafts. r/ML draft NOW HONEST after cross-benchmark study killed the fabricated `ρ ≈ 0.71` line. | ✅ YES |
+
+### DO NOT PUSH (workspace differs but pushing would be a regression)
+
+| File | Why not |
+|---|---|
+| `stickblade-web/package.json` | Workspace missing `@vercel/speed-insights` that GitHub has. Push would silently remove a working dep. |
+| `stickblade-web/package-lock.json` | Same reason. |
+| `stickblade-web/public/og-image.png` | GitHub is a 131-byte LFS pointer; workspace is 673 KB raw. Push would break LFS setup. |
+| `.gitattributes` | GitHub has it, workspace doesn't. Must survive on GitHub or LFS breaks. |
+| `.github/FUNDING.yml` | Workspace has instructional comments GitHub doesn't. Non-functional either way. Skip. |
+
+### Push command reference
+
+```powershell
+cd "C:\Users\ayush\projects\helloworld\top secret\Stickman-Arena"
+git pull origin main
+
+# Copy ONLY the "Ready ✅ YES" files from the workspace, at their same
+# relative paths. Explicitly check `git status` shows nothing in the
+# "DO NOT PUSH" table.
+
+git add METHODOLOGY.md TIMELINE.md .github/workflows/ci.yml \
+        stickblade-web/app/replay/page.js \
+        marketing/reddit_posts_2026-07-30.md \
+        research/
+
+git status  # SANITY CHECK against DO-NOT-PUSH table above
+
+git commit -m "sec+research+ux: Aikido CI pin + cross-benchmark study (null) + replay timeout_draw fix"
+git push origin main
+git push huggingface main
+```
+
+### Verify after push
+
+```bash
+# Aikido pin should be SHA
+curl -s https://raw.githubusercontent.com/Cometbuster4969/STICKBLADE-ARENA/main/.github/workflows/ci.yml | grep lycheeverse
+# want: uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+
+# Replay page should have timeout_draw
+curl -s https://raw.githubusercontent.com/Cometbuster4969/STICKBLADE-ARENA/main/stickblade-web/app/replay/page.js | grep -c "timeout_draw"
+# want: 1
+
+# Research files should be 200
+for f in cross_benchmark_correlation.py cross_benchmark_correlation_report_2026-08-04.md; do
+  curl -s -o /dev/null -w "$f: %{http_code}\n" "https://raw.githubusercontent.com/Cometbuster4969/STICKBLADE-ARENA/main/research/$f"
+done
+# want: 200 200
+
+# METHODOLOGY §4.1 present
+curl -s https://raw.githubusercontent.com/Cometbuster4969/STICKBLADE-ARENA/main/METHODOLOGY.md | grep -c "4.1 Empirical status"
+# want: 1
+```
+
+---
+
 ## Shipping timeline (what's done)
 
 Reverse chronological. Every ship gets: date · commit(s) · one-line summary.
 Long commits get a "Why it mattered" note.
+
+### Chatbot design draft — "Ask the Arena" (Aug 11, 2026)
+
+- **2026-08-11** · workspace — **`design/chatbot_widget.md` created** (blueprint, not code)
+  - User raised the idea of adding a chatbot that "tells everything about this website." Pushed back with 5 real objections: (1) vote-through 63.2% means visitors WHO LAND aren't confused, they're few — chatbot solves wrong problem; (2) 5 explainer surfaces already exist (hero, FAQ, WaitPanel, TurnTranscript, OnboardingCard) — 6th duplicates effort; (3) real cost is 3-4 days = same budget as Tier-A #4 which unblocks higher-ROI items; (4) new prompt-injection attack surface with BYOK keys in localStorage; (5) ongoing per-message LLM cost.
+  - User confirmed: WANT the chatbot, but AFTER Tier-A #4 frozen eval pack. Design goal is bounce-reduction + educating curious users (not customer support).
+  - Rather than ship 3-4 days of code today (wrong sequencing per own analysis), wrote a design blueprint so future-me can build in 2 days.
+  - **Key design decisions locked in:**
+    - Retrieval over static docs, NOT free-form LLM generation (eliminates "make up plausible lies about the project" failure mode)
+    - Floating widget bottom-right (per user answer)
+    - Strict system prompt with 5 rules including "cite source for every claim" and "'I don't know' is a valid answer"
+    - Prompt-injection defenses layered: input filter regex + strict system prompt + output filter for key patterns + refusal for role-hijack attempts
+    - Rate limits: 10 msgs/hour per IP, $5/day global cost cap with retrieval-only fallback
+    - Explicit exclusion list: NEVER embed `applications/` (grant drafts w/ personal odds analysis) or `study/` (interview prep) into corpus
+    - Kill switch via `config.chat_enabled` flag for 30-second rollback
+    - Success/failure criteria defined so it's clear when to revert
+  - **Timeline:** do NOT build until Tier-A #4 ships. Design doc estimated to save 1-2 days of build time later.
+  - Anchor grade delta: **none** (design draft, not code). Building the chatbot later will not move any grade — that's the honest analysis in the doc.
+
+### SEO fixes — real-audit vs scam-scanner (Aug 8, 2026)
+
+- **2026-08-08** · workspace — **Real SEO audit against live URL** (killed a scam scanner + shipped 3 real fixes)
+  - **Context:** user pasted results from an "On-Page and Technical SEO analysis" scanner that scored the site 75/100 with "Technical: 15/F" and a "buy the upsell to see fixes" pitch. On inspection, the scanner had scanned a MALFORMED URL (`stickblade-arena.vercel.app/https:/stickblade-arena.vercel.appGrade` — literally the homepage URL glued with the word "Grade" appended). Every downstream metric was measuring the 404 page's error content, not the actual site.
+  - **Ran a real audit** using curl + Google PageSpeed Insights API + Mozilla-Observatory-style header checks. Actual grade: **A- / ~92/100.** Full audit findings kept in session log.
+  - **Real issues found + fixed this commit:**
+    1. `llms.txt` and `llms-full.txt` both said "29 free models" — actual live roster is 24 (18 LLMs + 4 bots + 2 mocks). Same drift class as the fabricated `ρ ≈ 0.71` cross-benchmark number. Fixed with live-verified breakdown per provider and a `curl` pointer to the authoritative `/api/models` endpoint.
+    2. Meta description was 96 chars — 60%% of Google's ~155-char SERP budget wasted. Expanded to 152 chars with concrete model names (GPT-4o, Llama, Kimi) and license posture (Apache 2.0) to improve SERP CTR.
+    3. JSON-LD `license` field still pointed at MIT despite the 2026-07-30 Apache 2.0 relicense. Updated to `https://www.apache.org/licenses/LICENSE-2.0` — fixes structured-data drift.
+    4. `favicon.ico`, `apple-touch-icon.png`, `manifest.json` were all 404. Generated full favicon set from `/home/user/logos/stickblade-logo-1-action.png` at 16/32/48/180/192/512 sizes, added multi-res `.ico`, wrote `site.webmanifest`, wired both into `layout.js` `icons` + `manifest` metadata.
+  - **Real non-issues confirmed (do not fix):** `ai.txt` (not standardized, ignore); Privacy Policy / ToS / Cookie Policy (no PII, no cookies, not required for a public benchmark); "indexable: No" (was measuring the scanner's own 404 URL, not our real page).
+  - **Vercel edge served 4.8-day-stale HTML** on the tested request (`age: 416124`). Not a bug — Next.js ISR by design. Client-side JS updates on load. Flagged for future consideration if we ever add server-rendered dynamic content that must be fresh.
+  - Anchor grade delta: **none.** SEO is not a §0.5 rubric category. But the "meta desc uses full budget + favicon set + accurate llms.txt" all incrementally improve discoverability and AI-agent citation quality, which supports the Research grade indirectly.
+
+### Applications folder — 5 grant/accelerator drafts (Aug 4, 2026)
+
+- **2026-08-04** · workspace — **`applications/` folder created** (6 files)
+  - README + 5 application drafts: HF CPU grant, Snorkel Open Benchmarks, India research programs via BIT-Mesra faculty co-sign, LTFF, Buildspace Nights & Weekends.
+  - Every file follows same 6-part structure: reality-check (honest odds) + verified deadline + steps-before-applying + ready-to-send draft + reusable template + after-you-submit protocol.
+  - Deadlines and program details verified via web search 2026-08-04.
+  - Dropped from earlier list: Open Philanthropy LLM benchmarks RFP (closed Feb 2025 after $25M distributed), Neo Scholars (US-only eligibility), YC/a16z/Sequoia (not ready per session's honest verdict).
+  - **Honest framing throughout:** every draft acknowledges what's weak, what could sink the application, and what to fix before submitting. No inflated numbers, no fabricated safety-relevance connections. Vote-through and match count values are placeholders to be re-verified live before submission.
+  - Priority sequence (weeks 1-8) documented in README. Recommendation: HF grant → BIT-Mesra faculty outreach → Snorkel (AFTER frozen eval pack ships) → Buildspace → LTFF (hardest, needs strongest safety framing).
+  - Anchor grade delta: **none.** Prep material, not project artifact.
+
+### Study folder — interview + demo prep guide (Aug 4, 2026)
+
+- **2026-08-04** · workspace — **`study/` folder created** (21 files, 1079 lines)
+  - README + 20 numbered topic files (`01_elo_rating.md` through `20_rlhf_lineage.md`).
+  - Three tiers: **Tier 1** (must know cold — 6 topics: Elo, Wilson CI, eval paradigms, contamination, FastAPI async, pymunk); **Tier 2** (should know well — 8 topics: rank correlation, JSON schema output, retries, Next.js, Supabase, BYOK, bootstrap, supply chain); **Tier 3** (skim only — 6 topics: Docker/HF Spaces, pygame headless, CSP/CORS, statistical power, ragdoll IK, RLHF lineage).
+  - Every topic file follows the same 5-part structure: What it is / Why Stickblade uses it / What they'll actually ask you / 30-second answer / Where to learn it. Every claim traces back to a file:line reference in the codebase per §0.5.
+  - Includes a 5-minute pre-interview refresher + memorized 30/60-second pitch versions.
+  - Anchor grade delta: **none.** Prep material for me, not a project artifact that moves grades.
+
+### Cross-benchmark correlation study (Aug 4, 2026)
+
+- **2026-08-04** · workspace — **Cross-benchmark correlation study executed** (Tier-B item, was highest-ROI unblocked)
+  - New artifacts:
+    - `research/cross_benchmark_correlation.py` (executable notebook, Spearman + Kendall + 2000-iteration bootstrap CIs, both-side sample-size filters)
+    - `research/cross_benchmark_correlation_report_2026-08-04.md` (findings write-up)
+    - `research/export_snapshot_2026-08-04.json` (467 rated matches, checked in for reproduction)
+    - `research/lb_perceived_snapshot_2026-08-04.json`, `research/lb_objective_snapshot_2026-08-04.json`
+  - **Headline finding:** **the study is underpowered at current scale.** Only 2 of 24 roster models meet the joint threshold of `perceived_n ≥ 5` AND `objective_n ≥ 5`, the minimum needed for either metric to have moved off its 1000-Elo prior / lucky-single-match win-rate.
+  - Single-side-filtered ρ values (perceived_n ≥ 5 only) look striking (LLMs: ρ = −0.899, p = 0.015) but are entirely explained by objective-side small-sample noise (a model with 1 lucky win shows as `win_rate = 1.0`). Report explicitly rejects publishing these as a headline number.
+  - **Anti-sycophancy dividend:** the report **kills the fabricated `ρ ≈ 0.71` line** that was sitting in the r/ML post draft (`marketing/reddit_posts_2026-07-30.md:114`). Replaced with an honest "underpowered, unblocks with frozen eval pack" statement. `METHODOLOGY.md § 4.1 Empirical status` added with the same honesty.
+  - **Grade delta: NONE.** TIMELINE claimed shipping this study would push Research 8.2 → 8.4. That was conditional on producing a defensible headline number. It didn't (correctly — the data isn't there yet), so per §0.5 the grade does not move. What the report DID deliver: (1) killed a fabricated claim, (2) established the exact statistical threshold that must be crossed before the study is meaningful, (3) shipped a reproducible notebook that will auto-produce the right answer when the data catches up. That's a Research **rigor** win that doesn't move the anchor number.
+  - **Unblocks:** re-run this notebook after Tier-A #4 (frozen 100-matchup eval pack) lands. Expected finish state: n ≥ 10 shared models each with n ≥ 10 per axis; then a real Spearman ρ with defensible bootstrap CI is publishable.
 
 ### License hardening + citation infra (Jul 30, 2026)
 
@@ -386,12 +546,10 @@ Nice-to-have; ships once Tier A stabilizes.
   - Fix: daily GHA that runs the probe I've been doing manually. Loop every slug in `config.ARENA_MODELS`, hit each provider's endpoint, post a GitHub Issue if any go red.
   - Effort: ~1 hour.
 
-- [ ] **Cross-benchmark correlation study** (research/notebook) ⭐
-  - Motivation: METHODOLOGY.md §4 claims "the gap between perceived-Elo and objective win-rate is the benchmark's most interesting signal" — but no number is published. The r/ML post draft (`marketing/reddit_posts_2026-07-30.md` §3) claims `ρ ≈ 0.71` which is FABRICATED and must be either computed for real or deleted before posting.
-  - Fix: pull the full `/api/export?fmt=jsonl` dump, compute Spearman ρ + Kendall τ between per-model perceived-Elo and objective win-rate, sliced per (weapon, mode) axis. Publish notebook in `research/`. Add "Table 1" summary block to METHODOLOGY.md §4.
-  - Anchor grade delta if shipped: **Research 8.2 → 8.4** (concrete cross-benchmark evidence + honest, quotable number for the paper).
-  - External motivation: SuperAnnotate + Databricks audits both flag "cross-benchmark validation" as missing best-practice.
-  - Blocked on: nothing. ~1 day of pandas.
+- [x] ~~**Cross-benchmark correlation study**~~ (research/notebook) — **SHIPPED PARTIAL 2026-08-04**
+  - Notebook + report + snapshots shipped in commit [pending]. Killed the fabricated `ρ ≈ 0.71` claim from the r/ML draft. Study itself is underpowered at current traffic (only 2 models meet joint sample-size threshold) — this is documented, not hidden. See `research/cross_benchmark_correlation_report_2026-08-04.md`.
+  - **Follow-up needed:** re-run the same notebook after Tier-A #4 (frozen 100-matchup eval pack) lands. At that point the ρ number becomes publishable and the anchor Research grade moves 8.2 → 8.4.
+  - Anchor grade delta on this ship: **none** (per §0.5, no defensible headline number = no grade move; grade moves only when the pending Tier-A #4 unblocks it).
 
 - [ ] **Inter-rater agreement via optional multi-vote sample** (schema + endpoint)
   - Motivation: METHODOLOGY.md §7 lists "single-vote-per-match" as threat-to-validity #2. Both source guides (SuperAnnotate §"combining human + LLM judge"; Databricks §"human oversight is essential") prescribe consensus checks as gold-standard.

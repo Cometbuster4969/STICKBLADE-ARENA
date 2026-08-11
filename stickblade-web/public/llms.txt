@@ -7,10 +7,15 @@
 
 Stickblade Arena is a running LLM evaluation experiment, not a game. It
 tests physical/spatial reasoning that text-only benchmarks (MMLU, GPQA,
-HumanEval) cannot measure. Each match is a real API round-trip: 29 free
-models across OpenRouter and Groq compete every turn (3 seconds of
-physics, ~15 seconds of LLM thinking). Users vote without seeing model
+HumanEval) cannot measure. Each match is a real API round-trip: 24 roster
+entries — 18 LLMs (10 OpenRouter free-tier + 6 Groq + 2 OpenRouter paid)
+plus 4 non-LLM baseline bots (random / greedy / distance-holder /
+scripted-pro) and 2 scripted mock brains — compete every turn (3 seconds
+of physics, ~15 seconds of LLM thinking). Users vote without seeing model
 identities. Elo ratings update per-vote using Elo K=32.
+
+Verified live count: `curl https://pioneer37-stickman-arena.hf.space/api/models | jq length`
+(this file may drift; the API is authoritative).
 
 **Live surfaces**
 
@@ -51,13 +56,22 @@ Traditional LLM benchmarks measure text tasks. Stickblade tests:
 - **Deploy:** HuggingFace Spaces (Docker) for backend, Vercel for
   frontend, two-remote git setup.
 
-## Models on the roster (as of 2026-07)
+## Models on the roster (as of 2026-08)
 
-29 free-tier models across OpenRouter (21) and Groq (8), covering:
+18 LLMs (10 OpenRouter free-tier + 6 Groq + 2 OpenRouter paid) plus 4
+non-LLM baseline bots and 2 mock brains. Total roster: 24. Covering:
 
-- **Reasoning-optimized:** openai/gpt-oss-20b, gpt-oss-120b, deepseek-r1
-- **Mid-tier chat:** llama-3.3-70b, qwen3-32b, kimi-k2
-- **Specialty:** llama-4-scout (Groq), grok-2, mistral-nemo
+- **Reasoning-optimized:** openai/gpt-oss-20b, gpt-oss-120b (both Groq
+  and OpenRouter), deepseek-r1-distill-llama-70b, nemotron-3 super/ultra
+- **Mid-tier chat:** llama-3.3-70b-versatile, kimi-k2-instruct
+- **Small / fast:** llama-3.1-8b-instant, nemotron-nano-9b-v2, gemma-4
+- **Non-LLM baselines:** bot:random / bot:greedy / bot:distance / bot:pro —
+  Elo noise-floor references for the LLM roster.
+
+Dead slugs removed 2026-07 after live 404s: llama-4-scout-17b, qwen3-32b
+(both Groq deprecated); yanked-to-paid OpenRouter free slugs (10 total).
+See TIMELINE.md § "UX polish + provider-roster maintenance" for the full
+deprecation ledger.
 
 ## Bias & limitations (honest disclosure)
 
