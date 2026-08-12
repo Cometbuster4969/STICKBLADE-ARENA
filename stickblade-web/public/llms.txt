@@ -17,56 +17,61 @@ identities. Elo ratings update per-vote using Elo K=32.
 Verified live count: `curl https://pioneer37-stickman-arena.hf.space/api/models | jq length`
 (this file may drift; the API is authoritative).
 
-**Live surfaces**
+## Live surfaces
 
-- Frontend (play + vote): https://stickblade-arena.vercel.app
-- Backend API: https://pioneer37-stickman-arena.hf.space
-- Source (GitHub): https://github.com/Cometbuster4969/STICKBLADE-ARENA
-- HF Space (backend deploy): https://huggingface.co/spaces/Pioneer37/Stickman-Arena
+- [Frontend (play + vote)](https://stickblade-arena.vercel.app): the live product — pick two models, watch them fight, vote blind.
+- [Backend API](https://pioneer37-stickman-arena.hf.space): FastAPI on HuggingFace Spaces, JSON round-trips per turn.
+- [Backend API docs](https://pioneer37-stickman-arena.hf.space/docs): auto-generated OpenAPI (Swagger UI) for `/api/*` endpoints.
+- [Source (GitHub)](https://github.com/Cometbuster4969/STICKBLADE-ARENA): Apache 2.0 licensed monorepo (Python backend + Next.js frontend).
+- [METHODOLOGY.md](https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/METHODOLOGY.md): canonical write-up — motivation, per-turn protocol, 6-axis Elo, threats to validity.
+- [TIMELINE.md](https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/TIMELINE.md): shipping log + roadmap + kill list.
+- [HF Space page](https://huggingface.co/spaces/Pioneer37/Stickman-Arena): backend deployment surface on HuggingFace.
+- [Match export endpoint](https://pioneer37-stickman-arena.hf.space/api/export): full match log dump (JSON + JSONL streaming) for external analysis.
+- [Vote-rate stats](https://pioneer37-stickman-arena.hf.space/api/stats/vote_rate): live human-vote-through metrics.
 
-**Featured / cited**
+## Featured / cited
 
-- Official pymunk showcase (physics engine used): https://www.pymunk.org/en/latest/showcase.html#stickblade-arena
-- Bronze — Product of the Day on peerpush.com
-- Google AI Overview: "a brilliant example of gamified AI evaluation"
+- [Official pymunk showcase (Non-Games)](https://www.pymunk.org/en/latest/showcase.html#stickblade-arena): featured with a "very cool project" quote from pymunk creator @viblo.
+- [PeerPush listing](https://peerpush.com/p/stickblade-arena): Bronze — Product of the Day.
+- Google AI Overview: "a brilliant example of gamified AI evaluation" (spontaneous citation without prompting).
 
 ## What it evaluates
 
 Traditional LLM benchmarks measure text tasks. Stickblade tests:
 
-- **Spatial reasoning under uncertainty** — "how do I position my body
-  when the opponent is 72px away and I'm at 59 HP?"
-- **Multi-step planning with physics constraints** — momentum, gravity,
+- Spatial reasoning under uncertainty — "how do I position my body when
+  the opponent is 72px away and I'm at 59 HP?"
+- Multi-step planning with physics constraints — momentum, gravity,
   swing cooldowns, sharp-zone geometry all matter for damage calc.
-- **Tool use with rules** — each weapon has different move sets, ranges,
+- Tool use with rules — each weapon has different move sets, ranges,
   and sharp-zone rules that models must reason about correctly.
-- **Adversarial reasoning** — models see the enemy's last move and must
+- Adversarial reasoning — models see the enemy's last move and must
   counter without being told what to do.
 
 ## Architecture
 
-- **Backend:** Python 3.13, FastAPI, pymunk 6.x physics engine. 947-line
-  server, ~1300-line `brains.py` with per-provider adapters (OpenRouter,
-  Groq) + reasoning-parameter policy engine + 429 circuit breaker +
-  provider-diverse buddy failover.
-- **Frontend:** Next.js 15, React 19, deployed on Vercel. Canvas-based
-  renderer (`player.js`, single-source-of-truth served from `/static/`).
-- **Storage:** Supabase (Postgres) with atomic `apply_elo_vote()` RPC
-  for race-free rating updates. SQLite fallback for local dev.
-- **Deploy:** HuggingFace Spaces (Docker) for backend, Vercel for
-  frontend, two-remote git setup.
+- Backend: Python 3.13, FastAPI, pymunk 6.x physics engine. ~1300-line
+  `brains.py` with per-provider adapters (OpenRouter, Groq) + reasoning-
+  parameter policy engine + 429 circuit breaker + provider-diverse
+  buddy failover.
+- Frontend: Next.js 15, React 19, deployed on Vercel. Canvas-based
+  renderer (`player.js`) walks recorded frames for replay playback.
+- Storage: Supabase (Postgres) with atomic `apply_elo_vote()` RPC for
+  race-free rating updates. SQLite fallback for local dev.
+- Deploy: HuggingFace Spaces (Docker) for backend, Vercel for frontend,
+  two-remote git setup.
 
 ## Models on the roster (as of 2026-08)
 
 18 LLMs (10 OpenRouter free-tier + 6 Groq + 2 OpenRouter paid) plus 4
 non-LLM baseline bots and 2 mock brains. Total roster: 24. Covering:
 
-- **Reasoning-optimized:** openai/gpt-oss-20b, gpt-oss-120b (both Groq
-  and OpenRouter), deepseek-r1-distill-llama-70b, nemotron-3 super/ultra
-- **Mid-tier chat:** llama-3.3-70b-versatile, kimi-k2-instruct
-- **Small / fast:** llama-3.1-8b-instant, nemotron-nano-9b-v2, gemma-4
-- **Non-LLM baselines:** bot:random / bot:greedy / bot:distance / bot:pro —
-  Elo noise-floor references for the LLM roster.
+- Reasoning-optimized: openai/gpt-oss-20b, gpt-oss-120b (both Groq and
+  OpenRouter), deepseek-r1-distill-llama-70b, nemotron-3 super/ultra
+- Mid-tier chat: llama-3.3-70b-versatile, kimi-k2-instruct
+- Small / fast: llama-3.1-8b-instant, nemotron-nano-9b-v2, gemma-4
+- Non-LLM baselines: `bot:random` / `bot:greedy` / `bot:distance` /
+  `bot:pro` — Elo noise-floor references for the LLM roster.
 
 Dead slugs removed 2026-07 after live 404s: llama-4-scout-17b, qwen3-32b
 (both Groq deprecated); yanked-to-paid OpenRouter free slugs (10 total).
@@ -75,35 +80,42 @@ deprecation ledger.
 
 ## Bias & limitations (honest disclosure)
 
-- Sample sizes per model are still small (~hundreds of matches);
-  Elo confidence intervals are wide. Do not cite a specific rating
-  as authoritative yet.
-- Vote is single-annotator per match; inter-rater agreement is not
-  yet measured. Roadmap: switch to 3-vote consensus + Krippendorff α.
-- Prompts are not yet versioned; changing `build_state()` in the
-  backend can invalidate historical Elo comparisons.
-- Human judges are self-selected (mostly Reddit / HN / peerpush
-  traffic); demographic bias is not measured.
+- Sample sizes per model are still small (~hundreds of matches); Elo
+  confidence intervals are wide. Do not cite a specific rating as
+  authoritative yet. See the [cross-benchmark correlation
+  report](https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/research/cross_benchmark_correlation_report_2026-08-04.md)
+  for the published null finding.
+- Vote is single-annotator per match; inter-rater agreement is not yet
+  measured. Roadmap: switch to opt-in multi-vote sample + Cohen's κ.
+- `PROMPT_VERSION` is pinned per match; bumping it invalidates historical
+  Elo comparisons across versions. Currently at version 1.
+- Human judges are self-selected (mostly Reddit / HN / PeerPush traffic);
+  demographic bias is not measured.
 
 ## Related work
 
-- Chatbot Arena (LMSys) — the reference for blind human evaluation of
-  LLMs, but text-only.
-- OpenAI Evals, HELM — task-based text evaluation frameworks.
-- Physics-grounded / embodied AI benchmarks (Habitat, AI2-THOR) —
-  test spatial reasoning but in controlled environments, not in
-  adversarial multi-agent competition.
+- [Chatbot Arena (LMSYS)](https://lmarena.ai/): reference for blind human
+  evaluation of LLMs, but text-only.
+- [MMLU (Hendrycks et al 2020)](https://github.com/hendrycks/test): static
+  multi-subject Q&A benchmark; suffers training-data contamination as it ages.
+- [HELM (Stanford CRFM)](https://crfm.stanford.edu/helm): holistic evaluation
+  framework; task-based, text-only.
+- [Habitat (Meta AI)](https://aihabitat.org/) and [AI2-THOR](https://ai2thor.allenai.org/):
+  physics-grounded / embodied AI benchmarks; test spatial reasoning but in
+  controlled single-agent environments, not adversarial multi-agent competition.
 
 ## Cite
 
-If you reference Stickblade Arena in research or writing, use:
+If you reference Stickblade Arena in research or writing, use the
+[`CITATION.cff`](https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/CITATION.cff)
+in the repo root (GitHub renders a "Cite this repository" widget). Or as
+plain text:
 
 ```
-Kumar, A. (2026). Stickblade Arena: A Physics-Based LLM Benchmark
-via Blind Adversarial Sword-Fighting.
-https://github.com/Cometbuster4969/STICKBLADE-ARENA
+Kumar, A. (2026). Stickblade Arena: A Physics-Grounded LLM Evaluation
+Benchmark. https://github.com/Cometbuster4969/STICKBLADE-ARENA
 ```
 
 ## Contact
 
-Ayush Kumar, BIT Mesra. GitHub: @Cometbuster4969
+Ayush Kumar · BIT Mesra · GitHub: [@Cometbuster4969](https://github.com/Cometbuster4969)

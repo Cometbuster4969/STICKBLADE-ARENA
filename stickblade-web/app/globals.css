@@ -246,7 +246,14 @@ main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
+  /* CLS defense: reserve setup-panel vertical space so the row doesn't jerk
+   * down ~140px when /api/models responds and ModelPicker <select> options
+   * populate. Lighthouse (2026-08-12) reported CLS=0.144 with this row
+   * accounting for 0.141 of it. min-height keeps the space claimed on
+   * first paint. Auto-grows for weapon/arena/etc rows via `min-` semantics. */
+  min-height: 88px;
 }
+.row select { min-height: 40px; }
 @media (max-width: 880px) {
   .row { grid-template-columns: 1fr; }
 }
