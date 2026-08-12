@@ -101,3 +101,10 @@ nohup.out
 *.tmp
 tmp/
 temp/
+# Workspace-local folders — not to be pushed to GitHub or HuggingFace
+tools/
+research/
+study/
+applications/
+design/
+marketing/
