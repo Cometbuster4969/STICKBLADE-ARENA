@@ -86,7 +86,7 @@ def run_match_visual(p1, p2, sharp, log_path, weapon="sword"):
         for f in (m.f1, m.f2):
             rend.draw_fighter(screen, f, off)
             rend.draw_weapon(screen, f, sharp, off, arrows=m.arrows[f.fid] if m.arrows else None)
-        rend.draw_hud(screen, m.f1, m.f2, m.turn, C.MAX_TURNS, sharp,
+        rend.draw_hud(screen, m.f1, m.f2, m.turn, m.max_turns, sharp,
                       "THINKING…" if m.phase == Match.PH_THINK else "")
         rend.draw_thought(screen, m.f1, m.thoughts[0], 0)
         rend.draw_thought(screen, m.f2, m.thoughts[1], 1)

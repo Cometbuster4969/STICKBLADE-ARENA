@@ -7,14 +7,27 @@ const CUSTOM = "__custom__";
 
    IMPORTANT — blind voting:
      The picker DOES NOT show a colored swatch tied to the model. That used to
-     leak which model became the GREEN ragdoll vs the BLUE one. The server now
+     leak which model became the GREEN ragdoll vs the BLUE one. The server
      randomizes the canvas assignment per match, so we keep the picker neutral
-     and only show the slot index (1/2). */
+     and only show the slot index (1/2). Terminology is deliberately "Model 1"
+     / "Model 2" here: the Fighter A / Fighter B names belong to the replay and
+     the vote, and mixing the two was one of the review's terminology findings.
+
+   METADATA LINE (review item 5):
+     provider · latency budget · availability, straight from /api/models.
+     A 60-90s match reads as a hang unless the cost of a turn is visible at
+     the point of choice instead of buried in the FAQ. Every value is derived
+     server-side (brains._PROVIDER_HOST / _timeout_for / the 429 cooldown
+     map) so it can't drift from what the engine actually does. */
 export default function ModelPicker({ label, slotIndex, models, value, custom,
-                                      onChange, onCustomChange }) {
+                                      onChange, onCustomChange,
+                                      mode = "macro" }) {
   const isCustom = value === CUSTOM;
   const selectId = useId();
   const inputId = useId();
+  const metaId = useId();
+
+  const picked = models.find((m) => m.id === value);
 
   return (
     <div>
@@ -42,12 +55,13 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
                    marginLeft: "auto" }}
           title="The canvas color (green/blue) is randomized per match for blind voting"
         >
-          color randomized
+          canvas side randomized
         </span>
       </label>
       <select
         id={selectId}
         aria-label={label}
+        aria-describedby={picked ? metaId : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -67,6 +81,51 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
           style={{ marginTop: 6 }}
           autoFocus
         />
+      )}
+      {picked && (
+        <div className="model-meta" id={metaId}>
+          <span>{picked.provider}</span>
+          <span aria-hidden="true">·</span>
+          <span>
+            {picked.no_api
+              ? "no API call — instant"
+              : `up to ${picked.est_turn_s}s per turn`}
+          </span>
+          {picked.reasoning && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>reasoning</span>
+            </>
+          )}
+          {/* Capability at the point of choice (review item 4): the scripted
+              baselines have no joint form, so pairing one with Joint control
+              means it is driven by the macro executor. The sim handles it
+              instead of erroring, but the user should know before pressing
+              Fight rather than reading it in the replay. */}
+          {mode === "joint" && picked.modes && !picked.modes.includes("joint") && (
+            <span className="badge warn"
+                  title="This baseline only speaks macro moves. In a Joint match it is executed by the macro move controller, not by raw joint control.">
+              macro only
+            </span>
+          )}
+          {picked.cooldown_s > 0 ? (
+            <span className="badge off" title="Upstream provider rate-limited this model recently; the engine will fail over to a buddy model.">
+              throttled {picked.cooldown_s}s
+            </span>
+          ) : picked.no_api ? (
+            <span className="badge">scripted</span>
+          ) : (
+            <span className="badge ok">
+              {picked.tier === "free" ? "free tier" : "paid"}
+            </span>
+          )}
+        </div>
+      )}
+      {isCustom && (
+        <div className="model-meta">
+          <span className="badge warn">BYOK/custom</span>
+          <span>latency unknown — not on the curated roster</span>
+        </div>
       )}
     </div>
   );

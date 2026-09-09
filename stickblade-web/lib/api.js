@@ -1,4 +1,9 @@
-const BASE = process.env.NEXT_PUBLIC_API_BASE;
+// Empty base = same-origin. The Next server proxies /api/* to the backend
+// (see next.config.mjs rewrites), so the browser never needs to know the
+// backend's host — which is what makes preview URLs, LAN testing and local
+// dev all work with one configuration. Set NEXT_PUBLIC_API_BASE only to
+// talk to a backend on another origin.
+const BASE = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/+$/, "");
 
 export async function api(path, opts) {
   const r = await fetch(`${BASE}/api${path}`, opts);
@@ -66,6 +71,68 @@ export const getLeaderboardObjective = (sharp, weapon, mode, arena, blindfolded)
   return api(`/leaderboard/objective${qs ? `?${qs}` : ""}`);
 };
 
+/**
+ * Bradley-Terry ratings with bootstrap confidence intervals (§5).
+ * Unlike Elo this refits the whole match set at once, so it is
+ * order-independent and comes with an interval per model.
+ */
+export const getLeaderboardBradleyTerry = (sharp, weapon, mode, arena,
+                                           blindfolded, bootstraps = 200,
+                                           tier = null) => {
+  const q = new URLSearchParams();
+  if (sharp)  q.set("sharp",  sharp);
+  if (weapon) q.set("weapon", weapon);
+  if (mode)   q.set("mode",   mode);
+  if (arena)  q.set("arena",  arena);
+  if (blindfolded != null) q.set("blindfolded", String(Boolean(blindfolded)));
+  if (bootstraps != null) q.set("bootstraps", String(bootstraps));
+  // §6: null = every vote; "expert"/"casual" = that tier only.
+  if (tier) q.set("tier", tier);
+  return api(`/leaderboard/bradley_terry?${q.toString()}`);
+};
+
+/**
+ * Full per-model metric table (§5): win / preference / damage / lethality /
+ * survival / timeout / invalid-action / fallback / latency.
+ */
+export const getModelStats = (sharp, weapon, mode, arena, blindfolded) => {
+  const q = new URLSearchParams();
+  if (sharp)  q.set("sharp",  sharp);
+  if (weapon) q.set("weapon", weapon);
+  if (mode)   q.set("mode",   mode);
+  if (arena)  q.set("arena",  arena);
+  if (blindfolded != null) q.set("blindfolded", String(Boolean(blindfolded)));
+  const qs = q.toString();
+  return api(`/model_stats${qs ? `?${qs}` : ""}`);
+};
+
+/**
+ * Data-quality report for a leaderboard cell (next-step priority 2):
+ * `summary.evidence_level` ∈ scripted_only | insufficient_real | real, plus
+ * a per-model breakdown (real / mixed / scripted matches, fallback count,
+ * missing-token count, last match, benchmark version).
+ */
+export const getDataQuality = (sharp, weapon, mode, arena, blindfolded) => {
+  const q = new URLSearchParams();
+  if (sharp)  q.set("sharp",  sharp);
+  if (weapon) q.set("weapon", weapon);
+  if (mode)   q.set("mode",   mode);
+  if (arena)  q.set("arena",  arena);
+  if (blindfolded != null) q.set("blindfolded", String(Boolean(blindfolded)));
+  const qs = q.toString();
+  return api(`/data_quality${qs ? `?${qs}` : ""}`);
+};
+
+/**
+ * Recurring event calendar + champions archive (§31).
+ * The schedule is derived server-side (no cron, no table to desync); an
+ * undecided event reports *why* instead of naming a champion anyway.
+ */
+export const getEvents = (past = 3, future = 4) =>
+  api(`/events?past=${past}&future=${future}`);
+
+export const getEvent = (id) => api(`/events/${encodeURIComponent(id)}`);
+
 export const getRecent = () => api("/recent");
 export const getMatch = (id) => api(`/match/${id}`);
 /**
@@ -85,12 +152,57 @@ export const createMatch = (body) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-export const postVote = (id, choice) =>
+/**
+ * Cast a vote.
+ *
+ * `choice` is the TACTICAL vote — the only axis that moves a rating. The
+ * optional axes (execution / entertainment / deserved) and the 1-5
+ * confidence rating are collected separately so the dataset can measure
+ * "fought intelligently" against "was fun to watch" instead of conflating
+ * them (action-plan §6).
+ */
+/**
+ * Cast a vote. `extra` may carry the optional axes, the 1-5 confidence
+ * rating, and `voter_tier` ("casual" | "expert", §6).
+ */
+export const postVote = (id, choice, extra = {}) =>
   api(`/vote/${id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ choice }),
+    body: JSON.stringify({ choice, ...extra }),
   });
+
+/**
+ * Cancel a queued/running match (action-plan §13). The backend stops at
+ * the next turn boundary — it cannot abort an API call already in flight.
+ */
+export const cancelMatch = (id) =>
+  api(`/match/${id}/cancel`, { method: "POST" });
+
+// ---------- Benchmark specification + integrity (§1, §8) ----------
+export const getBenchmarkSpec = () => api("/benchmark/spec");
+export const getIntegrity = (id) => api(`/integrity/${id}`);
+
+// ---------- Observability (§19, §35) ----------
+export const getMetrics = () => api("/metrics");
+export const getStatus = () => api("/status");
+
+/** Absolute URL for the dataset export (§27). */
+export const exportUrl = (fmt = "json", params = {}) => {
+  const q = new URLSearchParams({ fmt, ...params });
+  return `${BASE}/api/export?${q.toString()}`;
+};
+
+/**
+ * The landing-page sample fight (§3). Served as a static asset so the
+ * "watch a sample fight" button works even when the backend is asleep or
+ * a provider is throttled.
+ */
+export async function getDemoReplay() {
+  const r = await fetch("/demo_replay.json");
+  if (!r.ok) return null;
+  return r.json();
+}
 
 // ---------- Tournaments ----------
 export const createTournament = (body) =>

@@ -1,19 +1,37 @@
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
-import { Inter, Rajdhani } from "next/font/google";
+import localFont from "next/font/local";
 
-// Self-hosted via next/font — no external font requests, so our strict
-// Content-Security-Policy (which omits fonts.googleapis.com) stays intact.
-const inter = Inter({
-  subsets: ["latin"],
+// Truly self-hosted via next/font/local: the woff2 files ship inside
+// @fontsource/* (a normal npm dependency), so the build never reaches out
+// to fonts.googleapis.com. That matters twice over — our Content-Security
+// Policy omits fonts.googleapis.com, and a build that depends on a third
+// party's uptime fails for reasons that have nothing to do with our code.
+const inter = localFont({
+  src: [
+    { path: "../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2",
+      weight: "400", style: "normal" },
+    { path: "../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2",
+      weight: "500", style: "normal" },
+    { path: "../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2",
+      weight: "600", style: "normal" },
+    { path: "../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2",
+      weight: "700", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-ui",
   preload: true,
 });
 
-const rajdhani = Rajdhani({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+const rajdhani = localFont({
+  src: [
+    { path: "../node_modules/@fontsource/rajdhani/files/rajdhani-latin-500-normal.woff2",
+      weight: "500", style: "normal" },
+    { path: "../node_modules/@fontsource/rajdhani/files/rajdhani-latin-600-normal.woff2",
+      weight: "600", style: "normal" },
+    { path: "../node_modules/@fontsource/rajdhani/files/rajdhani-latin-700-normal.woff2",
+      weight: "700", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-display",
   preload: true,
@@ -153,42 +171,11 @@ export default function RootLayout({ children }) {
         />
       </head>
       <body>
-        <header className="site-head">
-          <a href="/" className="logo" aria-label="Stickblade Arena home">
-            STICK<span className="blade">BLADE</span> ARENA
-          </a>
-          <nav aria-label="Primary">
-            <a href="/" className="active">Fight</a>
-            <a href="/tournament">🏆 Tournament</a>
-            <a href="/leaderboard">Leaderboard</a>
-            <a href="/history">History</a>
-          </nav>
-        </header>
+        {/* Global chrome now lives in <SiteNav/> / <SiteFooter/>, rendered
+            by each page. Those are client components, so they can highlight
+            the active route and poll live endpoints — the static header and
+            footer that used to sit here could do neither. */}
         <main>{children}</main>
-        <footer className="site-foot">
-          <div>
-            physics-based LLM benchmark · vote blind · sharp zones change everything
-          </div>
-          <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75,
-                        display: "flex", justifyContent: "center", gap: 14,
-                        flexWrap: "wrap" }}>
-            <a href="https://github.com/Cometbuster4969/STICKBLADE-ARENA"
-               target="_blank" rel="noreferrer"
-               style={{ color: "inherit", textDecoration: "none" }}>
-              ⭐ github
-            </a>
-            <span>·</span>
-            <a href="https://github.com/sponsors/Cometbuster4969"
-               target="_blank" rel="noreferrer"
-               style={{ color: "inherit", textDecoration: "none" }}>
-              ❤ sponsor
-            </a>
-            <span>·</span>
-            <span style={{ color: "inherit" }}>
-              free-tier throttled? paste your own key in the setup panel
-            </span>
-          </div>
-        </footer>
         <Analytics />
       </body>
     </html>

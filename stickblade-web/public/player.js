@@ -573,6 +573,227 @@ function advance(){
     killcamActive = false;
   }
 }
+/* ------------------------------------------------------------------ §10
+   Research debug overlay.
+
+   A benchmark that cannot show its work cannot be reviewed. Everything
+   below is derived from the same replay data the fight itself is drawn
+   from — nothing is re-simulated — so what a reviewer sees is exactly
+   what the engine did:
+
+     hitboxes        per-body capsule extents (HALF/WIDTHS, same table the
+                     renderer uses) — not an approximation of them
+     weapon segments blade geometry per weapon, with the sharp zone the
+                     match was played under highlighted
+     velocity        finite-difference torso velocity, px/s, drawn as a
+                     vector (length is speed, so a lunge is visible)
+     contact points  hit/clash events at their recorded coordinates,
+                     labelled with damage, body part and who landed it
+     damage source   the "by" field on each hit event
+     frame / action  frame index, turn, and the thought (action) in force
+
+   Toggle with the ⚙ Debug button or the "d" key. Off by default: it is
+   noise for a casual viewer and essential for a reviewer.
+   ------------------------------------------------------------------ */
+const DEBUG = {
+  on: false,
+  boxes: true, weapon: true, velocity: true,
+  contacts: true, hud: true,
+};
+window.__sbDebug = DEBUG;
+
+function debugToggle() {
+  DEBUG.on = !DEBUG.on;
+  const b = document.getElementById("bDebug");
+  if (b) {
+    b.textContent = DEBUG.on ? "⚙ Debug: on" : "⚙ Debug";
+    b.setAttribute("aria-pressed", String(DEBUG.on));
+  }
+  return DEBUG.on;
+}
+window.__sbDebugToggle = debugToggle;
+
+function drawDebug(frame, ox, oy) {
+  if (!DEBUG.on) return;
+  const prev = cursor > 0 ? R.frames[cursor - 1] : frame;
+  const dt = 1 / FPS;
+
+  // --- hitboxes: the actual capsule extents the physics uses ----------
+  if (DEBUG.boxes) {
+    ctx.lineWidth = 1;
+    for (let fi = 0; fi < 2; fi++) {
+      const meta = fi === 0 ? R.meta.p1 : R.meta.p2;
+      for (let bi = 0; bi < BODY.length; bi++) {
+        const nm = BODY[bi], b = bodyAt(frame, fi, bi);
+        if (!b) continue;
+        if (nm === "sword") continue;               // drawn as a segment below
+        const h = HALF[nm], w = WIDTHS[nm] / 2;
+        const a = local(b, 0, h), c = local(b, 0, -h);
+        ctx.strokeStyle = "rgba(120,220,255,0.55)";
+        ctx.beginPath();
+        ctx.moveTo(sx(a[0], ox), sy(a[1], oy));
+        ctx.lineTo(sx(c[0], ox), sy(c[1], oy));
+        ctx.lineWidth = w;
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(190,240,255,0.75)";
+        ctx.stroke();                                // crisp outline
+      }
+      // head hitbox
+      const hb = bodyAt(frame, fi, 1);
+      if (hb) {
+        ctx.strokeStyle = "rgba(190,240,255,0.75)";
+        ctx.beginPath();
+        ctx.arc(sx(hb[0], ox), sy(hb[1], oy), HEAD_R, 0, 7);
+        ctx.stroke();
+      }
+      void meta;
+    }
+  }
+
+  // --- weapon segments + the sharp zone this match was played under ---
+  if (DEBUG.weapon) {
+    const sharp = R.meta.sharp || [];
+    for (let fi = 0; fi < 2; fi++) {
+      const meta = fi === 0 ? R.meta.p1 : R.meta.p2;
+      if (WEAPON === "flail") {
+        const h = bodyAt(frame, fi, 10);
+        const a = local(h, 0, -8), b2 = local(h, 0, 26);
+        ctx.strokeStyle = sharp.includes("handle") ? "#ff6b6b" : "#ffd07a";
+        ctx.lineWidth = 6; seg(a, b2, ox, oy);
+        let from = local(h, 0, 26);
+        for (let i = 0; i < 3; i++) {
+          const lb = bodyAt(frame, fi, 11 + i);
+          if (!lb) break;
+          const to = local(lb, 0, 9);
+          ctx.strokeStyle = sharp.includes("chain") ? "#ff6b6b" : "#ffd07a";
+          ctx.lineWidth = 3; seg(from, to, ox, oy);
+          from = to;
+        }
+        const bb = bodyAt(frame, fi, 14);
+        if (bb) {
+          ctx.strokeStyle = "#ff6b6b"; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(sx(bb[0], ox), sy(bb[1], oy), 11, 0, 7);
+          ctx.stroke();
+        }
+      } else {
+        const g = WEAPON_GEO[WEAPON] || SW;
+        const h = bodyAt(frame, fi, 10);
+        if (h) {
+          const pommel = local(h, g.pommel, 0), tip = local(h, g.tip, 0);
+          ctx.strokeStyle = "#ffd07a"; ctx.lineWidth = g.w; seg(pommel, tip, ox, oy);
+          // sharp zone: the part of the blade that actually cuts this match
+          const zx = g.tip * g.tipFrac;
+          ctx.strokeStyle = "#ff4646"; ctx.lineWidth = g.w + 3;
+          seg(local(h, zx, 0), tip, ox, oy);
+          if (g.hilt) {
+            ctx.strokeStyle = "#ffd07a"; ctx.lineWidth = g.w + 4;
+            seg(local(h, g.handle, 0), local(h, g.handle + 6, 0), ox, oy);
+          }
+          ctx.fillStyle = "#ff4646";
+          ctx.beginPath(); ctx.arc(sx(tip[0], ox), sy(tip[1], oy), 4, 0, 7);
+          ctx.fill();
+          ctx.fillStyle = "#ffd07a";
+          ctx.font = "10px monospace"; ctx.textAlign = "center";
+          ctx.fillText("sharp:" + (sharp.join("+") || "none"),
+                       sx(tip[0], ox), sy(tip[1], oy) - 10);
+        }
+      }
+      void meta;
+    }
+  }
+
+  // --- velocity vectors (finite difference, px/s) ----------------------
+  if (DEBUG.velocity) {
+    for (let fi = 0; fi < 2; fi++) {
+      const meta = fi === 0 ? R.meta.p1 : R.meta.p2;
+      const t = bodyAt(frame, fi, 0), pt = bodyAt(prev, fi, 0);
+      if (!t || !pt) continue;
+      const vx = (t[0] - pt[0]) / dt, vy = (t[1] - pt[1]) / dt;
+      const sp = Math.hypot(vx, vy);
+      // 0.25 px per (px/s) keeps a 400px/s lunge inside the frame.
+      const k = 0.25;
+      ctx.strokeStyle = meta.color; ctx.lineWidth = 2;
+      arrow(sx(t[0], ox), sy(t[1], oy),
+            sx(t[0], ox) + vx * k, sy(t[1], oy) - vy * k);
+      ctx.fillStyle = "#e8eaf4"; ctx.font = "11px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(`${sp.toFixed(0)} px/s`, sx(t[0], ox) + 10,
+                   sy(t[1], oy) + 26);
+    }
+  }
+
+  // --- contact points / damage source ---------------------------------
+  if (DEBUG.contacts) {
+    // Events from the last ~0.4s stay on screen so a hit is legible.
+    for (let f = Math.max(0, cursor - Math.round(FPS * 0.4)); f <= cursor; f++) {
+      for (const e of (eventsByFrame[f] || [])) {
+        const age = (cursor - f) / (FPS * 0.4);
+        const alpha = Math.max(0.15, 1 - age);
+        ctx.globalAlpha = alpha;
+        const isHit = e.k === "hit";
+        ctx.strokeStyle = isHit ? (e.l ? "#ff2d55" : "#ffb020") : "#7fd7ff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx(e.x, ox), sy(e.y, oy), isHit ? 9 : 6, 0, 7);
+        ctx.stroke();
+        if (isHit) {
+          ctx.beginPath();
+          ctx.moveTo(sx(e.x, ox) - 5, sy(e.y, oy));
+          ctx.lineTo(sx(e.x, ox) + 5, sy(e.y, oy));
+          ctx.moveTo(sx(e.x, ox), sy(e.y, oy) - 5);
+          ctx.lineTo(sx(e.x, ox), sy(e.y, oy) + 5);
+          ctx.stroke();
+          ctx.fillStyle = "#fff"; ctx.font = "bold 11px monospace";
+          ctx.textAlign = "center";
+          const label = `${(e.d || 0).toFixed(1)}${e.part ? " " + e.part : ""}`
+                      + (e.by ? ` ← ${e.by}` : "");
+          ctx.fillText(label, sx(e.x, ox), sy(e.y, oy) - 14);
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // --- frame / turn / current action ----------------------------------
+  if (DEBUG.hud) {
+    const th = thoughtIdx >= 0 ? R.thoughts[thoughtIdx] : null;
+    const lines = [
+      `frame ${cursor}/${total - 1}   t=${(cursor / FPS).toFixed(2)}s`,
+      `turn  ${frame[2]}   hp ${frame[0].toFixed(1)} / ${frame[1].toFixed(1)}`,
+      `weapon ${WEAPON}   sharp [${(R.meta.sharp || []).join(", ")}]   arena ${R.meta.arena || "normal"}`,
+      th ? `A: ${(th.a || "").slice(0, 58)}` : "A: —",
+      th ? `B: ${(th.b || "").slice(0, 58)}` : "B: —",
+    ];
+    ctx.font = "11px monospace"; ctx.textAlign = "left";
+    const wBox = 470, hBox = 12 * lines.length + 12;
+    ctx.fillStyle = "rgba(6,8,14,0.82)";
+    rr(14, H - hBox - 14, wBox, hBox, 6); ctx.fill();
+    ctx.strokeStyle = "rgba(120,220,255,0.4)"; ctx.lineWidth = 1;
+    rr(14, H - hBox - 14, wBox, hBox, 6); ctx.stroke();
+    lines.forEach((l, i) => {
+      ctx.fillStyle = i < 3 ? "#7fd7ff" : "#c9d2e4";
+      ctx.fillText(l, 24, H - hBox + 4 + i * 12);
+    });
+  }
+}
+function seg(a, b, ox, oy) {
+  ctx.beginPath();
+  ctx.moveTo(sx(a[0], ox), sy(a[1], oy));
+  ctx.lineTo(sx(b[0], ox), sy(b[1], oy));
+  ctx.stroke();
+}
+function arrow(x1, y1, x2, y2) {
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  const a = Math.atan2(y2 - y1, x2 - x1), L = 7;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - L * Math.cos(a - 0.4), y2 - L * Math.sin(a - 0.4));
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - L * Math.cos(a + 0.4), y2 - L * Math.sin(a + 0.4));
+  ctx.stroke();
+}
+
 function render(){
   if (bgDirty) buildBg();
   const frame = R.frames[cursor];
@@ -601,6 +822,7 @@ function render(){
     drawQuip(qa, frame, 0, R.meta.p1, qAlpha);
     drawQuip(qb, frame, 1, R.meta.p2, qAlpha);
   }
+  drawDebug(frame, ox, oy);
   if (flash>0){ ctx.fillStyle=`rgba(255,255,255,${0.8*flash})`; ctx.fillRect(0,0,W,H); }
   if (killcamActive){
     // Cinematic letterbox bars
@@ -660,6 +882,18 @@ const _seekHandler = (e) => {
   if (!alive) return;
   const f = e && e.detail && Number.isFinite(e.detail.frame) ? e.detail.frame : null;
   if (f === null) return;
+  // `killcam: true` (dispatched by the replay toolbar's KILLCAM button)
+  // re-arms the same slow-motion treatment the automatic end-of-match
+  // killcam gets, then seeks to the frame the caller picked. The existing
+  // "end killcam a couple frames after the lethal hit" logic in the loop
+  // takes care of switching back to normal speed.
+  if (e.detail && e.detail.killcam) {
+    killcamPlayed = true;
+    killcamActive = true;
+    slowmo = Math.max(slowmo, 3.0);
+    playing = true;
+    bPlay.textContent = "⏸ Pause";
+  }
   gotoFrame(f, true);
   // Keep the current play state — if user paused to read, don't force
   // them back to playing; if they were watching, keep the replay running

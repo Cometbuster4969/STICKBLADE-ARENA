@@ -8,6 +8,10 @@ name: CI
 #   1. backend-tests        — Python 3.11/3.12/3.13 matrix
 #                             compile check + smoke-run every weapon
 #                             + full 24-turn mock match + test_phases suite
+#   1b. test-suite          — pytest regression gate: benchmark spec,
+#                             physics, replay determinism, API schema,
+#                             Elo/rating maths, blind identity, anti-gaming,
+#                             BYOK secret-leak checks
 #   2. frontend-checks      — Node 20/22: install, lint-ish balance check,
 #                             next build (catches SSR/hydration + type errors)
 #   3. security             — Bandit static analysis + secret-scanning regex
@@ -191,8 +195,41 @@ jobs:
           assert r2['elo_change'][A] == 16.0, f'A should gain 16, got {r2}'
           assert r2['elo_change'][B] == -16.0, f'B should lose 16, got {r2}'
           print('  normal vote: A +16 / B -16 — OK')
+
+          # Flip-aware objective leaderboard attribution
+          mid3 = s.create_match(A, B, ['tip'], blind=True, weapon='sword')
+          s.set_flip(mid3, True)
+          s.finish_match(mid3, 'a', 'kill', 10, {
+              'meta': {
+                  'metrics': {
+                      'damage_dealt_a': 100.0, 'damage_dealt_b': 20.0,
+                      'hits_landed_a': 5, 'hits_landed_b': 1,
+                      'hits_attempted_a': 10, 'hits_attempted_b': 8,
+                      'fallback_turns_a': 0, 'fallback_turns_b': 2,
+                      'avg_distance': 150.0
+                  }
+              },
+              'frames': [], 'events': [], 'thoughts': []
+          })
+          obj_lb = {row['model']: row for row in s.objective_leaderboard()}
+          assert obj_lb[B]['damage_per_turn'] == 10.0, f'B dmg/turn wrong: {obj_lb[B]}'
+          assert obj_lb[A]['damage_per_turn'] == 2.0, f'A dmg/turn wrong: {obj_lb[A]}'
+          assert obj_lb[B]['wins'] == 1 and obj_lb[A]['losses'] == 1
+          print('  objective leaderboard flip mapping: OK')
+
+          # Stale match cleanup on restart
+          mid_stale = s.create_match(A, B, ['tip'], blind=True, weapon='sword')
+          s.cleanup_stale_matches()
+          assert s.get_match(mid_stale)['status'] == 'error'
+          print('  stale match cleanup: OK')
           print('storage regression: PASS')
           "
+
+      - name: Audit fixes regression test suite
+        working-directory: stickblade
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: python3 test_audit_fixes.py
 
       - name: Brain routing — Groq/OR/mock all resolve correctly
         working-directory: stickblade
@@ -271,6 +308,13 @@ jobs:
               sys.exit(f"\n{len(failed)} files have unbalanced braces/parens")
           PY
 
+      # The player is a vanilla <script> bound to fixed DOM ids, so the
+      # build never executes it. This runs it headlessly against the
+      # checked-in demo replay — including the S10 debug overlay.
+      - name: Replay player smoke (incl. debug overlay)
+        working-directory: stickblade-web
+        run: npm run check:player
+
       - name: Next.js production build (catches SSR + hydration errors)
         working-directory: stickblade-web
         env:
@@ -316,9 +360,13 @@ jobs:
         run: |
           # Scan the entire git history (not just current tree) for accidentally
           # committed secret files. --all covers deleted-in-later-commit cases.
+          # .env.example/.sample/.template are the documented exception: they
+          # contain placeholders only and exist precisely so nobody copies a
+          # real .env into a commit.
           if git log --all --diff-filter=A --name-only --pretty=format: | \
                 sort -u | \
-                grep -iE '(^|/)(\.env(\.|$)|.*\.key$|.*\.pem$|.*_credentials\.json$|\.git-credentials|\.netrc)' ; then
+                grep -iE '(^|/)(\.env(\.|$)|.*\.key$|.*\.pem$|.*_credentials\.json$|\.git-credentials|\.netrc)' | \
+                grep -viE '(^|/)\.env\.(example|sample|template)$' ; then
             echo "::error::A credential/env file was committed at some point in history"
             exit 1
           fi
@@ -439,17 +487,92 @@ jobs:
           "
 
   # ==========================================================================
+  # 5b. TEST SUITE — the pytest regression gate
+  #
+  # backend-tests is a set of inline smoke scripts. tests/ is the real
+  # regression suite (117 cases across 8 files: benchmark spec, physics
+  # determinism, API contracts, Elo math, blind-election integrity,
+  # adversarial input, BYOK key hygiene). It runs headless via the dummy
+  # SDL driver, so it needs no display and no API key.
+  # ==========================================================================
+  test-suite:
+    name: pytest suite
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: stickblade/requirements.txt
+
+      - name: Install system deps for pygame/pymunk
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 \
+            libsdl2-ttf-2.0-0 libfreetype6
+
+      - name: Install Python deps
+        working-directory: stickblade
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx
+
+      - name: Benchmark spec fingerprint is stable
+        # If this drifts, every published replay's provenance is stale. The
+        # fingerprint is a hash of the frozen spec document, so it must only
+        # change when a version is deliberately bumped.
+        working-directory: stickblade
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          python3 benchmark.py --fingerprint
+          python3 -c "
+          import benchmark as B
+          from brains import PROMPT_VERSION
+          assert B.BENCHMARK_VERSION == '1.0', B.BENCHMARK_VERSION
+          # Pinned per prompt version. The fingerprint hashes PROMPT_VERSION
+          # too, so a prompt bump is expected to move it — anything else
+          # moving it is a silent physics/rules change and fails here.
+          # 2026-09-09: docs said 029281ed627a (prompt v1) while runtime was
+          # 09de66effd02 (prompt v2) for a day because this step only
+          # printed the value. Now it asserts it.
+          PINNED = {1: '029281ed627a', 2: '09de66effd02'}
+          assert B.SPEC_FINGERPRINT == PINNED[PROMPT_VERSION], (
+              B.SPEC_FINGERPRINT, PROMPT_VERSION, PINNED)
+          print('benchmark spec v' + B.BENCHMARK_VERSION,
+                'prompt v' + str(PROMPT_VERSION),
+                'fingerprint', B.SPEC_FINGERPRINT)
+          "
+
+      - name: Run the pytest suite
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: python3 -m pytest tests -q --tb=short
+
+  # ==========================================================================
   # 6. SUMMARY — one green check that depends on all above
   # ==========================================================================
   ci-summary:
     name: CI passed
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-checks, security, roster-consistency]
+    needs: [backend-tests, test-suite, frontend-checks, security,
+            roster-consistency]
     if: always()
     steps:
       - name: Fail if any required job failed
         run: |
           if [ "${{ needs.backend-tests.result }}" != "success" ] || \
+             [ "${{ needs.test-suite.result }}" != "success" ] || \
              [ "${{ needs.frontend-checks.result }}" != "success" ] || \
              [ "${{ needs.security.result }}" != "success" ] || \
              [ "${{ needs.roster-consistency.result }}" != "success" ]; then

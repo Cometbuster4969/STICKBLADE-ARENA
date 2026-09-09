@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in the arena is broken or wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. The single most useful thing you can give us is a
+        **match id** — it lets us pull the provenance record and the replay
+        straight out of the database.
+  - type: input
+    id: match_id
+    attributes:
+      label: Match id (if applicable)
+      description: 12-character hex id, e.g. 4f2a9c1b7e03
+      placeholder: 4f2a9c1b7e03
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Pick model X vs model Y, weapon sword, sharp tip
+        2. Start match
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: integrity
+    attributes:
+      label: Integrity output (if you have a match id)
+      description: "Paste the output of GET /api/integrity/{match_id}"
+      render: json
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Website (stickblade-arena.vercel.app)
+        - Backend API
+        - Offline tools (tools/)
+        - Dataset / export
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Environment
+      description: Browser + OS, or Python version + OS for the backend/tools.
+      placeholder: "Firefox 141 / Windows 11 — or — Python 3.13 / Ubuntu 24.04"

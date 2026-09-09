@@ -670,6 +670,7 @@ truncate table elo;  -- clean slate, all ratings start at 1000 under v2
 | Version | Date       | Change                                                                            | Cutover |
 | ------- | ---------- | --------------------------------------------------------------------------------- | ------- |
 | v1      | 2026-07-18 | Baseline: 5 weapons, 3 arenas, macro/joint modes, spatial state w/ facing_enemy   | —       |
+| v2      | 2026-09-08 | Ranged mobility: `ranged_hint` gains `enemy_approaching`, `closing_speed_px_s`, `distance_band`, `space_ahead_px`, `space_behind_px`, `consecutive_hold_turns`, `recommended_footwork`, `max_consecutive_holds`; new `MOVEMENT` block in `SYSTEM_PROMPT`; bow `range_hint` rewritten from "keep distance >260 and shoot" to an explicit repositioning rule with a 2-turn `hold` cap. Additive — no v1 field removed or redefined. Fix for "bow agents stopped repositioning" (both archers chose `hold` on 112/112 turns; torso moved 30px per match). See `stickblade/test_bow_mobility.py`. | Soft — v1 ratings stay readable; don't average v1 and v2 bow cells together |
 
 When you bump, add a row here BEFORE pushing the code change. Reviewers
 should be able to read this table and understand exactly what changed.

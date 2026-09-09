@@ -104,6 +104,11 @@ deprecation ledger.
   physics-grounded / embodied AI benchmarks; test spatial reasoning but in
   controlled single-agent environments, not adversarial multi-agent competition.
 
+## License
+
+- **Code:** [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) — permissive, attribution required in redistributions, patent grant included. See [`LICENSE`](https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/LICENSE) in repo root.
+- **Match data** (everything at `/api/export`, replay JSONs, snapshot files in `research/`): **[CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)** — you can use it (including commercially), but must attribute and any derivative dataset must also be open. Full terms in [`research/DATA_LICENSE.md`](https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/research/DATA_LICENSE.md).
+
 ## Cite
 
 If you reference Stickblade Arena in research or writing, use the
@@ -114,6 +119,7 @@ plain text:
 ```
 Kumar, A. (2026). Stickblade Arena: A Physics-Grounded LLM Evaluation
 Benchmark. https://github.com/Cometbuster4969/STICKBLADE-ARENA
+Data license: CC-BY-SA 4.0.
 ```
 
 ## Contact

@@ -46,15 +46,51 @@ create table if not exists matches (
     hits_attempted_b  integer,
     fallback_turns_a  integer,
     fallback_turns_b  integer,
-    avg_distance      double precision
+    avg_distance      double precision,
+
+    -- =====================================================================
+    -- Benchmark spec v1.0 — per-match provenance.
+    -- Every published match is pinned to a version triple so that a
+    -- leaderboard slice stays interpretable after the code moves on.
+    -- =====================================================================
+    benchmark_version text,
+    physics_version   text,
+    prompt_version    text,
+    spec_fingerprint  text,
+    seed              integer,        -- NULL = unseeded (not reproducible)
+    match_length      text,           -- sprint | standard | full
+    max_turns         integer,
+    fallback_policy   text,           -- strict | operational | demo
+    model_used_a      text,           -- after buddy/fallback swaps
+    model_used_b      text,
+    provider_used_a   text,           -- openrouter | groq | scripted | ...
+    provider_used_b   text,
+    fallback_used     boolean default false,
+    latency_ms_a      double precision,
+    latency_ms_b      double precision,
+    invalid_actions_a integer default 0,
+    invalid_actions_b integer default 0,
+    ranking_eligible  boolean default true,
+    cancelled         boolean default false,
+    models_used_a     text,           -- JSON {model_id: turns}
+    models_used_b     text
 );
 
 create table if not exists votes (
     id        text primary key,
     match_id  text references matches(id),
     created   double precision,
-    choice    text                          -- a | b | draw (CANVAS side)
+    choice    text,                         -- TACTICAL vote (ranked)
+    -- Separate axes (action-plan §6). Only `choice` moves a rating; the
+    -- rest exist so the dataset can separate tactical quality from
+    -- entertainment value.
+    execution      text,
+    entertainment  text,
+    deserved       text,
+    confidence     integer                  -- 1..5, self-reported
 );
+
+create unique index if not exists idx_votes_match_id on votes (match_id);
 
 -- Per-cell Elo leaderboards. PK is
 --   (model, sharp, weapon, mode, arena, blindfolded)
@@ -104,6 +140,39 @@ create table if not exists tournament_matches (
 );
 
 -- ============================================================================
+-- ============================================================================
+-- 1b. BENCHMARK SPEC v1.0 MIGRATION (idempotent — safe to re-run)
+-- ============================================================================
+alter table matches add column if not exists benchmark_version text;
+alter table matches add column if not exists physics_version   text;
+alter table matches add column if not exists prompt_version    text;
+alter table matches add column if not exists spec_fingerprint  text;
+alter table matches add column if not exists seed              integer;
+alter table matches add column if not exists match_length      text;
+alter table matches add column if not exists max_turns         integer;
+alter table matches add column if not exists fallback_policy   text;
+alter table matches add column if not exists model_used_a      text;
+alter table matches add column if not exists model_used_b      text;
+alter table matches add column if not exists provider_used_a   text;
+alter table matches add column if not exists provider_used_b   text;
+alter table matches add column if not exists fallback_used     boolean default false;
+alter table matches add column if not exists latency_ms_a      double precision;
+alter table matches add column if not exists latency_ms_b      double precision;
+alter table matches add column if not exists invalid_actions_a integer default 0;
+alter table matches add column if not exists invalid_actions_b integer default 0;
+alter table matches add column if not exists ranking_eligible  boolean default true;
+alter table matches add column if not exists cancelled         boolean default false;
+alter table matches add column if not exists models_used_a     text;
+alter table matches add column if not exists models_used_b     text;
+
+alter table votes add column if not exists execution      text;
+alter table votes add column if not exists entertainment  text;
+alter table votes add column if not exists deserved       text;
+alter table votes add column if not exists confidence     integer;
+
+create index if not exists idx_matches_benchmark on matches (benchmark_version);
+create index if not exists idx_matches_status_created on matches (status, created);
+
 -- 2. IDEMPOTENT MIGRATIONS for older deployments
 --    Must run BEFORE any CREATE INDEX or PK change that references new columns.
 -- ============================================================================

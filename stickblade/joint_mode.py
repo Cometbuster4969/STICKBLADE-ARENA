@@ -57,6 +57,10 @@ class JointController:
         self.enemy = enemy
         self.fired = False
         fighter.last_action = self._summary()
+        # Same mobility bookkeeping as moves.MoveController: joint mode also
+        # gets to stand still, and the prompt's consecutive_hold_turns has to
+        # stay truthful in either control regime.
+        fighter.note_footwork(self.footwork)
 
     def _summary(self):
         active = [f"{j}:{s}" for j, s in self.states.items() if s != "hold"]
@@ -224,8 +228,14 @@ class MockJointBrain:
     """
 
     label = "Mock-jointer"
+    scripted = True          # no network — see brains.Brain.scripted
 
-    def __init__(self, sharp_zones, label=None, weapon="sword"):
+    def __init__(self, sharp_zones, label=None, weapon="sword", rng=None):
+        # Per-instance RNG: joint decisions are also computed in a thread,
+        # so the global random module must not be touched here (see
+        # brains.Brain.__init__).
+        import random as _random
+        self.rng = rng if rng is not None else _random
         self.sharp = sharp_zones
         if label:
             self.label = label
@@ -233,7 +243,12 @@ class MockJointBrain:
         self.phase = 0
 
     def decide(self, state):
-        d = state["distance"]
+        # brains._distance_of, not state["distance"]: blindfolded matches
+        # strip the derived distance/height fields, and this brain is both a
+        # selectable roster entry and the joint-mode fallback, so reading the
+        # key directly raised KeyError on every blindfolded joint turn.
+        from brains import _distance_of
+        d = _distance_of(state)
         if self.weapon == "bow":
             return self._decide_bow(state, d)
 
@@ -255,9 +270,9 @@ class MockJointBrain:
                   "footwork": "lunge" if d > 110 else "hold"}
         self.phase += 1
         # tiny chaos so mirror matches diverge
-        if random.random() < 0.2:
-            j = random.choice(JOINTS)
-            mv["joints"][j] = random.choice(JOINT_STATES)
+        if self.rng.random() < 0.2:
+            j = self.rng.choice(JOINTS)
+            mv["joints"][j] = self.rng.choice(JOINT_STATES)
         return sanitize_joint_reply(mv)
 
     def _decide_bow(self, state, d):
@@ -275,12 +290,36 @@ class MockJointBrain:
                 "thought": "Too close to shoot — bash with the bow.",
                 "joints": bash, "footwork": "hop_back", "fire": False,
             })
+        # Footwork from the shared bow policy. This used to be
+        # `"retreat" if d < 200 else "hold"`, i.e. the joint-mode archer
+        # planted its feet for the entire match at anything past 200px — the
+        # same statue behaviour the macro-mode bow branch had. See
+        # brains.bow_footwork / test_bow_mobility.py.
+        from brains import bow_footwork, _mobility_of, _phase_of
+        hold_streak, space_behind, approaching = _mobility_of(state)
         return sanitize_joint_reply({
             "thought": "Draw the string and loose an arrow.",
             "joints": draw,
-            "footwork": "retreat" if d < 200 else "hold",
+            "footwork": bow_footwork(d, approaching=approaching,
+                                     hold_streak=hold_streak,
+                                     space_behind=space_behind,
+                                     turn=state.get("turn", 0),
+                                     phase=_phase_of(state)),
             "fire": True,
         })
 
     def decide_with_timeout(self, state):
-        return self.decide(state)
+        # Provenance stamps, same as brains.Brain.decide_with_timeout: this
+        # brain bypasses that ladder (nothing to retry), so without these a
+        # joint-mode mock reported an empty provider and the calibration
+        # audit's "100 % of matches identify the provider" check failed on
+        # every scripted joint match.
+        out = self.decide(state)
+        try:
+            from brains import _model_id_of, _provider_of
+            out["_model_used"] = _model_id_of(self)
+            out["_provider_used"] = _provider_of(self)
+            out["_attempt"] = 1
+        except Exception:
+            pass
+        return out

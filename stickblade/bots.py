@@ -24,10 +24,12 @@ same matchup to produce the same outcome across re-runs.
 """
 import random
 from moves import ACTIONS, FOOTWORK, ACTION_ZONE
-from brains import Brain, _sanitize
+from brains import (Brain, _sanitize, bow_footwork, _distance_of, _mobility_of,
+                    _phase_of)
 
 
 class BotBrain(Brain):
+    scripted = True          # pure heuristics, no network (see Brain.scripted)
     """Base for non-LLM baselines. Inherits WEAPON_ACTIONS resolution,
     self.actions vocabulary, self.sharp, self.mode from Brain. Overrides
     chat() to return a canned line (no network) so pre-fight quips still
@@ -139,7 +141,7 @@ class DistanceHolderBot(BotBrain):
     label = "DistanceBot"
 
     def decide(self, state):
-        d = state.get("distance", 100)
+        d = _distance_of(state)      # blindfolded-safe (raw-coord fallback)
         ideal = _IDEAL_RANGE.get(self.weapon, 100)
         atk = self._sharp_attacks()
         if d < ideal - _RANGE_BUFFER:
@@ -176,7 +178,7 @@ class ScriptedProBot(BotBrain):
     label = "ScriptedPro"
 
     def decide(self, state):
-        d = state.get("distance", 100)
+        d = _distance_of(state)      # blindfolded-safe (raw-coord fallback)
         my_hp = state.get("my_hp", 100)
         enemy_hp = state.get("enemy_hp", 100)
         my_last = state.get("my_last_action", "ready")
@@ -207,20 +209,29 @@ class ScriptedProBot(BotBrain):
                               "thought": "[pro] hurt + being hit — retreat + block."})
 
         # Bow branch: pure ranged, never engage in melee unless clinched.
+        # Footwork comes from the same shared bow_footwork() policy the
+        # scripted mock uses — the old in-line version chose "hold" at every
+        # d>280 turn, which made the "ceiling" baseline a statue that never
+        # repositioned (see brains.bow_footwork + test_bow_mobility.py).
         if self.weapon == "bow":
-            if d > 280:
+            hold_streak, space_behind, approaching = _mobility_of(state)
+            if d > 260:
                 mv = {"action": self._rng.choice(["draw_shot", "high_arc_shot"]),
-                      "footwork": "hold",
-                      "thought": "[pro] long range full draw."}
+                      "thought": "[pro] long range full draw, moving."}
             elif d > 120:
-                mv = {"action": "quick_shot", "footwork": "retreat",
+                mv = {"action": "quick_shot",
                       "thought": "[pro] closing distance — snap + backpedal."}
             elif d > 50:
-                mv = {"action": "quick_shot", "footwork": "hop_back",
+                mv = {"action": "quick_shot",
                       "thought": "[pro] point blank — shoot + jump."}
             else:
-                mv = {"action": "bow_bash", "footwork": "hop_back",
+                mv = {"action": "bow_bash",
                       "thought": "[pro] clinched — bash + disengage."}
+            mv["footwork"] = bow_footwork(d, approaching=approaching,
+                                          hold_streak=hold_streak,
+                                          space_behind=space_behind,
+                                          turn=state.get("turn", 0),
+                                          phase=_phase_of(state))
             return _sanitize(mv, self.actions)
 
         # Flail branch: needs momentum. Spin up if idle, otherwise commit.

@@ -1,0 +1,258 @@
+# Stickblade Arena — Frozen Evaluation Pack v1
+# ==============================================
+#
+# This is the canonical 100-matchup test suite. Every model on the roster
+# plays every match in this pack. Results are deterministic per seed (as
+# much as pymunk's collision-order allows), reproducible across runs, and
+# published as a CSV alongside METHODOLOGY.md.
+#
+# Purpose (per TIMELINE.md Tier-A #4):
+#   * Give every model >= 10 matches per axis, unblocking the cross-
+#     benchmark correlation study (research/cross_benchmark_correlation.py)
+#   * Provide a citable, downloadable static benchmark for external
+#     researchers who don't want to trust the live leaderboard
+#   * Serve as the regression suite for prompt_version changes: bumping
+#     PROMPT_VERSION reruns this pack, diff of Elo tells you if the
+#     schema change materially changed model behavior
+#
+# Design decisions (locked in 2026-08-13, session log):
+#
+#   1. FIXED PROMPT VERSION = 1. Reruns MUST use this. If the runtime
+#      says PROMPT_VERSION != 1, the runner aborts. Any bump requires
+#      a v2 pack with new baseline results.
+#
+#   2. 100 matches total (deliberate — matches TIMELINE.md spec of
+#      "20 per weapon × 5 [weapons] = 100").
+#
+#   3. Distribution: 20 matches per weapon × 5 weapons = 100.
+#      Each weapon uses its DEFAULT sharp zone (first entry in
+#      WEAPON_ZONES per weapon). Multi-sharp variation is a v2 concern.
+#
+#   4. Model selection per match uses a fixed round-robin from an
+#      ordered ELIGIBLE_MODELS list. This guarantees:
+#        - Every model appears in >= 10 matches
+#        - Every ordered (A, B) pair is unique OR repeated with fixed
+#          seed variation
+#        - No model plays itself (self-play is zero-information for
+#          the correlation study)
+#
+#   5. Seeds are deterministic: hash("stickblade-frozen-v1:{i}") mod
+#      2^31. Same seed always produces the same match trajectory
+#      (subject to pymunk floating-point non-determinism, which is
+#      logged as a threat-to-validity in METHODOLOGY.md § 7).
+#
+#   6. All matches use:
+#        mode        = "macro"       (the default; joint mode is a
+#                                     separate axis, not v1 scope)
+#        arena       = "normal"      (ice / low_gravity are v2 scope)
+#        blindfolded = false         (blindfolded is a separate axis)
+#      This keeps the pack focused on the primary rating cell.
+#
+#   7. Non-LLM baseline bots (bot:random/greedy/distance/pro) are
+#      INCLUDED. They're the noise floor per METHODOLOGY.md § 5.1.
+#      Every LLM should beat bot:random and ideally bot:pro.
+#
+#   8. Mock brains (mock:duelist/mock:berserker) are EXCLUDED from
+#      the frozen pack. They're for smoke-testing the pipeline, not
+#      for scientific comparison.
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+pack_version: 1
+prompt_version_required: 1     # runner aborts if backend reports != this
+created: "2026-08-13"
+author: "Ayush (Cometbuster4969)"
+
+# The exact URL the runner posts to. Changing this = a different pack.
+backend_base_url: "https://pioneer37-stickman-arena.hf.space"
+
+# =============================================================================
+# Eligible models — the roster snapshot as of 2026-08-13
+# =============================================================================
+# Verified live via `curl /api/models` at pack creation time.
+# Mocks are excluded (see design decision 8).
+# Order matters — round-robin uses this order.
+
+eligible_models:
+  # --- LLMs (18) ---
+  - openai/gpt-oss-20b:free                              # OR :free, small/fast
+  - google/gemma-4-31b-it:free                           # OR :free, mid
+  - google/gemma-4-26b-a4b-it:free                       # OR :free, mid MoE
+  - nvidia/nemotron-3-super-120b-a12b:free               # OR :free, large
+  - nvidia/nemotron-3-ultra-550b-a55b:free               # OR :free, xlarge
+  - nvidia/nemotron-3-nano-30b-a3b:free                  # OR :free, small
+  - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free   # OR :free, reasoning
+  - nvidia/nemotron-nano-9b-v2:free                      # OR :free, tiny
+  - cohere/north-mini-code:free                          # OR :free, code-tuned
+  - poolside/laguna-xs-2.1:free                          # OR :free, small
+  - openai/gpt-4o-mini                                   # OR paid, small/fast
+  - groq:llama-3.3-70b-versatile                         # Groq, large
+  - groq:llama-3.1-8b-instant                            # Groq, small
+  - groq:openai/gpt-oss-120b                             # Groq, xlarge
+  - groq:openai/gpt-oss-20b                              # Groq, small
+  - groq:deepseek-r1-distill-llama-70b                   # Groq, reasoning
+  - groq:moonshotai/kimi-k2-instruct                     # Groq, mid
+  # --- Non-LLM baselines (4) — the noise floor ---
+  - bot:random
+  - bot:greedy
+  - bot:distance
+  - bot:pro
+  # Note: 22 eligible entries total. openrouter/free (auto-router) is
+  # excluded because its selected model varies per-call, making
+  # reproducibility across pack reruns impossible.
+
+# =============================================================================
+# The 100 matches
+# =============================================================================
+# 20 matches per weapon × 5 weapons.
+# Each entry generated deterministically at pack-lock time (see
+# tools/generate_frozen_pack.py for the generator that produced this).
+#
+# NOTE: this file is authoritative. If you want to change the matchups,
+# bump pack_version to 2 and generate a new pack. Do not silently edit v1.
+
+matches:
+  # ---------- sword (20 matches, sharp=tip) ----------
+  - {i:  0, weapon: sword,  sharp: tip,       seed: 1000, model_a: openai/gpt-oss-20b:free,                        model_b: groq:llama-3.3-70b-versatile}
+  - {i:  1, weapon: sword,  sharp: tip,       seed: 1001, model_a: google/gemma-4-31b-it:free,                     model_b: groq:openai/gpt-oss-120b}
+  - {i:  2, weapon: sword,  sharp: tip,       seed: 1002, model_a: google/gemma-4-26b-a4b-it:free,                 model_b: groq:moonshotai/kimi-k2-instruct}
+  - {i:  3, weapon: sword,  sharp: tip,       seed: 1003, model_a: nvidia/nemotron-3-super-120b-a12b:free,         model_b: openai/gpt-4o-mini}
+  - {i:  4, weapon: sword,  sharp: tip,       seed: 1004, model_a: nvidia/nemotron-3-ultra-550b-a55b:free,         model_b: groq:deepseek-r1-distill-llama-70b}
+  - {i:  5, weapon: sword,  sharp: tip,       seed: 1005, model_a: nvidia/nemotron-3-nano-30b-a3b:free,            model_b: groq:llama-3.1-8b-instant}
+  - {i:  6, weapon: sword,  sharp: tip,       seed: 1006, model_a: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free, model_b: groq:openai/gpt-oss-20b}
+  - {i:  7, weapon: sword,  sharp: tip,       seed: 1007, model_a: nvidia/nemotron-nano-9b-v2:free,                model_b: bot:pro}
+  - {i:  8, weapon: sword,  sharp: tip,       seed: 1008, model_a: cohere/north-mini-code:free,                    model_b: bot:distance}
+  - {i:  9, weapon: sword,  sharp: tip,       seed: 1009, model_a: poolside/laguna-xs-2.1:free,                    model_b: bot:greedy}
+  - {i: 10, weapon: sword,  sharp: tip,       seed: 1010, model_a: openai/gpt-4o-mini,                             model_b: bot:random}
+  - {i: 11, weapon: sword,  sharp: tip,       seed: 1011, model_a: groq:llama-3.3-70b-versatile,                   model_b: google/gemma-4-31b-it:free}
+  - {i: 12, weapon: sword,  sharp: tip,       seed: 1012, model_a: groq:llama-3.1-8b-instant,                      model_b: google/gemma-4-26b-a4b-it:free}
+  - {i: 13, weapon: sword,  sharp: tip,       seed: 1013, model_a: groq:openai/gpt-oss-120b,                       model_b: nvidia/nemotron-3-super-120b-a12b:free}
+  - {i: 14, weapon: sword,  sharp: tip,       seed: 1014, model_a: groq:openai/gpt-oss-20b,                        model_b: nvidia/nemotron-3-ultra-550b-a55b:free}
+  - {i: 15, weapon: sword,  sharp: tip,       seed: 1015, model_a: groq:deepseek-r1-distill-llama-70b,             model_b: nvidia/nemotron-nano-9b-v2:free}
+  - {i: 16, weapon: sword,  sharp: tip,       seed: 1016, model_a: groq:moonshotai/kimi-k2-instruct,               model_b: cohere/north-mini-code:free}
+  - {i: 17, weapon: sword,  sharp: tip,       seed: 1017, model_a: bot:pro,                                        model_b: poolside/laguna-xs-2.1:free}
+  - {i: 18, weapon: sword,  sharp: tip,       seed: 1018, model_a: bot:distance,                                   model_b: openai/gpt-oss-20b:free}
+  - {i: 19, weapon: sword,  sharp: tip,       seed: 1019, model_a: bot:greedy,                                     model_b: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free}
+
+  # ---------- dagger (20 matches, sharp=tip) ----------
+  - {i: 20, weapon: dagger, sharp: tip,       seed: 2000, model_a: openai/gpt-oss-20b:free,                        model_b: groq:openai/gpt-oss-20b}
+  - {i: 21, weapon: dagger, sharp: tip,       seed: 2001, model_a: google/gemma-4-31b-it:free,                     model_b: groq:llama-3.1-8b-instant}
+  - {i: 22, weapon: dagger, sharp: tip,       seed: 2002, model_a: google/gemma-4-26b-a4b-it:free,                 model_b: groq:llama-3.3-70b-versatile}
+  - {i: 23, weapon: dagger, sharp: tip,       seed: 2003, model_a: nvidia/nemotron-3-super-120b-a12b:free,         model_b: groq:openai/gpt-oss-120b}
+  - {i: 24, weapon: dagger, sharp: tip,       seed: 2004, model_a: nvidia/nemotron-3-ultra-550b-a55b:free,         model_b: groq:moonshotai/kimi-k2-instruct}
+  - {i: 25, weapon: dagger, sharp: tip,       seed: 2005, model_a: nvidia/nemotron-3-nano-30b-a3b:free,            model_b: openai/gpt-4o-mini}
+  - {i: 26, weapon: dagger, sharp: tip,       seed: 2006, model_a: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free, model_b: groq:deepseek-r1-distill-llama-70b}
+  - {i: 27, weapon: dagger, sharp: tip,       seed: 2007, model_a: nvidia/nemotron-nano-9b-v2:free,                model_b: bot:random}
+  - {i: 28, weapon: dagger, sharp: tip,       seed: 2008, model_a: cohere/north-mini-code:free,                    model_b: bot:pro}
+  - {i: 29, weapon: dagger, sharp: tip,       seed: 2009, model_a: poolside/laguna-xs-2.1:free,                    model_b: bot:distance}
+  - {i: 30, weapon: dagger, sharp: tip,       seed: 2010, model_a: openai/gpt-4o-mini,                             model_b: bot:greedy}
+  - {i: 31, weapon: dagger, sharp: tip,       seed: 2011, model_a: groq:llama-3.3-70b-versatile,                   model_b: openai/gpt-oss-20b:free}
+  - {i: 32, weapon: dagger, sharp: tip,       seed: 2012, model_a: groq:llama-3.1-8b-instant,                      model_b: nvidia/nemotron-3-nano-30b-a3b:free}
+  - {i: 33, weapon: dagger, sharp: tip,       seed: 2013, model_a: groq:openai/gpt-oss-120b,                       model_b: google/gemma-4-31b-it:free}
+  - {i: 34, weapon: dagger, sharp: tip,       seed: 2014, model_a: groq:openai/gpt-oss-20b,                        model_b: google/gemma-4-26b-a4b-it:free}
+  - {i: 35, weapon: dagger, sharp: tip,       seed: 2015, model_a: groq:deepseek-r1-distill-llama-70b,             model_b: nvidia/nemotron-nano-9b-v2:free}
+  - {i: 36, weapon: dagger, sharp: tip,       seed: 2016, model_a: groq:moonshotai/kimi-k2-instruct,               model_b: cohere/north-mini-code:free}
+  - {i: 37, weapon: dagger, sharp: tip,       seed: 2017, model_a: bot:pro,                                        model_b: nvidia/nemotron-3-super-120b-a12b:free}
+  - {i: 38, weapon: dagger, sharp: tip,       seed: 2018, model_a: bot:distance,                                   model_b: nvidia/nemotron-3-ultra-550b-a55b:free}
+  - {i: 39, weapon: dagger, sharp: tip,       seed: 2019, model_a: bot:greedy,                                     model_b: poolside/laguna-xs-2.1:free}
+
+  # ---------- spear (20 matches, sharp=tip) ----------
+  - {i: 40, weapon: spear,  sharp: tip,       seed: 3000, model_a: openai/gpt-oss-20b:free,                        model_b: nvidia/nemotron-3-super-120b-a12b:free}
+  - {i: 41, weapon: spear,  sharp: tip,       seed: 3001, model_a: google/gemma-4-31b-it:free,                     model_b: nvidia/nemotron-3-ultra-550b-a55b:free}
+  - {i: 42, weapon: spear,  sharp: tip,       seed: 3002, model_a: google/gemma-4-26b-a4b-it:free,                 model_b: nvidia/nemotron-3-nano-30b-a3b:free}
+  - {i: 43, weapon: spear,  sharp: tip,       seed: 3003, model_a: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free, model_b: openai/gpt-4o-mini}
+  - {i: 44, weapon: spear,  sharp: tip,       seed: 3004, model_a: nvidia/nemotron-nano-9b-v2:free,                model_b: groq:llama-3.3-70b-versatile}
+  - {i: 45, weapon: spear,  sharp: tip,       seed: 3005, model_a: cohere/north-mini-code:free,                    model_b: groq:openai/gpt-oss-120b}
+  - {i: 46, weapon: spear,  sharp: tip,       seed: 3006, model_a: poolside/laguna-xs-2.1:free,                    model_b: groq:moonshotai/kimi-k2-instruct}
+  - {i: 47, weapon: spear,  sharp: tip,       seed: 3007, model_a: openai/gpt-4o-mini,                             model_b: groq:deepseek-r1-distill-llama-70b}
+  - {i: 48, weapon: spear,  sharp: tip,       seed: 3008, model_a: groq:llama-3.3-70b-versatile,                   model_b: groq:llama-3.1-8b-instant}
+  - {i: 49, weapon: spear,  sharp: tip,       seed: 3009, model_a: groq:llama-3.1-8b-instant,                      model_b: groq:openai/gpt-oss-20b}
+  - {i: 50, weapon: spear,  sharp: tip,       seed: 3010, model_a: groq:openai/gpt-oss-120b,                       model_b: bot:pro}
+  - {i: 51, weapon: spear,  sharp: tip,       seed: 3011, model_a: groq:openai/gpt-oss-20b,                        model_b: bot:distance}
+  - {i: 52, weapon: spear,  sharp: tip,       seed: 3012, model_a: groq:deepseek-r1-distill-llama-70b,             model_b: bot:greedy}
+  - {i: 53, weapon: spear,  sharp: tip,       seed: 3013, model_a: groq:moonshotai/kimi-k2-instruct,               model_b: bot:random}
+  - {i: 54, weapon: spear,  sharp: tip,       seed: 3014, model_a: bot:pro,                                        model_b: openai/gpt-oss-20b:free}
+  - {i: 55, weapon: spear,  sharp: tip,       seed: 3015, model_a: bot:distance,                                   model_b: google/gemma-4-31b-it:free}
+  - {i: 56, weapon: spear,  sharp: tip,       seed: 3016, model_a: bot:greedy,                                     model_b: google/gemma-4-26b-a4b-it:free}
+  - {i: 57, weapon: spear,  sharp: tip,       seed: 3017, model_a: bot:random,                                     model_b: nvidia/nemotron-3-nano-30b-a3b:free}
+  - {i: 58, weapon: spear,  sharp: tip,       seed: 3018, model_a: cohere/north-mini-code:free,                    model_b: poolside/laguna-xs-2.1:free}
+  - {i: 59, weapon: spear,  sharp: tip,       seed: 3019, model_a: nvidia/nemotron-3-super-120b-a12b:free,         model_b: nvidia/nemotron-nano-9b-v2:free}
+
+  # ---------- flail (20 matches, sharp=ball) ----------
+  - {i: 60, weapon: flail,  sharp: ball,      seed: 4000, model_a: openai/gpt-oss-20b:free,                        model_b: groq:moonshotai/kimi-k2-instruct}
+  - {i: 61, weapon: flail,  sharp: ball,      seed: 4001, model_a: google/gemma-4-31b-it:free,                     model_b: groq:deepseek-r1-distill-llama-70b}
+  - {i: 62, weapon: flail,  sharp: ball,      seed: 4002, model_a: google/gemma-4-26b-a4b-it:free,                 model_b: openai/gpt-4o-mini}
+  - {i: 63, weapon: flail,  sharp: ball,      seed: 4003, model_a: nvidia/nemotron-3-super-120b-a12b:free,         model_b: groq:llama-3.3-70b-versatile}
+  - {i: 64, weapon: flail,  sharp: ball,      seed: 4004, model_a: nvidia/nemotron-3-ultra-550b-a55b:free,         model_b: groq:openai/gpt-oss-120b}
+  - {i: 65, weapon: flail,  sharp: ball,      seed: 4005, model_a: nvidia/nemotron-3-nano-30b-a3b:free,            model_b: groq:openai/gpt-oss-20b}
+  - {i: 66, weapon: flail,  sharp: ball,      seed: 4006, model_a: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free, model_b: groq:llama-3.1-8b-instant}
+  - {i: 67, weapon: flail,  sharp: ball,      seed: 4007, model_a: nvidia/nemotron-nano-9b-v2:free,                model_b: bot:distance}
+  - {i: 68, weapon: flail,  sharp: ball,      seed: 4008, model_a: cohere/north-mini-code:free,                    model_b: bot:greedy}
+  - {i: 69, weapon: flail,  sharp: ball,      seed: 4009, model_a: poolside/laguna-xs-2.1:free,                    model_b: bot:random}
+  - {i: 70, weapon: flail,  sharp: ball,      seed: 4010, model_a: openai/gpt-4o-mini,                             model_b: bot:pro}
+  - {i: 71, weapon: flail,  sharp: ball,      seed: 4011, model_a: groq:llama-3.3-70b-versatile,                   model_b: nvidia/nemotron-nano-9b-v2:free}
+  - {i: 72, weapon: flail,  sharp: ball,      seed: 4012, model_a: groq:llama-3.1-8b-instant,                      model_b: poolside/laguna-xs-2.1:free}
+  - {i: 73, weapon: flail,  sharp: ball,      seed: 4013, model_a: groq:openai/gpt-oss-120b,                       model_b: cohere/north-mini-code:free}
+  - {i: 74, weapon: flail,  sharp: ball,      seed: 4014, model_a: groq:openai/gpt-oss-20b,                        model_b: openai/gpt-oss-20b:free}
+  - {i: 75, weapon: flail,  sharp: ball,      seed: 4015, model_a: groq:deepseek-r1-distill-llama-70b,             model_b: google/gemma-4-31b-it:free}
+  - {i: 76, weapon: flail,  sharp: ball,      seed: 4016, model_a: groq:moonshotai/kimi-k2-instruct,               model_b: google/gemma-4-26b-a4b-it:free}
+  - {i: 77, weapon: flail,  sharp: ball,      seed: 4017, model_a: bot:pro,                                        model_b: nvidia/nemotron-3-nano-30b-a3b:free}
+  - {i: 78, weapon: flail,  sharp: ball,      seed: 4018, model_a: bot:distance,                                   model_b: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free}
+  - {i: 79, weapon: flail,  sharp: ball,      seed: 4019, model_a: bot:greedy,                                     model_b: nvidia/nemotron-3-super-120b-a12b:free}
+
+  # ---------- bow (20 matches, sharp=arrowhead) ----------
+  - {i: 80, weapon: bow,    sharp: arrowhead, seed: 5000, model_a: openai/gpt-oss-20b:free,                        model_b: groq:deepseek-r1-distill-llama-70b}
+  - {i: 81, weapon: bow,    sharp: arrowhead, seed: 5001, model_a: google/gemma-4-31b-it:free,                     model_b: openai/gpt-4o-mini}
+  - {i: 82, weapon: bow,    sharp: arrowhead, seed: 5002, model_a: google/gemma-4-26b-a4b-it:free,                 model_b: groq:openai/gpt-oss-120b}
+  - {i: 83, weapon: bow,    sharp: arrowhead, seed: 5003, model_a: nvidia/nemotron-3-super-120b-a12b:free,         model_b: groq:moonshotai/kimi-k2-instruct}
+  - {i: 84, weapon: bow,    sharp: arrowhead, seed: 5004, model_a: nvidia/nemotron-3-ultra-550b-a55b:free,         model_b: groq:llama-3.3-70b-versatile}
+  - {i: 85, weapon: bow,    sharp: arrowhead, seed: 5005, model_a: nvidia/nemotron-3-nano-30b-a3b:free,            model_b: groq:llama-3.1-8b-instant}
+  - {i: 86, weapon: bow,    sharp: arrowhead, seed: 5006, model_a: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free, model_b: groq:openai/gpt-oss-20b}
+  - {i: 87, weapon: bow,    sharp: arrowhead, seed: 5007, model_a: nvidia/nemotron-nano-9b-v2:free,                model_b: bot:greedy}
+  - {i: 88, weapon: bow,    sharp: arrowhead, seed: 5008, model_a: cohere/north-mini-code:free,                    model_b: bot:random}
+  - {i: 89, weapon: bow,    sharp: arrowhead, seed: 5009, model_a: poolside/laguna-xs-2.1:free,                    model_b: bot:pro}
+  - {i: 90, weapon: bow,    sharp: arrowhead, seed: 5010, model_a: openai/gpt-4o-mini,                             model_b: bot:distance}
+  - {i: 91, weapon: bow,    sharp: arrowhead, seed: 5011, model_a: groq:llama-3.3-70b-versatile,                   model_b: bot:random}
+  - {i: 92, weapon: bow,    sharp: arrowhead, seed: 5012, model_a: groq:llama-3.1-8b-instant,                      model_b: openai/gpt-oss-20b:free}
+  - {i: 93, weapon: bow,    sharp: arrowhead, seed: 5013, model_a: groq:openai/gpt-oss-120b,                       model_b: google/gemma-4-31b-it:free}
+  - {i: 94, weapon: bow,    sharp: arrowhead, seed: 5014, model_a: groq:openai/gpt-oss-20b,                        model_b: google/gemma-4-26b-a4b-it:free}
+  - {i: 95, weapon: bow,    sharp: arrowhead, seed: 5015, model_a: groq:deepseek-r1-distill-llama-70b,             model_b: nvidia/nemotron-3-nano-30b-a3b:free}
+  - {i: 96, weapon: bow,    sharp: arrowhead, seed: 5016, model_a: groq:moonshotai/kimi-k2-instruct,               model_b: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free}
+  - {i: 97, weapon: bow,    sharp: arrowhead, seed: 5017, model_a: bot:pro,                                        model_b: nvidia/nemotron-nano-9b-v2:free}
+  - {i: 98, weapon: bow,    sharp: arrowhead, seed: 5018, model_a: bot:distance,                                   model_b: cohere/north-mini-code:free}
+  - {i: 99, weapon: bow,    sharp: arrowhead, seed: 5019, model_a: bot:greedy,                                     model_b: poolside/laguna-xs-2.1:free}
+
+# =============================================================================
+# Per-model matchup counts (auto-verified by tools/audit_frozen_pack.py)
+# =============================================================================
+# Distribution: min 7, max 10 slots per model. All models >= 5, which is the
+# joint-filter threshold for the cross-benchmark correlation study (per
+# research/cross_benchmark_correlation_report_2026-08-04.md).
+#
+# 21 distinct models × ~9.5 avg slots = 200 total slots = 100 matches × 2 sides.
+#
+# Full audit (regenerate with: python3 tools/audit_frozen_pack.py):
+#   openai/gpt-oss-20b:free                              → 10 slots
+#   google/gemma-4-31b-it:free                           → 10 slots
+#   google/gemma-4-26b-a4b-it:free                       → 10 slots
+#   nvidia/nemotron-3-super-120b-a12b:free               →  9 slots
+#   nvidia/nemotron-3-ultra-550b-a55b:free               →  7 slots
+#   nvidia/nemotron-3-nano-30b-a3b:free                  →  9 slots
+#   nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free   →  8 slots
+#   nvidia/nemotron-nano-9b-v2:free                      → 10 slots
+#   cohere/north-mini-code:free                          → 10 slots
+#   poolside/laguna-xs-2.1:free                          → 10 slots
+#   openai/gpt-4o-mini                                   → 10 slots
+#   groq:llama-3.3-70b-versatile                         → 10 slots
+#   groq:llama-3.1-8b-instant                            → 10 slots
+#   groq:openai/gpt-oss-120b                             → 10 slots
+#   groq:openai/gpt-oss-20b                              → 10 slots
+#   groq:deepseek-r1-distill-llama-70b                   → 10 slots
+#   groq:moonshotai/kimi-k2-instruct                     → 10 slots
+#   bot:random                                           →  7 slots
+#   bot:greedy                                           → 10 slots
+#   bot:distance                                         → 10 slots
+#   bot:pro                                              → 10 slots
+# Total slots = 200 (matches × 2)

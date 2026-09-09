@@ -4,6 +4,9 @@
 # ======================================================================
 
 # ---------------- SECRETS — never commit these ----------------
+# (stickblade-web/.env.example is deliberately tracked: it documents the
+#  one public variable the frontend needs. The negation lives in
+#  stickblade-web/.gitignore so this rule stays simple.)
 .env
 .env.*
 *.env
@@ -19,17 +22,15 @@ service-account*.json
 .ssh/
 
 # ---------------- Local data / generated match output ----------------
-# Arena runtime data (SQLite DB + stored replays + turn logs)
+# Arena runtime data (SQLite DB + stored replays + turn logs) is created
+# wherever the backend runs — never commit it.
 arena_data/
 *.db
 *.sqlite
 *.sqlite3
-
-# Generated battle logs, replays, tournaments, screenshots, recordings
+replays/
 battle_log_*.json
 log_*.json
-replays/
-tournaments/
 shot_*.png
 design_*.png
 joint_shot*.png
@@ -37,7 +38,6 @@ wp_*.png
 fl_*.png
 *.pid
 *.mp4
-*.gif
 
 # ---------------- Python ----------------
 __pycache__/
@@ -66,10 +66,10 @@ htmlcov/
 node_modules/
 .next/
 out/
-.vercel/
 .turbo/
 .swc/
 *.tsbuildinfo
+.vercel
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -81,30 +81,23 @@ yarn-error.log*
 ._*
 Thumbs.db
 Desktop.ini
-ehthumbs.db
 *.swp
 *.swo
 *~
 .idea/
 .vscode/
 *.sublime-*
-.spyderproject
-.ropeproject
 
-# ---------------- Misc caches / sandbox dirs ----------------
+# ---------------- Misc caches / scratch ----------------
 .cache/
 .npm/
-.config/
-.arena/
 nohup.out
 *.log
 *.tmp
 tmp/
 temp/
-# Workspace-local folders — not to be pushed to GitHub or HuggingFace
-tools/
-research/
-study/
-applications/
-design/
-marketing/
+
+# ---------------- Research exports (generated, large) ----------------
+# research/ itself is tracked (published datasets + reports); only the
+# bulk export output of tools/export_dataset.py stays local.
+/research/exports/

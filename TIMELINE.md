@@ -12,8 +12,8 @@
 > Never delete deprioritized items — keep them as ledger entries so future
 > sessions don't re-propose them.
 
-**Last updated:** 2026-08-04 · Cross-benchmark correlation study shipped (null / underpowered finding — kills fabricated ρ ≈ 0.71 claim; grade unchanged). Earlier 2026-07-30: Apache-2.0 license swap + CITATION.cff + NOTICE + 3 Tier-B items + AGPL kill; and METHODOLOGY.md seed + SuperAnnotate/Databricks audit + 3 Tier-B items.
-**Live grades (per AGENTS.md §0.5 anchors):** Codebase 8.4 · Security 8.7 · Research 8.2
+**Last updated:** 2026-09-09 · §5 ratings + §20 capacity measured (see shipping timeline). Prior entry 2026-09-08 · tip `a94062f` (PR #3, tag `v1.4.0`) · Benchmark spec v1.0 frozen + provenance everywhere + tooling + /trust,/status,/dashboard + 117-test suite (see shipping timeline). Earlier 2026-08-04: cross-benchmark correlation study shipped (null / underpowered finding — kills fabricated ρ ≈ 0.71 claim; grade unchanged). Earlier 2026-07-30: Apache-2.0 license swap + CITATION.cff + NOTICE + 3 Tier-B items + AGPL kill; and METHODOLOGY.md seed + SuperAnnotate/Databricks audit + 3 Tier-B items.
+**Live grades (per AGENTS.md §0.5 anchors, self-assessed 2026-09-08, re-derive independently):** Codebase 8.8 (was 8.4) · Security 8.7 · Research 8.6 (was 8.2)
 
 **Live vote-through rate (measured 2026-07-XX):**
 - Lifetime: **23.9%** (106/443)
@@ -87,9 +87,12 @@ mode × arena × blindfolded variant.
 
 | Priority | File | What & Why | Ready? |
 |---|---|---|---|
+| 🟢 SHIP | branch `arena/01a0821b-stickblade-arena-core` | Benchmark spec v1.0 arc — frozen spec + provenance, determinism fix, research tooling, /trust + /status + /dashboard, docs, 117-test suite. Pushed from the agent session rather than the laptop, so verify the merge on GitHub before folding it into the laptop clone. |
 | 🔴 SECURITY | `.github/workflows/ci.yml` | Aikido supply-chain scan flagged `lycheeverse/lychee-action@v2` as a floating third-party ref. Pinned to SHA `e7477775783ea5526144ba13e8db5eec57747ce8` (= v2.9.0, verified via GitHub API). One-line change. | ✅ YES |
 | 🟡 UX BUG | `stickblade-web/app/replay/page.js` | Missing `timeout_draw` in the draw-copy branch (parallel to `page.js` which already has the fix). One-line change. Users on `/replay?id=...` links see wrong copy on time-cap draws. | ✅ YES |
 | 🟢 DOCS | `METHODOLOGY.md` | Adds § 4.1 Empirical status with honest cross-benchmark study results (null, underpowered). | ✅ YES |
+| 🟡 SEO/UX | `stickblade-web/app/globals.css` | CLS fix — added `min-height: 88px` to `.row` and `min-height: 40px` to `.row select`. Real Lighthouse (2026-08-12) reported CLS 0.144 with the setup-panel row accounting for 0.141. Reserving vertical space stops the layout jerk when `/api/models` populates ModelPicker options. Expected Perf 94 → 97-98. | ✅ YES |
+| 🟡 AGENTIC-SEO | `stickblade-web/public/llms.txt` | Full rewrite. Lighthouse Agentic Browsing audit flagged "does not follow recommendations. File does not appear to contain any links." Root cause: plain URLs instead of markdown link syntax. Rewrote all Live Surfaces + Featured + Related Work sections in proper `[text](url)` format. 18 markdown links now, H1 preserved, all sections intact. Follows [llmstxt.org](https://llmstxt.org) spec. | ✅ YES |
 | 🟢 DESIGN | `design/chatbot_widget.md` | New folder + file. Full design blueprint for post-Tier-A-#4 "Ask the Arena" chatbot widget. Retrieval-over-docs (not free-form gen), floating widget bottom-right, strict system prompt with 5 prompt-injection defense layers, rate limits, cost caps, explicit exclusion list for private docs (applications/, study/), kill-switch flag. NOT to be built until Tier-A #4 frozen eval pack ships. | ✅ YES |
 | 🟢 SEO | `stickblade-web/app/layout.js` | 3 fixes: (a) meta description 96 → 152 chars (uses full Google SERP budget, names concrete model providers), (b) JSON-LD license MIT → Apache 2.0 (drift from July license swap), (c) added `icons` + `manifest` metadata for favicon set. | ✅ YES |
 | 🟢 SEO | `stickblade-web/public/llms.txt` + `llms-full.txt` | Fixed stale roster count. Both files said "29 free models" — actual live roster is 24 total (18 LLMs + 4 bots + 2 mocks). Updated to accurate breakdown per provider, with pointer to live `/api/models` as authoritative source. | ✅ YES |
@@ -104,6 +107,9 @@ mode × arena × blindfolded variant.
 | 🟢 RESEARCH | `research/lb_objective_snapshot_2026-08-04.json` | 22 rows. | ✅ YES |
 | 🟢 RESEARCH | `research/superannotate_audit_2026-07-30.md` | Industry-guide audit vs Stickblade. Prior session. | ✅ YES |
 | 🟢 DOCS | `marketing/reddit_posts_2026-07-30.md` | 4 launch-post drafts. r/ML draft NOW HONEST after cross-benchmark study killed the fabricated `ρ ≈ 0.71` line. | ✅ YES |
+| 🟢 RESEARCH | `research/cross_benchmark_correlation_report_2026-08-04.md` | UPDATED with 2026-08-13 post-frozen-pack section. Real numbers, honest null verdict, "what unblocks a defensible ρ" ranked list. | ✅ YES |
+| 🟢 DOCS | `METHODOLOGY.md` | § 4.1 Empirical status REWRITTEN — old "underpowered pre-pack" text replaced with real post-pack tables, honest null verdict, kills the "grade move pending pack" gate that no longer applies. | ✅ YES (this is the ONE user-should-actually-push file this session, since research/ and marketing/ are on exclusion list) |
+| 🟢 DOCS | `research/frozen_pack_v1_results.csv` | 100-match CSV, generated on user's laptop 2026-08-13 by tools/run_frozen_pack.py. Reproducibility artifact. Would be nice on GitHub but research/ is on exclusion list. | ⚠️ USER DECIDE — override exclusion for this ONE file or keep it laptop-local? |
 
 ### DO NOT PUSH (workspace differs but pushing would be a regression)
 
@@ -165,6 +171,356 @@ curl -s https://raw.githubusercontent.com/Cometbuster4969/STICKBLADE-ARENA/main/
 
 Reverse chronological. Every ship gets: date · commit(s) · one-line summary.
 Long commits get a "Why it mattered" note.
+
+### Review priorities 1–5: calibration runner, data-quality labels, dataset release, status, research pages (Sep 9, 2026, second session)
+
+- **2026-09-09** · branch `arena/01a08592-stickblade-arena-core` · commits
+  `f822a93` (P2), `773d263` (P1), `dbffcb7` (P3) + this session's final
+  commit (P4, P5, docs) — the five priorities from the September review
+  (`next step.txt`), in its order.
+- **P1 — calibration runner is built and verified, the batch is not run.**
+  `tools/run_calibration_batch.py` (plan / run --local|--backend / audit).
+  Backend and offline runners produce identical rows for the same plan
+  (24/24 fields equal). Dry run committed at
+  `research/calibration/dry-run/` (96 sprint matches, 4 scripted models,
+  side balance 0, 96/96 provider+model identified, 0 silent fallbacks) —
+  `NOT ACCEPTED` on `real_provider_evidence_present`, which is the point.
+  Blocked on `OPENROUTER_API_KEY` / `GROQ_API_KEY` on the backend.
+- **Why it mattered:** making local == backend bit-for-bit exposed that the
+  server's pre-fight quips advanced the scripted brains' RNG — the seeded-
+  replay claim held in tests and silently failed in production. Fixed in
+  `brains.py` (`pre_fight_quip`, `MockBrain.chat`), pinned by
+  `tests/test_replay_determinism.py::test_pre_fight_quips_do_not_perturb_a_seeded_fight`
+  (fails on the old code). Also: joint-mode mocks reported no provider;
+  `POST /api/match` gained optional `flip` so batches can pin sides.
+- **P2 — every ranking row says what it is evidence of.**
+  `stickblade/data_quality.py`, `GET /api/data_quality`, `evidence` column
+  in exports, `data_quality` block on leaderboard / Bradley–Terry /
+  model_stats / objective rows and `/api/status`; banner + chips in the app.
+  Current level on every deployment without real matches: `scripted_only`.
+- **P3 — versioned dataset release.** `tools/export_dataset.py build|verify`:
+  HF layout (`matches/ votes/ events/ actions/`), JSONL+CSV+Parquet, column
+  whitelist as the leak guard, `SCHEMA.json`, `MANIFEST.json` (SHA-256 per
+  file, Bradley–Terry snapshot), `SHA256SUMS`, dataset-card README. `verify`
+  re-hashes + refits and fails when one vote is altered (tested).
+  `tools/benchmark_report.py` §0 *Data quality* names dataset version,
+  versions, fingerprint, evidence split. HF upload still not done (token).
+- **P4 — status page carries replays / last incident / degraded modes;**
+  an all-scripted deployment reports `degraded`, not `ok`.
+- **P5 — `/research`, `/methodology`, `/data`, `/reproducibility`,
+  `/limitations`** with a live evidence strip; in nav, footer, sitemap.
+- **Fingerprint mismatch resolved:** `029281ed627a` = prompt v1,
+  `09de66effd02` = prompt v2 (fingerprint hashes `PROMPT_VERSION`). Docs
+  corrected; CI now asserts it per prompt version.
+- Tests: 193 → 252 passing (`pytest tests`). `npx next build` clean, 18 routes.
+- **Not done / honest gaps:** real-provider calibration (keys), HF dataset
+  upload (token), `storage_supabase.py` still lacks `model_stats` /
+  `preference_pairs`, `research/reports/2026-09.md` not regenerated this
+  session (its "0 of 1 pairs separable" language stands).
+
+### Uncertainty-aware ratings + capacity measurement (Sep 9, 2026)
+
+- **2026-09-09** · branch `arena/01a0821b-stickblade-arena-core` (PR #3
+  continues) — action-plan **§5 (rating model)** and **§20 (load testing)**
+  are now measured rather than planned.
+- **§20 — capacity is now measured, not assumed** (`docs/CAPACITY.md`,
+  `tools/load_test.py`). Single uvicorn worker, scripted `mock:` fighters,
+  4-turn sprints: 1 → 59.3 matches/min, 5 → 98.8, 25 → 110.7, 100 → 105.3,
+  **0 failures at every wave** (gate ≤ 5 %). The plateau at ~105–110/min is
+  CPU-bound simulation in one worker: queue and storage are not the
+  bottleneck, and admission control (`MAX_QUEUE=200`) sheds load with
+  `503 arena is busy` instead of growing without bound.
+- **§5 — a second rating that can say "we don't know"**
+  (`stickblade/ratings.py`, `METHODOLOGY.md §3.3b`). Elo stays as the live
+  scoreboard. Alongside it, `/api/leaderboard/bradley_terry` fits a
+  Bradley–Terry model with a **Davidson tie term** over every voted
+  comparison in a cell at once, so it is order-independent where Elo is not,
+  and it publishes a bootstrap 95 % interval per model.
+  - Two traps found and fixed during validation, both of which flatten the
+    whole field silently: (1) holding the tie parameter ν constant instead of
+    estimating it compresses a 90/10 record to 1.21 logits instead of the
+    analytic `ln 9 = 2.197`; (2) resampling *pair rows* rather than
+    *matches* gives every draw double weight and reports an interval that is
+    too tight exactly when draws are common.
+  - Sparse-data behaviour is the point: a 3–0 newcomer must not get an
+    infinite rating, so the fit is ridged; models not connected to the main
+    comparison graph are reported as islands, not ranked.
+  - The UI refuses to imply separations the data does not support: models
+    whose intervals overlap share a tie letter and are labelled *not
+    separable* (`stickblade-web/components/RatingTable.js`).
+- **§5 — the full metric table is now queryable** (`/api/model_stats`,
+  `stickblade-web/components/ModelStatsTable.js`): win rate, human
+  preference rate, damage/turn, hit rate, lethal rate, survival rate,
+  timeout rate, invalid-action rate, fallback rate, latency, per model,
+  filterable across all five eval axes. Two definitions are pinned in the
+  docstrings because they are routinely misread: `hit_rate` can exceed 1.0
+  (contact events per decision, not accuracy) and `lethal_rate` counts only
+  kills, so an attrition fighter correctly shows 0 lethality with a high win
+  rate.
+- **Tests:** 142 passing (was 117). 21 of the new tests pin the rating model
+  to analytic ground truth rather than "it runs": a known win rate recovers
+  the known log-odds, intervals tighten with n, an undefeated 3–0 stays
+  finite, a rock-paper-scissors cycle produces no spurious ordering, and the
+  canvas-side → model mapping respects the `flip` bit (getting that wrong
+  would rank the wrong model while everything still looked fine).
+- **§6 — expert and casual evaluators are no longer mixed.** Every vote
+  carries a self-declared `voter_tier`, ratings can be fitted per tier
+  (`?tier=expert`), and the export carries `votes_expert` / `votes_casual`
+  as separate columns. The tier is a **label, not a weight**: there is no
+  identity check behind it, so it is published alongside the numbers rather
+  than used to override them (`METHODOLOGY.md §3.3c`).
+- **§29 — first generated benchmark report** (`research/reports/2026-09.md`,
+  produced by `tools/benchmark_report.py` from a live snapshot in
+  `research/snapshots/`). It reports the honest headline: with 20
+  comparisons, **0 of 1 model pairs are statistically separable** — which is
+  exactly the claim Elo alone could not have made.
+- **§10 — the physics is now inspectable.** The replay player ships a
+  research debug overlay (⚙ Debug, or the `d` key): hitboxes drawn from the
+  same capsule table the renderer uses, weapon segments with the match's
+  sharp zone highlighted, finite-difference velocity vectors, contact points
+  labelled with damage + body part + attacker, and frame/turn/action.
+  Nothing is re-simulated — it is all replayed from the stored frame array,
+  so an audit cannot diverge from the match it audits
+  (`METHODOLOGY.md §3.3d`). It is covered by a headless smoke test
+  (`stickblade-web/scripts/check-player.mjs`, wired into CI as
+  `npm run check:player`) because the player is a vanilla script the Next
+  build never executes — a broken draw call would otherwise only show up as
+  a blank arena in a real browser.
+- **§31 — recurring events, calendar and champions archive**
+  (`stickblade/events.py`, `/api/events`, `/events`). Weekly cup, monthly
+  season, rotating weapon cups, blindfolded challenge, speed tournament and
+  JOINT-mode open. Two deliberate choices: the schedule is **derived** from
+  a cadence + anchor date (no cron to silently stop, no table to desync, and
+  no occurrence can be invented before its event existed), and an event
+  names a champion only when the leader has cleared the minimum sample
+  **and** its interval clears the runner-up's — otherwise it reports exactly
+  what it is missing. On current data every running event is correctly
+  undecided, and the archive is empty rather than populated with
+  unfalsifiable winners.
+- **§33 — cost is measured, not estimated.** Providers report what they
+  bill; the brains now accumulate those token counts across retries and
+  buddy fallbacks (`stickblade/brains.py`), they are persisted per match,
+  and `/api/costs` reports spend, per-model split and budget state. Three
+  honesty rules are enforced by tests: unreported usage marks the rollup
+  `complete: false` (a lower bound, never "free"), offline/scripted matches
+  are counted separately so they cannot mask a gap, and an unset budget
+  reports `unset` rather than `ok`. Prices are data, overrideable via
+  `STICKBLADE_PRICES_JSON`, with the unknown-model fallback deliberately
+  the *most expensive* row.
+- **§34 — the access model is published** (`ACCESS_TIERS`, same endpoint):
+  public quick matches, BYOK and research mode are free; the only priced
+  tiers are volume/hosting and are explicitly marked not implemented. A
+  test fails if anyone paywalls the reproducible tier.
+- **§11 — state-representation ablations: harness shipped, prompt cost
+  measured.** `stickblade/ablations.py` defines the ten ablations from the
+  plan (velocity, opponent last action, weapon geometry, arena modifier,
+  history, head positions, blindfolded, normalized vs raw coordinates).
+  `tools/run_ablation.py prompt` measures what each field costs: the
+  headline is that **the bow `per_shot` tables are ~25 % of every prompt
+  and are meaningless for melee weapons** (`research/ablation_prompt_cost.md`).
+  That is filed as a *hypothesis, not a fix*: gating them on weapon would
+  change the state models see, which means a `PROMPT_VERSION` bump and lost
+  Elo comparability — the wrong trade for a small token saving, and not one
+  to make silently. `tools/run_ablation.py matches` (the behavioural sweep)
+  is written but **refuses to run against scripted fighters**: scripted
+  brains never read the state, so it would produce a null result dressed as
+  a finding. It needs provider traffic.
+- **§32 — contributor pathway published.** `CONTRIBUTING.md` now lists
+  concrete good-first-issue areas (new weapon, new arena, replay
+  instrumentation, bot adapter, dataset analysis, accessibility, docs, test
+  coverage) and the label taxonomy. The labels now exist on the repo:
+  `good first issue`, `help wanted`, `research`, `frontend`, `backend`,
+  `physics`, `security`, `data quality`, and `benchmark spec` — the last one
+  flagged as "needs a version bump", because a spec change invalidates
+  comparability with every result recorded so far and must never be a
+  drive-by change.
+- **Not done, still needs live infra:** real-provider traffic (so no real
+  rating movement yet — the numbers above come from scripted baselines), the
+  25–100-concurrency run *with* LLMs in the loop, hosted status page, actual
+  HF dataset upload.
+
+### Benchmark spec v1.0 — frozen spec, provenance, tooling, and the credibility pages (Sep 8, 2026)
+
+- **2026-09-08** · commit `a94062f` · branch `arena/01a0821b-stickblade-arena-core` (PR #3, tag `v1.4.0`) — executed the
+  "10/10 Action Plan" (`../action plan.txt`) as far as it can go without live
+  providers, a hosted status page, or a deployment. ~40 files touched.
+- **The headline change:** benchmark specification **v1.0 is frozen**
+  (`stickblade/benchmark.py`, fingerprint `029281ed627a`). It is derived from
+  the live code, hashed, and stored on every match and replay, so two results
+  with different fingerprints are no longer comparable — which is the thing
+  that makes any of our other numbers mean anything.
+- **Backend:** provenance record on every match (version triple, seed,
+  match length, fallback policy, model/provider actually used, latency,
+  invalid-action counts, ranking eligibility); deterministic action log;
+  `verify_replay()` 8-check audit; `anti_gaming.py` replay forensics;
+  match lengths (sprint/standard/full) and fallback policies
+  (strict/operational/demo); seeds; match cancellation; multi-axis voting;
+  parallel per-fighter decisions; `/api/benchmark/spec`, `/api/integrity/{id}`,
+  `/api/metrics`, `/api/status`, `/api/export` (json/jsonl/csv).
+- **Determinism bug found and fixed (important):** seeded matches were
+  *silently* not reproducible — `test_same_seed_replays_identically` failed
+  ~40 % of runs on `main`. Two causes, both now fixed: scripted brains drew
+  from Python's global RNG while the two fighters decide in concurrent
+  threads, and the think phase steps physics once per frame while it waits, so
+  thread-scheduling jitter moved the fighters between runs. Scripted brains
+  now own a per-instance RNG and scripted-vs-scripted matches resolve inline
+  (`stickblade/brains.py:708`, `stickblade/main.py:229`). CI now runs the
+  suite, so this cannot regress quietly again.
+- **Provenance bug found and fixed:** blind matches recorded
+  `model_used = "Fighter A"/"Fighter B"` in the dataset, because the blind
+  rename happens before decisions and scripted brains carry no `.model`.
+  Provenance now falls back to the requested roster id (`stickblade/main.py:302`).
+- **Research tooling:** `tools/run_match.py` single entry point
+  (`spec | simulate | verify | demo` + pass-through `batch | balance | report |
+  export | loadtest`); `weapon_balance.py` mirrored-bot sweeps with Wilson
+  intervals; `export_dataset.py` (JSON/JSONL/CSV/Parquet + `MANIFEST.json`,
+  from a live backend or a local `arena.db`); `benchmark_report.py` monthly
+  report generator; `load_test.py` written but not run at scale.
+- **Empirical finding — flail is asymmetric.** Mirrored bot batch (n=24):
+  side-A win rate **0.19**, 95 % CI [0.08, 0.38] excludes 50/50. The
+  configuration, not the model, decides flail matches. Per action-plan §9 the
+  weapon is now *labelled* rather than silently shipped: `WEAPON_BALANCE` in
+  `stickblade/weapons.py`, exposed via `/api/weapons`, and marked with ⚠ in the
+  UI. Bow (0.31) and sword (0.58) are off 50/50 but their intervals still
+  contain it — reported as **provisional**, not as findings.
+  Full numbers: `research/balance_report.md` + `research/balance_matches.csv`.
+- **Frontend:** Quick Match as the default path (Research mode behind a tab,
+  advanced controls behind a `<details>`); sample-fight modal fed by a real
+  offline replay (`public/demo_replay.json`, regenerated with
+  `./tools/run_match.py demo`, seed 101, 12 turns, verified clean by
+  `verify` + anti-gaming); new `/trust` (§23), `/status` (§35),
+  `/dashboard` (§28); integrity badge, result scorecard with provenance
+  table, multi-axis vote panel, wait panel with phase/turn/ETA/cancel, share
+  bar, accessibility controls; shared nav + footer across every page.
+- **Frontend build fix:** fonts are now genuinely self-hosted via
+  `@fontsource/*` + `next/font/local`. They were fetched from
+  `fonts.googleapis.com` at build time, which (a) contradicts the file's own
+  "no external font requests" comment and the CSP, and (b) made builds fail
+  whenever Google Fonts was unreachable.
+- **Dev-experience fix:** `NEXT_PUBLIC_API_BASE` now defaults to empty
+  (same-origin) with a Next rewrite proxying `/api/*` to the backend, so
+  preview URLs and LAN testing work instead of hard-coding `localhost:8000`.
+- **CI:** new `test-suite` job (pytest on 3.11 + 3.13, plus a spec-fingerprint
+  stability assertion). Note: the previous session had already wired
+  `ci-summary`'s `needs:` to a `test-suite` job that did not exist — the
+  workflow was invalid until this session added the job body.
+- **Docs:** repo `README.md` (was a duplicate of `tools/README.md`, so the
+  project had no top-level README), `docs/BENCHMARK_SPEC.md`,
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`,
+  issue templates (bug / feature / **data quality**) + PR template, and this
+  file.
+- **Test suite:** **117 passing** across 8 files (spec conformance, physics
+  determinism, API contracts, Elo math, blind-election integrity, adversarial
+  input, BYOK key hygiene). ~35 s, headless, no network, no API key.
+- **Anchor grade delta:** Codebase 8.4 → **8.8** (frozen spec + provenance +
+  a real regression suite; the determinism fix removes a silent correctness
+  bug). Research 8.2 → **8.6** (instrument behaviour is now measured and
+  published, and an honest asymmetry was found instead of assumed away).
+  Security unchanged at 8.7 (BYOK hygiene was already tested; nothing new was
+  weakened). *These are self-assessed and should be re-derived by an
+  independent reviewer against AGENTS.md §0.5 — not taken on trust.*
+- **Reality check / what did NOT ship:** no live-provider traffic (so no
+  real-model leaderboard movement), no hosted status page (the page reads the
+  backend's own endpoints; nothing is monitoring it yet), no HF dataset
+  upload, no 25–100 concurrent load run, and the grant/marketing items from
+  the plan were not touched. The 24 seeded matches behind the local dashboard
+  are **scripted baselines**, not model strength.
+
+### NotebookLM canonical brief for BITS Hyd pitch deck (Aug 29, 2026)
+
+- **2026-08-29** · workspace — `pitches/notebooklm_canonical_brief.md` written so a NotebookLM notebook cannot average stale repo docs into a new corporate deck.
+- **Why it exists:** README / METHODOLOGY / AGENTS / TIMELINE disagree in places (MIT vs Apache, frozen-pack-not-run vs ran, roster 29 vs 24, Research 5.5 vs 8.2). NotebookLM will happily blend those. This file is the override: 16-slide order, frozen 2026-08-13 numbers, verbatim "smart file manager" line, PIEDS ₹5L ask, kill-list of claims.
+- **Do not upload to NotebookLM:** `AGENTS.md`, full `TIMELINE.md`, `applications/`, `study/`, marketing drafts, code, JSON snapshots.
+- **Anchor grade delta:** none. Pitch-process asset, not a project artifact.
+
+### Demo video v1 review + v2 recut script drafted (Aug 23, 2026)
+
+- **2026-08-23** · workspace — user fetched Arcade demo video via catbox.moe (`https://files.catbox.moe/tu3e02.mp4`, 33s @ 1920×1080, 9.89 MB, H.264). Frames extracted via imageio-ffmpeg (LimeWire client-side encryption made server-side decrypt impossible last session; catbox re-host bypassed that).
+- **v1 audit (workspace-local `pitches/demo_video_v2_recut.md`):**
+  - Structure is intact (hook → title → JSON → vote → reveal → CTA in 33s)
+  - **What works:** opener hook, split-screen JSON at 14-22s, blind-vote UI text
+  - **What's broken:** fencer stock footage on-screen ~15/33s (bait-and-switch — judges won't recognize the 2D stickman product); pommel-only damage constraint not shown (kills the "not-trained-on" thesis); 24-turn dynamic goal not shown; reveal beat <1s (should be 2.5-3s); "TRY IT NOW" CTA has no URL; Arcade watermark stamps every frame; audio at -25.3 dB mean
+  - **Grade:** v1 as standalone = 6.5/10; as pitch asset with verbal fallback notes = 7.5/10
+- **v2 recut script:** `pitches/demo_video_v2_recut.md` — 85-second, 13-shot scene-by-scene with on-screen text, timings, asset checklist, and Aug 31 fallback plan. Projected 8.5/10 if executed.
+- **v2 Arcade execution playbook:** `pitches/demo_video_v2_arcade_playbook.md` — step-by-step Arcade click-path (superseded — user found Arcade insufficient).
+- **v2 Runway execution playbook:** `pitches/demo_video_v2_runway_playbook.md` — HYBRID approach: 6 Runway generations (cinematic beats) + 4 OBS screen recordings (real product) + 2 static slides + CapCut stitch. 90-second target. Includes 6 verbatim Runway prompts with universal style suffix for cross-clip consistency, OBS setup guide, CapCut timeline table, credit budget (~100 credits), time budget (~2h rested).
+- **v1 stays** as social/thumbnail asset (Twitter, HN card, Reddit preview) — do NOT delete.
+- **Anchor grade delta:** none. Marketing/pitch asset, not a project artifact.
+
+### Pitch decks v2 — rewritten around user's actual 1v1 pitch script (Aug 19, 2026)
+
+- **2026-08-19 (later)** · workspace — **Pitch decks rewritten from scratch** after user rejected v1 as too corporate/generic.
+- **What changed:**
+  - Narrative order now matches user's actual 1v1 pitch: hook ("treats LLMs like humans") → 4000-rated Codeforces argument → "smart file manager" line → static-vs-dynamic goal (crossing-the-road analogy) → sharp-zone twist → 24-turn dynamic goal
+  - Added **LIVE DEMO slide** (slide 5) — dedicated placeholder with URL, 6-step demo script, fallback if backend down
+  - Added **JSON state schema slide** (slide 6) with actual code block — technical judges want to see what the LLM receives
+  - Added **full stack architecture slide** (slide 7) — backend + frontend columns pulled from README architecture doc
+  - Added **security + reliability slide** (slide 9) — 4-quadrant grid: security / BYOK / reliability / open-reproducible. Reveals engineering discipline (Aikido pin, Bandit, CSP, rate limits, cross-provider failover)
+  - Added **monetization tiers slide** — Free/Premium/Enterprise with BYOA, concurrent matches, 3D roadmap, ecosystem features
+  - Ask slide now includes **NVIDIA DGX stretch goal** for self-hosting open-weight models at ₹40L+
+  - Deckbuilder v2 supports code blocks (monospace), tags (slide-type labels), better color palette
+- **BITS Hyd deck1 via a BITS-Hyd co-founder friend.
+- **What shipped:**
+  - `pitches/_deckbuilder.py` — shared python-pptx theme (dark cyberpunk matching the site) with reusable primitives (blank_slide, headline, bullets, panels, footer, logo). Both decks consume this so they feel like one product.
+  - `pitches/build_bits_hyd.py` — venue-specific deck (12 slides). Includes "Why PIEDS specifically" slide connecting Stickblade to PIEDS's stated preferences (deep-tech, tier-2 origin, SISFS eligibility path).
+  - `pitches/build_generic.py` — reusable deck (11 slides) for other student startup events, hackathons, accelerator demo days. No venue-specific framing.
+  - `pitches/stickblade_bits_hyd_2026-08-31.pptx` — 1.6 MB output
+  - `pitches/stickblade_generic_v1.pptx` — 1.6 MB output
+- **Design decisions:**
+  - Line-item budget on the Ask slide (not a round number) — concrete beats abstract at this tier
+  - Explicit "honest limitations" slide (BITSian culture rewards intellectual honesty)
+  - Traction slide leads with calibrated 567 matches / 121 votes, NOT inflated numbers
+  - Team slide leaves BITS co-founder name as a placeholder for user to fill in with real bio before presenting
+  - Anti-sycophancy protocol referenced (AGENTS.md §0.5) as a differentiator vs typical student pitches
+- **Anchor grade delta:** none. Pitch decks are user-facing material, not project artifacts moving the rubric.
+- **Eligibility flag captured in file comments:** PIEDS grants require BITS student/alum as founding-team member. User's friend at BITS Hyd must be positioned as genuine co-founder (equity, work, willing to incorporate), NOT as advisor/campus rep. If just advisor: the ₹5L formal ask isn't available and the pitch reframes to smaller in-house prizes.
+
+### Data licensing decision — CC-BY-SA 4.0 for match data (Aug 13, 2026)
+
+- **2026-08-13** · workspace — **Decision: keep match data OPEN, explicitly under CC-BY-SA 4.0.**
+- **Context:** user asked "is closing the data a good move." Considered honestly. Verdict: bad idea at current scale (~500 matches, ~$0 revenue, no realistic buyer of closed data). Every marketing pitch drafted this month (HN, r/ML, r/LocalLLaMA, HF grant, Snorkel, LTFF, arXiv preprint) hinges on "open + reproducible." Closing kills those pathways for zero cash gain. Reasoning documented in `research/DATA_LICENSE.md` § "Rationale for open data" so the decision is auditable and can be revisited when circumstances change (paying customers, enterprise ask, PII risk).
+- **What shipped:**
+  - `research/DATA_LICENSE.md` — new. Human-readable statement of CC-BY-SA 4.0 for all match data, replay JSONs, snapshots, and future HF Datasets published under `Pioneer37/stickblade-*`. Explicit "what you can/must/cannot do" table. Compatibility note re Apache 2.0 code license. Citation format.
+  - `stickblade/server.py:1096` — `/api/export` JSON response now includes `license: "CC-BY-SA-4.0"` + `license_url` + `cite` field pointing at CITATION.cff. Machine-readable license declaration alongside the data.
+  - `stickblade-web/public/llms.txt` — new `## License` section splitting code (Apache 2.0) from data (CC-BY-SA 4.0) so AI agents citing Stickblade know the reuse terms. Cite section updated with "Data license: CC-BY-SA 4.0" line.
+- **Why CC-BY-SA specifically** (not MIT / not public domain / not "no license"): attribution preserves the citation graph a benchmark depends on; share-alike blocks the specific failure mode of "big lab wraps our data with scoring layer + closes it." Same license posture LMSYS / EleutherAI / HuggingFace use for open datasets.
+- **Anchor grade delta:** none. Licensing declarations don't move grades per §0.5, but they de-risk every downstream growth vector we're pursuing (grants, arXiv, citations, HF Datasets snapshot).
+- **Kill-list entry added:** "close the match data behind a paywall" pre-emptively rejected with reasoning so future sessions don't re-propose it.
+
+### Frozen pack v1 SHIPPED + post-pack null finding published (Aug 13, 2026)
+
+- **2026-08-13** · workspace — **User ran the frozen pack: 100/100 matches completed in 199 min at ~$0.05 cost.** Re-execution of `research/cross_benchmark_correlation.py` produced the post-pack correlation.
+- **Result: honest null.** 14 shared models cross joint filter (was 2 pre-pack). Twelve reported correlations, none reach p < 0.05. Best-case: ρ (Elo vs win-rate) = +0.148 for LLMs-only (n=13), p = 0.629, CI [−0.45, +0.71]. Weak negative trend on damage_per_turn (ρ = −0.29 to −0.22) worth flagging as hypothesis, not finding.
+- **Root cause diagnosed:** frozen pack fixed the objective-side sample-size problem (median objective_n 2 → 36) but perceived_n remained the bottleneck (11 of 14 filtered models still have perceived_n < 20). Frozen-pack matches don't generate votes by design. **The bottleneck is human votes, not matches.** More frozen packs won't help.
+- **Also fixed this session:** two Windows encoding bugs in the analysis pipeline (cp1252 default on read + write). Files now explicitly UTF-8. Commits `8d1edf1` + `5a0c8a0`.
+- **Also fixed:** stale objective-leaderboard snapshot masking pack matches in `build_shared_frame()`. Now recomputes stats from merged export directly. Commit `e96d15e`.
+- **Grade delta: NONE** per §0.5. Frozen pack was hypothesized to move Research 8.2 → 8.4 conditional on defensible headline ρ; ρ isn't there, grade doesn't move. What the pack DID deliver: (a) killed fabricated "ρ ≈ 0.71" claim permanently across `METHODOLOGY.md §4.1` and report, (b) established statistical threshold future work must cross, (c) shipped reproducible tooling that produces the right answer when vote-count bottleneck resolves.
+- **Anti-sycophancy dividend #2:** deliberately did NOT loosen the joint filter to `perceived_n ≥ 3` (would inflate n=14 to n=25 but trade rigor for headline number), did NOT cherry-pick the single most positive of the twelve correlations to lead with, did NOT retroactively bump K-factor. Kill-list entry added below to prevent re-proposal.
+- **Report updated:** `research/cross_benchmark_correlation_report_2026-08-04.md` now has a "2026-08-13 update" section at the top with the post-pack tables + honest verdict + "what we CAN report" + "what we CANNOT report" lists.
+- **Unblocks:** marketing push (HN/Reddit posts drafted — the honest null IS the story, not a bug). Multi-vote / inter-rater κ track becomes the highest-ROI next research item, promoted from Tier-B tail to Tier-B head.
+
+### Tier-A #4: Frozen eval pack v1 — spec + runner + audit (Aug 13, 2026)
+
+- **2026-08-13** · workspace — **Frozen 100-matchup eval pack (Tier-A #4)** spec + tooling shipped. Runtime execution pending user (~2.5 hours + $0-1 cost).
+  - **New files:**
+    - `research/frozen_pack_v1.yaml` — the canonical 100-matchup spec. 20 matches × 5 weapons. 21 distinct models, min 7 / max 10 slots per model (all ≥ 5 = joint-filter threshold). All seeds unique + deterministic. Locked to prompt_version=1. Excludes mocks (smoke-test only) and openrouter/free auto-router (non-reproducible).
+    - `tools/audit_frozen_pack.py` — validator. 7 checks (100 matches, weapon dist, no self-play, seeds unique, live-roster match, per-model counts, YAML parses). Runs in <1s. Ships passing.
+    - `tools/run_frozen_pack.py` — the runner. stdlib-only (no yaml/httpx dep). Reads pack, POSTs each match to `/api/match`, polls until done, appends to `research/frozen_pack_v1_results.csv`. Resumable — skips completed rows on restart. Throttles at 40 matches/hour (under backend 50/hour cap). Records errors separately to `frozen_pack_v1_errors.jsonl` for later retry. Includes `--dry-run` mode that validates against live backend without dispatching.
+    - `tools/README.md` — step-by-step execution guide. Includes tmux/screen recommendation for overnight run.
+    - `research/cross_benchmark_correlation.py` UPDATED — auto-consumes frozen-pack CSV when present, so re-running the notebook after the pack lands produces the publishable ρ number. Backwards-compatible: notebook still runs on organic 2026-08-04 snapshot alone if CSV absent.
+  - **Verified pre-flight against live backend:** all 21 models in the pack are live on production roster; prompt_version=1 confirmed; ~2.5-hour ETA at default throttle.
+  - **Cost estimate** (from METHODOLOGY.md § 6 verification + measured token usage): **$0-1** total. Dominated by free-tier models. Only `openai/gpt-4o-mini` slots (10 of 100) consume budget at ~$0.005 each = ~$0.05 realistic.
+  - **Anchor grade delta:** none from THIS commit (spec + runner shipped; results pending). Once user runs `run_frozen_pack.py` and re-executes the correlation notebook, Research grade moves 8.2 → 8.4 conditional on the new ρ being defensible (p < 0.05, n ≥ 5 in the joint filter). Grade move logged separately when it lands.
+  - **Unblocks (per session analysis):** cross-benchmark correlation study grade move · arXiv preprint (real ρ in the paper) · Snorkel Open Benchmarks grant application (data-at-scale claim) · Chatbot widget build gate · VLM + OOD-physics Tier-B items · HF Datasets snapshot cron.
+
+### Lighthouse-real fixes: CLS + llms.txt markdown links (Aug 12, 2026)
+
+- **2026-08-12** · workspace — **Real Lighthouse audit** (Perf 94 / A11y 100 / Best Practices 96 / SEO 100 / Agentic 1-of-3) shipped 2 targeted fixes.
+  - **CLS 0.144 → expected ~0.02** (`stickblade-web/app/globals.css`): the `.row` div in the setup panel was jerking down ~140px when `/api/models` populated ModelPicker `<select>` options after first paint. Added `min-height: 88px` on `.row` + `min-height: 40px` on `.row select` to reserve vertical space. Zero-JS fix; auto-grows on other rows via `min-` semantics; mobile 1-column layout unaffected.
+  - **llms.txt agentic-browsing audit failure** (`stickblade-web/public/llms.txt`): Lighthouse's new "Agentic browsing" category flagged the file as spec-non-compliant with "File does not appear to contain any links." Root cause: URLs were plain text (`https://...`) instead of markdown link syntax (`[text](url)`). Rewrote all Live Surfaces + Featured + Related Work sections in proper markdown. 18 links now, H1 preserved. Follows llmstxt.org spec so ChatGPT/Claude/Perplexity agents that follow the spec can cite Stickblade accurately.
+  - **NOT fixed (intentional):** the CSP `'unsafe-inline'` finding that docks Best Practices 100 → 96. Cheap fix requires Next.js nonce middleware + can break Vercel Analytics. Cost/benefit doesn't justify it for a 4-point gain on a category we already lead. Filed as Tier-C "eventually" not Tier-B.
+  - Also noted from the report: the scam scanner in an earlier session claimed "Technical: 15/F" on this same site. Real Lighthouse: **Performance A, Accessibility A, Best Practices A, SEO A.** Recording this contrast because the pattern will repeat — SEO scanners upsell by dangling fake scores.
+  - Anchor grade delta: none (Perf/SEO/A11y aren't §0.5 categories). But this is legitimate hygiene that supports the Research grade indirectly via AI-citation quality.
 
 ### Chatbot design draft — "Ask the Arena" (Aug 11, 2026)
 
@@ -668,6 +1024,20 @@ Nice-to-have; ships once Tier A stabilizes.
 reasoning has changed.** All were considered, weighed, and killed with
 specific rationale.
 
+- ❌ **Close /api/export behind a paywall / API-key requirement / rate-limit-to-death** (considered 2026-08-13, rejected)
+  - The instinct behind this ("I built it, I shouldn't give the data away") is valid in principle, wrong in application at current scale. Zero paying customers means zero revenue lost by keeping data open, but every marketing/grant/citation pathway CURRENTLY OPEN requires open data. The moat is methodology + brand + ongoing pipeline, not a historical CSV. See `research/DATA_LICENSE.md` § "Rationale for open data" for the full argument.
+  - Re-open this decision when: (a) 1+ paying customers exist and closing enables monetization, (b) specific enterprise buyer needs private-tier data, (c) PII-adjacent risk emerges. None of those apply today.
+
+- ❌ **Loosen cross-benchmark joint filter from `perceived_n ≥ 5` to `perceived_n ≥ 3`** (considered 2026-08-13 post-frozen-pack, rejected)
+  - Would inflate the joint-filter n from 14 to ~25 models and might crack p < 0.05 on one or two correlations. But at `perceived_n = 3` most models are within 1 SD of the 1000 Elo baseline prior — the "Elo" is basically the prior, not a converged rating. Reviewer with stats training would spot the trick in seconds. AGENTS.md §0.5 anti-sycophancy trap; the point of publishing a null is to publish it, not to fake-power it into looking positive.
+  - Re-consider only if we ever drop below `perceived_n ≥ 5` as the *documented* project-wide filter for ALL analyses (i.e. change the standard, not the study). Would need to update Wilson CI display too. Big cross-cutting change; needs its own decision.
+
+- ❌ **Cherry-pick the single most positive of the twelve reported correlations for the headline** (considered 2026-08-13, rejected)
+  - The post-frozen-pack notebook produces 12 ρ values (4 populations × 3 objective metrics). At the current n, one or two will be borderline-significant by chance alone. Leading with just the positive number and burying the eleven others (or the CI) is exactly the practice that produces irreproducible published findings. Report all twelve or report none.
+
+- ❌ **Retroactively bump Elo K-factor from 32 to 64 to "boost" perceived_n informativeness** (considered 2026-08-13, rejected)
+  - Higher K would make each vote move Elo more, so `perceived_n = 5` at K=64 is roughly as informative as `perceived_n = 10` at K=32. Sounds tempting. But: (a) breaks Elo comparability across current and historical votes, (b) amplifies noise as much as signal, (c) any K change should bump `PROMPT_VERSION` too and reset the leaderboard. Not a shortcut worth taking; the honest fix is more votes.
+
 - ❌ **B2B enterprise testing API (LMSYS-model monetization)** (Reviewer #5 M1)
   — LMSYS didn't monetize this way until they had ~1M matches on the
   leaderboard; we have ~400. Foundation labs (OpenAI/Anthropic/Meta)
@@ -805,6 +1175,23 @@ this file before the session ends.** Rules:
 
 **Anti-pattern to avoid:** don't update TIMELINE.md as marketing copy.
 It's a working document for future agents. Honesty > polish. If an item
+is behind schedule, say so. If a shipped feature turned out to be worse
+than expected, log it under "Shipping timeline" with a "reality check"
+note.
+
+**Format discipline:**
+- Reverse chronological in "Shipping timeline"
+- Ranked by impact/effort in Roadmap (highest first per tier)
+- Kill list stays sorted roughly by "how many times someone re-proposed
+  this" — put the most tempting-to-re-propose items at the top so
+  future agents hit them first when skimming.
+
+**When there's a genuinely different opinion** about whether to ship
+something, log both sides briefly in Roadmap and let the maintainer
+(@Cometbuster4969, Ayush Kumar) decide. Don't cave to whichever LLM
+argued last — that's exactly the sycophancy protocol §0.5 of AGENTS.md
+exists to prevent.
+ng document for future agents. Honesty > polish. If an item
 is behind schedule, say so. If a shipped feature turned out to be worse
 than expected, log it under "Shipping timeline" with a "reality check"
 note.

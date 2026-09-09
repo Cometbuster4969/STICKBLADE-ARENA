@@ -1,0 +1,40 @@
+name: Feature or research request
+description: Propose something new, or ask for a measurement we don't publish
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What question are you trying to answer?
+      description: |
+        Frame it as the thing you want to know, not the thing you want built.
+        "I can't tell whether a leaderboard row is thin" is better than "add a
+        column", because there may be a better fix.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: If you already have one in mind, say what it is and where it would land.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - New measurement / axis
+        - New weapon, arena, or rule
+        - UI / accessibility
+        - Dataset or export
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: cost
+    attributes:
+      label: What does it cost the benchmark?
+      description: |
+        Anything that changes physics, prompting, or the action vocabulary
+        invalidates cross-version comparison. If your idea does that, say so
+        here — we will still consider it, it just needs a version bump.

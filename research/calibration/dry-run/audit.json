@@ -1,0 +1,98 @@
+{
+  "generated": "2026-09-09T10:50:07Z",
+  "matches": 96,
+  "completed": 96,
+  "failed": 0,
+  "evidence": {
+    "real_provider": 0,
+    "mixed_provider": 0,
+    "scripted_baseline": 96
+  },
+  "strict_fallback_excluded": 0,
+  "token_coverage": null,
+  "token_missing_sides": 0,
+  "latency_ms": {
+    "n": 192,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 1.4
+  },
+  "by_pair": {
+    "bot:pro|mock:duelist": {
+      "n": 16,
+      "eligible": 16,
+      "a_wins": 9,
+      "b_wins": 7,
+      "draws": 0,
+      "left_a": 8
+    },
+    "bot:pro|bot:greedy": {
+      "n": 16,
+      "eligible": 16,
+      "a_wins": 9,
+      "b_wins": 7,
+      "draws": 0,
+      "left_a": 8
+    },
+    "bot:pro|bot:distance": {
+      "n": 16,
+      "eligible": 16,
+      "a_wins": 8,
+      "b_wins": 2,
+      "draws": 6,
+      "left_a": 8
+    },
+    "mock:duelist|bot:greedy": {
+      "n": 16,
+      "eligible": 16,
+      "a_wins": 10,
+      "b_wins": 6,
+      "draws": 0,
+      "left_a": 8
+    },
+    "mock:duelist|bot:distance": {
+      "n": 16,
+      "eligible": 16,
+      "a_wins": 13,
+      "b_wins": 2,
+      "draws": 1,
+      "left_a": 8
+    },
+    "bot:greedy|bot:distance": {
+      "n": 16,
+      "eligible": 16,
+      "a_wins": 12,
+      "b_wins": 4,
+      "draws": 0,
+      "left_a": 8
+    }
+  },
+  "checks": {
+    "all_matches_identify_provider_and_model": {
+      "pass": true,
+      "detail": "96/96"
+    },
+    "all_matches_record_eligibility_status": {
+      "pass": true,
+      "detail": "96/96"
+    },
+    "no_silent_fallback_in_strict_mode": {
+      "pass": true,
+      "detail": "0 ranked strict matches fell back"
+    },
+    "token_coverage_at_least_95pct_or_reported": {
+      "pass": true,
+      "detail": "no real-provider sides"
+    },
+    "failed_matches_retained_not_ranked": {
+      "pass": true,
+      "detail": "0 failed, all flagged"
+    },
+    "real_provider_evidence_present": {
+      "pass": false,
+      "detail": "0 real / 0 mixed / 96 scripted"
+    }
+  },
+  "accepted": false,
+  "note": "A passing audit validates the MEASUREMENT PIPELINE. It says nothing about which model is better \u2014 that needs the Bradley\u2013Terry separability test on voted data."
+}

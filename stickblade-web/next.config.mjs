@@ -25,6 +25,13 @@ try {
 // Trusted Types is added in Report-Only so we don't break Next's runtime,
 // but still satisfies the Lighthouse "Mitigate DOM-based XSS" advisory.
 const API_ORIGIN = "https://pioneer37-stickman-arena.hf.space";
+// Which backend the browser talks to. Production calls the deployed Space
+// directly; anything else (dev, preview, LAN) uses the same-origin proxy
+// below, because a hard-coded http://localhost:8000 is unreachable from any
+// machine that is not the one running the backend.
+const IS_PROD = process.env.NODE_ENV === "production";
+const PUBLIC_API_BASE = process.env.NEXT_PUBLIC_API_BASE
+  || (IS_PROD ? API_ORIGIN : "");
 
 const ContentSecurityPolicy = [
   "default-src 'self'",
@@ -104,14 +111,45 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Next 15 refuses cross-origin requests to the dev server unless the
+  // host is allow-listed here. Sandbox/LAN previews are served from a
+  // generated host, so without this every preview URL gets a blocked-origin
+  // page instead of the site.
+  allowedDevOrigins: [
+    "*.e2b.app",
+    "*.e2b.dev",
+    "localhost",
+    "*.localhost",
+    "*.vercel.app",
+    "*.hf.space",
+  ],
   // Modern browsers only — keeps the SWC/Next polyfill list (Array.prototype.at,
   // flat, flatMap, Object.fromEntries, Object.hasOwn, String trimStart/trimEnd)
   // out of the client bundle. See package.json#browserslist.
   compress: true,
   env: {
     // Point this at your deployed FastAPI backend (HF Space URL).
-    NEXT_PUBLIC_API_BASE:
-      process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000",
+    // EMPTY means "same origin": the browser calls /api/* on this Next
+    // server and the rewrite below proxies it to the backend. That is the
+    // default for local dev, because a hard-coded http://localhost:8000
+    // breaks the moment the page is opened from any other machine
+    // (a teammate's laptop, a preview URL, a phone on the LAN).
+    NEXT_PUBLIC_API_BASE: PUBLIC_API_BASE,
+  },
+  // Same-origin API proxy. Lets the browser talk to the backend without
+  // knowing where it lives — no CORS, no hard-coded host, works behind any
+  // preview URL. In production NEXT_PUBLIC_API_BASE is set to the HF Space
+  // and the browser calls it directly; this rewrite then simply goes unused.
+  async rewrites() {
+    // BACKEND_ORIGIN wins, then API_PROXY_TARGET (the knob the other branch
+    // added), then: prod = the deployed Space, dev = local uvicorn. The
+    // prod fallback matters — defaulting a production deploy to
+    // localhost:8000 would leave it proxying to a port nothing listens on.
+    const backend = (process.env.BACKEND_ORIGIN
+      || process.env.API_PROXY_TARGET
+      || (IS_PROD ? API_ORIGIN : "http://127.0.0.1:8000")
+    ).replace(/\/+$/, "");
+    return [{ source: "/api/:path*", destination: `${backend}/api/:path*` }];
   },
   // Strip Next.js's hard-coded legacy-JS polyfill module from the client
   // bundle (~11 KiB) since our browserslist only targets modern browsers

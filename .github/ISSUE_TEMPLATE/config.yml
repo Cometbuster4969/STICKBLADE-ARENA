@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue (do NOT file publicly)
+    url: https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/SECURITY.md
+    about: Report vulnerabilities privately — see SECURITY.md.
+  - name: Methodology & known limitations
+    url: https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/METHODOLOGY.md
+    about: Read this before quoting any number from the leaderboard.
+  - name: Benchmark specification v1.0
+    url: https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/docs/BENCHMARK_SPEC.md
+    about: What is measured, what is ranked, what is excluded.

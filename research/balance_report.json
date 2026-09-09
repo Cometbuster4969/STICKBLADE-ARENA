@@ -1,0 +1,249 @@
+{
+  "by_weapon": [
+    {
+      "weapon": "bow",
+      "matches": 24,
+      "side_a_win_rate": 0.3125,
+      "ci_lo": 0.1643,
+      "ci_hi": 0.5125,
+      "avg_damage": 45.31,
+      "avg_hits": 4.62,
+      "avg_turns": 9.0,
+      "lethal_rate": 0.375
+    },
+    {
+      "weapon": "dagger",
+      "matches": 24,
+      "side_a_win_rate": 0.4792,
+      "ci_lo": 0.2965,
+      "ci_hi": 0.6676,
+      "avg_damage": 37.88,
+      "avg_hits": 9.42,
+      "avg_turns": 11.8,
+      "lethal_rate": 0.083
+    },
+    {
+      "weapon": "flail",
+      "matches": 24,
+      "side_a_win_rate": 0.1875,
+      "ci_lo": 0.0794,
+      "ci_hi": 0.3819,
+      "avg_damage": 73.41,
+      "avg_hits": 13.21,
+      "avg_turns": 9.4,
+      "lethal_rate": 0.667
+    },
+    {
+      "weapon": "spear",
+      "matches": 24,
+      "side_a_win_rate": 0.4375,
+      "ci_lo": 0.2617,
+      "ci_hi": 0.6306,
+      "avg_damage": 25.71,
+      "avg_hits": 4.79,
+      "avg_turns": 11.8,
+      "lethal_rate": 0.042
+    },
+    {
+      "weapon": "sword",
+      "matches": 24,
+      "side_a_win_rate": 0.5833,
+      "ci_lo": 0.3883,
+      "ci_hi": 0.7553,
+      "avg_damage": 39.83,
+      "avg_hits": 8.33,
+      "avg_turns": 11.2,
+      "lethal_rate": 0.125
+    }
+  ],
+  "by_arena": [
+    {
+      "arena": "ice",
+      "matches": 40,
+      "side_a_win_rate": 0.4375,
+      "ci_lo": 0.296,
+      "ci_hi": 0.5899,
+      "avg_damage": 43.81,
+      "avg_hits": 8.51,
+      "avg_turns": 11,
+      "lethal_rate": 0.25
+    },
+    {
+      "arena": "low_gravity",
+      "matches": 40,
+      "side_a_win_rate": 0.375,
+      "ci_lo": 0.2422,
+      "ci_hi": 0.5297,
+      "avg_damage": 42.15,
+      "avg_hits": 6.76,
+      "avg_turns": 10.2,
+      "lethal_rate": 0.25
+    },
+    {
+      "arena": "normal",
+      "matches": 40,
+      "side_a_win_rate": 0.3875,
+      "ci_lo": 0.2528,
+      "ci_hi": 0.5419,
+      "avg_damage": 47.32,
+      "avg_hits": 8.95,
+      "avg_turns": 10.8,
+      "lethal_rate": 0.275
+    }
+  ],
+  "by_zone": [
+    {
+      "sharp": "arrow_shaft",
+      "matches": 9,
+      "side_a_win_rate": 0.4444,
+      "ci_lo": 0.1888,
+      "ci_hi": 0.7334,
+      "avg_damage": 43.01,
+      "avg_hits": 8.44,
+      "avg_turns": 12,
+      "lethal_rate": 0.0
+    },
+    {
+      "sharp": "arrowhead",
+      "matches": 9,
+      "side_a_win_rate": 0.1111,
+      "ci_lo": 0.0199,
+      "ci_hi": 0.435,
+      "avg_damage": 68.42,
+      "avg_hits": 2.22,
+      "avg_turns": 4.1,
+      "lethal_rate": 1.0
+    },
+    {
+      "sharp": "back_edge",
+      "matches": 12,
+      "side_a_win_rate": 0.5,
+      "ci_lo": 0.2538,
+      "ci_hi": 0.7462,
+      "avg_damage": 23.82,
+      "avg_hits": 9,
+      "avg_turns": 12,
+      "lethal_rate": 0.0
+    },
+    {
+      "sharp": "ball",
+      "matches": 6,
+      "side_a_win_rate": 0.0,
+      "ci_lo": 0.0,
+      "ci_hi": 0.3903,
+      "avg_damage": 47.32,
+      "avg_hits": 15.67,
+      "avg_turns": 12,
+      "lethal_rate": 0.0
+    },
+    {
+      "sharp": "bow_limb",
+      "matches": 6,
+      "side_a_win_rate": 0.4167,
+      "ci_lo": 0.1395,
+      "ci_hi": 0.7589,
+      "avg_damage": 14.09,
+      "avg_hits": 2.5,
+      "avg_turns": 12,
+      "lethal_rate": 0.0
+    },
+    {
+      "sharp": "butt",
+      "matches": 6,
+      "side_a_win_rate": 0.3333,
+      "ci_lo": 0.0968,
+      "ci_hi": 0.7,
+      "avg_damage": 11.95,
+      "avg_hits": 4.33,
+      "avg_turns": 12,
+      "lethal_rate": 0.0
+    },
+    {
+      "sharp": "chain",
+      "matches": 6,
+      "side_a_win_rate": 0.3333,
+      "ci_lo": 0.0968,
+      "ci_hi": 0.7,
+      "avg_damage": 88.55,
+      "avg_hits": 14.83,
+      "avg_turns": 9,
+      "lethal_rate": 1.0
+    },
+    {
+      "sharp": "edge",
+      "matches": 12,
+      "side_a_win_rate": 0.625,
+      "ci_lo": 0.3544,
+      "ci_hi": 0.835,
+      "avg_damage": 41.71,
+      "avg_hits": 10.33,
+      "avg_turns": 11.6,
+      "lethal_rate": 0.083
+    },
+    {
+      "sharp": "handle",
+      "matches": 6,
+      "side_a_win_rate": 0.0,
+      "ci_lo": 0.0,
+      "ci_hi": 0.3903,
+      "avg_damage": 81.48,
+      "avg_hits": 9.5,
+      "avg_turns": 6.7,
+      "lethal_rate": 1.0
+    },
+    {
+      "sharp": "pommel",
+      "matches": 12,
+      "side_a_win_rate": 0.5,
+      "ci_lo": 0.2538,
+      "ci_hi": 0.7462,
+      "avg_damage": 51.27,
+      "avg_hits": 10.75,
+      "avg_turns": 12,
+      "lethal_rate": 0.0
+    },
+    {
+      "sharp": "shaft",
+      "matches": 9,
+      "side_a_win_rate": 0.5556,
+      "ci_lo": 0.2666,
+      "ci_hi": 0.8112,
+      "avg_damage": 32.91,
+      "avg_hits": 4.67,
+      "avg_turns": 12,
+      "lethal_rate": 0.0
+    },
+    {
+      "sharp": "spikes",
+      "matches": 6,
+      "side_a_win_rate": 0.4167,
+      "ci_lo": 0.1395,
+      "ci_hi": 0.7589,
+      "avg_damage": 76.28,
+      "avg_hits": 12.83,
+      "avg_turns": 9.8,
+      "lethal_rate": 0.667
+    },
+    {
+      "sharp": "tip",
+      "matches": 21,
+      "side_a_win_rate": 0.4524,
+      "ci_lo": 0.2639,
+      "ci_hi": 0.6556,
+      "avg_damage": 33.94,
+      "avg_hits": 5.33,
+      "avg_turns": 10.9,
+      "lethal_rate": 0.238
+    }
+  ],
+  "flags": [
+    "\u2022 bow: point estimate 0.3125 is off 50/50 but the 95% CI [0.1643, 0.5125] still contains it \u2014 widen the batch (n=24) before treating this as imbalance",
+    "\u26a0 flail: side bias 0.1875 (95% CI [0.0794, 0.3819]) excludes 50/50 on a mirrored bot batch \u2014 the configuration, not the model, is deciding matches"
+  ],
+  "meta": {
+    "generated": "2026-09-08",
+    "n": 8,
+    "base_seed": 5000,
+    "match_length": "standard"
+  }
+}
