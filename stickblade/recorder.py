@@ -125,6 +125,43 @@ class ReplayRecorder:
                     row += [x, y, a]
         self.frames.append(row)
 
+    # ------------------------------------------- provenance / telemetry
+    def _provenance(self):
+        m = self.match
+        try:
+            return m.build_provenance()
+        except Exception as e:
+            # Never let telemetry break a replay — degrade to the raw
+            # fields we can still recover.
+            from benchmark import provenance
+            return provenance(
+                model_requested_a=getattr(m, "_requested", {}).get(1, ""),
+                model_requested_b=getattr(m, "_requested", {}).get(2, ""),
+                seed=getattr(m, "seed", None),
+                match_length=getattr(m, "match_length", "full"),
+                fallback_policy=getattr(m, "fallback_policy", "operational"),
+                provenance_error=str(e)[:120])
+
+    def _telemetry(self):
+        m = self.match
+        tel = getattr(m, "telemetry", None)
+        if not tel:
+            return {}
+        out = {"turns": tel.get("turns", [])}
+        for fid, side in ((1, "a"), (2, "b")):
+            t = tel.get(fid, {})
+            n = max(1, int(t.get("turns", 0) or 0))
+            out[side] = {
+                "turns": t.get("turns", 0),
+                "latency_ms_avg": round(t.get("latency_ms_total", 0.0) / n, 1),
+                "latency_ms_max": round(t.get("latency_ms_max", 0.0), 1),
+                "fallback_turns": t.get("fallback_turns", 0),
+                "invalid_actions": t.get("invalid_actions", 0),
+                "models_used": t.get("models_used", {}),
+                "providers_used": t.get("providers_used", {}),
+            }
+        return out
+
     # ------------------------------------------------------------ output
     def build(self):
         m = self.match
@@ -164,11 +201,36 @@ class ReplayRecorder:
                 # how many turns used a scripted fallback brain (LLM error/timeout)
                 "fallback_turns": self.fallback_turns,
                 "total_turns": m.turn,
+                "evaluation_integrity": {
+                    "fully_llm_controlled": (
+                        int(metrics.get("fallback_turns_a") or 0) == 0
+                        and int(metrics.get("fallback_turns_b") or 0) == 0
+                    ),
+                    "fallback_turns_a": int(metrics.get("fallback_turns_a") or 0),
+                    "fallback_turns_b": int(metrics.get("fallback_turns_b") or 0),
+                    "total_turns": m.turn,
+                },
                 # Tier S #3: objective proxy metrics per fighter, computed
                 # from the event stream. Powers the objective-skill
                 # leaderboard alongside human-vote Elo. See _proxy_metrics()
                 # for definitions.
                 "metrics": metrics,
+                # ---- benchmark spec v1.0: provenance + audit trail ----
+                # Every published replay now carries the version triple
+                # (benchmark / physics / prompt), the seed, match length,
+                # fallback policy, per-fighter model+provider actually
+                # used, latency, invalid actions and ranking eligibility.
+                # See benchmark.provenance() for the field contract.
+                "provenance": self._provenance(),
+                # Ordered per-turn decisions. With `seed` + physics_version
+                # this is what makes a published result reproducible, and
+                # it is what benchmark.verify_replay() audits.
+                "action_log": list(getattr(m, "action_log", []) or []),
+                "telemetry": self._telemetry(),
+                "match_length": getattr(m, "match_length", "full"),
+                "max_turns": getattr(m, "max_turns", C.MAX_TURNS),
+                "mode": getattr(m, "mode", "macro"),
+                "blindfolded": bool(getattr(m, "blindfolded", False)),
             },
             "frames": self.frames,
             "events": self.events,

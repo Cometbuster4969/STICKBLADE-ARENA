@@ -94,6 +94,114 @@ Elo updates use `K = 32` on wins/losses; draws count as ½-win per Elo conventio
 
 Every leaderboard row publishes a Wilson 95% CI (`stickblade/server.py:842`, `_wilson_ci(wins, losses, draws, z=1.96)`) on the win-share `p_hat = (w + d/2) / (w + l + d)`. This is included because raw win-percentage with `n=3` matches is meaningless, and readers need to see rating uncertainty.
 
+### 3.3b Bradley–Terry with confidence intervals (`stickblade/ratings.py`)
+
+Elo is a good live scoreboard and a weak scientific claim: it updates
+sequentially, so two models with identical records can end up with
+different ratings depending on the order their matches happened to arrive
+in, and it carries no interval. Neither is fixable inside Elo, because both
+are properties of the update rule, not of the data.
+
+So the benchmark publishes a second rating alongside it. `/api/leaderboard/
+bradley_terry` fits all voted comparisons in a cell at once by maximum
+likelihood:
+
+- **Model.** Bradley–Terry with a Davidson tie term (`stickblade/ratings.py`,
+  `bradley_terry()`). For models *i*, *j*: `P(i ≻ j) = p_i / (p_i + p_j +
+  ν√(p_i p_j))` — ν > 0 puts mass on the draw outcome rather than deleting
+  it, which matters for us because draws are a real and frequent outcome.
+- **ν is estimated, not assumed.** Holding ν at a constant silently
+  compresses the whole field: with ν ≡ 0.5 a 90/10 record fitted to 1.213
+  logits instead of the analytic `ln 9 = 2.197`. The fitter solves the score
+  equation for ν and forces ν = 0 when there are no draws.
+- **Ridge shrinkage (`DEFAULT_RIDGE = 1.0`).** A model that is 3–0 has an
+  infinite MLE. The ridge keeps every estimate finite, which is exactly the
+  sparse-data failure mode that makes small-sample leaderboards lie.
+- **Identifiability.** Ratings are centred per fit, and only within a
+  connected component of the comparison graph are they comparable at all.
+  Components are reported (`component`, `component_size`) and anything
+  outside the main one is flagged `provisional`, rather than being placed
+  in a ranking it has no claim to.
+- **Intervals.** `fit_with_ci()` bootstrap-resamples the comparison set and
+  reports the 2.5/97.5 percentiles. Intervals must widen as n falls — that
+  property is pinned by a test, not asserted in prose
+  (`tests/test_ratings.py::test_more_data_gives_a_tighter_interval`).
+- **Scale.** Ratings are reported as `1000 + (400/ln 10)·θ` purely for
+  readability. This is **not** Elo, and the numbers are not comparable to
+  the Elo column.
+
+The UI shows tie letters: models whose intervals overlap share a letter and
+are described as *not separable*, because publishing a sorted list invites
+readers to read rank order as a result even when the data does not support
+one.
+
+### 3.3c Expert and casual evaluators are not mixed (§6)
+
+A viewer may prefer the dramatic fighter even when it made the worse
+decisions, and an experienced evaluator may systematically disagree with
+the crowd. Both facts are only measurable if the two populations are
+separable after the fact.
+
+Every vote therefore carries a **self-declared** `voter_tier`
+(`casual` | `expert`, `stickblade/storage.py` migration +
+`record_vote(..., voter_tier=...)`), and:
+
+- the tier is **recorded, never weighted** — an expert vote does not count
+  more, and there is no identity verification behind it, which is precisely
+  why it is published as a label rather than used to override anyone;
+- ratings can be computed per tier (`/api/leaderboard/bradley_terry?tier=
+  expert`), so "do experienced evaluators disagree with the crowd?" is a
+  question the dataset can answer later;
+- the export carries `votes_expert` / `votes_casual` as separate columns,
+  so a downstream analyst can reproduce either tier's leaderboard instead
+  of having to trust ours.
+
+### 3.3d The physics is inspectable (§10)
+
+A benchmark result the reader cannot check is an assertion, not a
+measurement. The replay player therefore ships a **research debug
+overlay** (`stickblade-web/public/player.js`, `drawDebug()`; toggle with
+the ⚙ Debug button or the `d` key) that draws, per frame:
+
+| Layer | Source |
+|---|---|
+| Hitboxes | the same per-body `HALF`/`WIDTHS` capsule table the renderer uses — not an approximation of it |
+| Weapon segments | per-weapon blade geometry, with the sharp zone the match was played under highlighted in red |
+| Velocity vectors | finite-difference torso velocity (px/s), labelled, so a lunge is visible and stalling is obvious |
+| Contact points | `hit`/`clash` events at their recorded coordinates, labelled with damage, body part and attacker |
+| Frame / turn / action | frame index, elapsed time, HP, weapon, sharp list, arena, and both fighters' thoughts in force |
+
+Everything is replayed from the stored frame array; **nothing is
+re-simulated**, so an audit cannot diverge from the match it audits. The
+overlay is off by default (it is noise for a casual viewer) and is
+covered by a headless smoke test (`stickblade-web/scripts/check-player.mjs`)
+because the player is a vanilla script the Next build never executes.
+
+### 3.3e Cost is measured, not estimated (§33)
+
+Every provider tells us what it billed; the brains accumulate those counts
+across retries and buddy fallbacks (`stickblade/brains.py`,
+`Brain._record_usage`) and they are persisted on the match row, so
+`/api/costs` reports **actual** token spend rather than a guess based on
+prompt length. Three rules keep the number honest:
+
+- **Unreported is not free.** A billable match whose provider omitted usage
+  is counted in `matches_without_usage` and sets `complete: false`, making
+  every total a lower bound until it is filled in.
+- **Offline is not missing.** Scripted-versus-scripted matches genuinely
+  cost \$0 and are counted as `matches_offline`, so they can never mask a
+  real reporting gap.
+- **Prices are data.** The price table carries an as-of date and is
+  overridable via `STICKBLADE_PRICES_JSON`; the unknown-model fallback is
+  deliberately the *most expensive* row, because an under-estimated budget
+  fails silently while an over-estimated one just leaves headroom.
+
+Budgets (`BUDGET_DAILY_USD` / `BUDGET_MONTHLY_USD`) report `unset` when
+unconfigured — an unconfigured limit is not a healthy one. The access model
+(§34, `stickblade/costs.py`, `ACCESS_TIERS`) is published through the same
+endpoint: public quick matches, BYOK and research mode are free, and the
+only priced tiers are volume/hosting and are marked not implemented.
+
 ### 3.4 Prompt version pinning
 
 Every match is stamped with `PROMPT_VERSION` (`stickblade/brains.py:36`, currently `1`), exposed via `/api/version` and on every leaderboard row. When the state-JSON schema or the system prompt changes, this integer bumps and downstream dataset consumers can filter for the version they need (`stickblade/brains.py:148-154`, protocol documented in `AGENTS.md §PROMPT_VERSION_LOG`).
@@ -121,15 +229,30 @@ The reason for two leaderboards is that they answer different questions:
 
 The gap between them is the benchmark's most interesting signal. For example, in bow matches humans reward "smart waiting for cooldown" that does not show up in raw damage. Formal cross-benchmark correlation analysis is Tier-B work (see `TIMELINE.md` — cross-benchmark correlation study).
 
-### 4.1 Empirical status (2026-08-04)
+### 4.1 Empirical status (updated 2026-08-13)
 
-The cross-benchmark correlation study was first executed on the 2026-08-04 snapshot (467 matches, 106 votes) and is written up in `research/cross_benchmark_correlation_report_2026-08-04.md`. Result: **the study is underpowered at current scale.** Only 2 of the 24 roster models meet the joint threshold of `perceived_n ≥ 5` (rated matches) AND `objective_n ≥ 5` (completed matches), which is the minimum needed for either metric to have moved off its prior. A meaningful Spearman ρ cannot be computed from 2 data points.
+The cross-benchmark correlation study was first executed on the 2026-08-04 snapshot and re-executed on 2026-08-13 after the [Tier-A #4 frozen 100-matchup eval pack](../research/frozen_pack_v1.yaml) completed. Full report in `research/cross_benchmark_correlation_report_2026-08-04.md`.
 
-Reporting a single-side-filtered ρ from this dataset (e.g. filtering only on `perceived_n ≥ 5` yields ρ = −0.899 for LLMs, p = 0.015) would be dishonest — the striking negative correlation is entirely explained by objective-side small-sample noise, where a model with one lucky win shows as `objective_win_rate = 1.0` against models with dozens of rated matches. The reproducible notebook makes this failure mode explicit.
+**Post-pack result: 14 models cross the joint filter of `perceived_n ≥ 5 AND matches ≥ 5`** (up from 2 pre-pack). No correlation reaches p < 0.05:
 
-**What unblocks a defensible number:** the Tier-A #4 frozen 100-matchup eval pack. A 100-match pack across 10 shared models (10 matches per model per axis) would push the joint filter above threshold for enough models to compute a real ρ with a defensible 95% bootstrap CI. This is the next research milestone.
+| Population | ρ (Elo vs win-rate) | ρ (Elo vs dmg/turn) | ρ (Elo vs hit-rate) |
+|---|---|---|---|
+| All (n=14) | +0.099 (p=.74) | −0.285 (p=.32) | −0.372 (p=.19) |
+| LLMs only (n=13) | +0.148 (p=.63) | −0.219 (p=.47) | −0.263 (p=.39) |
 
-Publishing this null / underpowered finding *before* the eval pack lands is deliberate, per `AGENTS.md §0.5`: reporting negative results is how the anti-sycophancy protocol proves it isn't performative.
+All 95% bootstrap CIs span zero. This is a null result — but a *scientifically informative* null. What it tells us:
+
+1. **Perceived-Elo and objective win-rate are NOT tightly correlated** (ρ near zero, wide CI). If they were (ρ > 0.85), the two leaderboards would be redundant and one should be collapsed. They aren't — publishing both is empirically justified.
+
+2. **A weakly negative trend on damage_per_turn is worth flagging as a hypothesis** (ρ=−0.29, LLMs-only ρ=−0.22, not significant): consistent with the reading that humans reward tactical patience over aggression. Not a finding — the CI includes zero.
+
+3. **The bottleneck is not matches, it's votes.** The frozen pack fattened `objective_n` (median 2 → 36) but `perceived_n` remained the limiting factor. 11 of 14 filtered models still have `perceived_n < 20`, so Elo hasn't converged past the 1000-baseline prior enough to produce signal above noise.
+
+**What unblocks a defensible ρ:** more human votes. Ranked by ROI: (a) marketing push to drive site traffic, (b) opt-in multi-vote per match (Tier-B roadmap — also unlocks inter-rater κ as a separate publishable finding), (c) NOT a bigger frozen pack (would strengthen per-weapon analysis but doesn't help ρ).
+
+**What we deliberately did NOT do:** loosen the joint filter to `perceived_n ≥ 3` (would pump n=14 to n=25 but trade rigor for headline number — an AGENTS.md §0.5 anti-sycophancy trap). Cherry-picking the most positive of the twelve reported correlations to headline (same trap). Bumping Elo K-factor retroactively (breaks Elo comparability across `prompt_version`).
+
+Publishing this refined null finding openly is consistent with §0.5: the frozen pack was hypothesized to move Research 8.2 → 8.4 conditional on a defensible headline ρ; the ρ isn't there, so the grade doesn't move. What the pack DID deliver: (a) killed the fabricated "ρ ≈ 0.71" claim permanently, (b) established the exact statistical threshold that must be crossed to publish a real number, (c) shipped reproducible tooling (`tools/run_frozen_pack.py` + `research/cross_benchmark_correlation.py`) that will produce the right answer when the vote-count bottleneck resolves.
 
 ---
 

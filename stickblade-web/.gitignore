@@ -1,2 +1,14 @@
 .vercel
 .env*
+!.env.example
+
+# Next.js build output + deps — machine-specific and huge (100k+ files).
+# The repo ships source only.
+/node_modules
+/.next
+/out
+next-env.d.ts
+
+# Local env overrides (NEXT_PUBLIC_API_BASE, API_PROXY_TARGET, BYOK keys).
+# `.env*` above already covers these; listed for clarity.
+.env*.local

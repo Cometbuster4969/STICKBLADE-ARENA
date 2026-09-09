@@ -324,8 +324,11 @@ main {
 .panel-title.blue  .tick { background: var(--blue);  color: var(--blue);  }
 .panel-title.gold  .tick { background: var(--gold);  color: var(--gold);  }
 
-/* ---------- Labels ---------- */
-label.lbl {
+/* ---------- Labels ----------
+   Bare `.lbl` (not `label.lbl`) so the same label works whether it's a real
+   <label for=...> or the heading of a button-group (a <label> with no control
+   would be a lie to assistive tech). */
+.lbl {
   font-family: var(--font-display), "Rajdhani", system-ui, sans-serif;
   font-size: 11px;
   color: var(--dim);
@@ -672,3 +675,731 @@ a.mlink { color: var(--blue); text-decoration: none; }
 
 /* ---------- Selection ---------- */
 ::selection { background: rgba(255, 61, 92, 0.35); color: #fff; }
+
+/* =========================================================================
+   Accessibility modes + benchmark v1.0 UI
+   -------------------------------------------------------------------------
+   Applied from <html data-* attrs> by lib/prefs.js. Keeping them in CSS
+   means no runtime cost and no hydration flash.
+   ========================================================================= */
+
+/* ---- Reduced motion: kill every animation + smooth scroll (§15) -------- */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+html[data-motion="reduced"] body::after { display: none; }
+html[data-motion="reduced"] .fight-btn::before { display: none; }
+html[data-motion="reduced"] .marquee,
+html[data-motion="reduced"] .ticker-live { animation: none !important; }
+
+/* ---- High contrast: readable text + visible boundaries (§15) ----------- */
+html[data-contrast="high"] {
+  --text:   #ffffff;
+  --text-2: #e6e9f5;
+  --dim:    #c3c8db;
+  --mute:   #9aa0b8;
+  --line:   #5b6288;
+  --line-strong: #8a92bd;
+  --bg-2:   #101223;
+  --bg-2-solid: #0e1020;
+  --bg-3:   #1c2036;
+}
+html[data-contrast="high"] .panel { border-width: 2px; }
+html[data-contrast="high"] button,
+html[data-contrast="high"] .chip,
+html[data-contrast="high"] .zone,
+html[data-contrast="high"] select,
+html[data-contrast="high"] input { border-width: 2px; }
+html[data-contrast="high"] .vote-row button { font-weight: 700; }
+
+/* ---- Visible keyboard focus everywhere (§15) --------------------------- */
+:focus-visible {
+  outline: 3px solid var(--gold, #ffc547);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+summary:focus-visible { outline: 3px solid var(--gold, #ffc547); }
+
+/* Skip link for keyboard + screen-reader users */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--gold, #ffc547);
+  color: #06070d;
+  padding: 8px 14px;
+  font-weight: 700;
+  z-index: 200;
+  border-radius: 0 0 8px 0;
+}
+.skip-link:focus {
+  left: 8px;
+  top: 8px;
+}
+
+/* ---- Hero: one primary action (§12) ------------------------------------ */
+.hero {
+  padding: 26px 22px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(900px 320px at 12% -10%, rgba(255, 61, 92, 0.16), transparent 60%),
+    radial-gradient(800px 300px at 88% 0%, rgba(79, 168, 255, 0.14), transparent 60%),
+    var(--bg-2-solid);
+  box-shadow: var(--shadow-card);
+}
+.hero h1 {
+  font-family: var(--font-display), var(--font-ui), system-ui, sans-serif;
+  font-size: clamp(26px, 4.4vw, 42px);
+  line-height: 1.1;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+.hero h1 .accent { color: var(--red); }
+.hero p.lede {
+  color: var(--text-2);
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  align-items: center;
+}
+.btn-secondary {
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  min-height: 44px;
+  font-size: 14px;
+}
+.btn-secondary:hover { background: rgba(255, 255, 255, 0.05); }
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--dim);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 8px 4px;
+  min-height: 44px;
+}
+
+/* ---- Mode tabs: Quick Match vs Research Mode (§2) ---------------------- */
+.mode-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+}
+.mode-tab {
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  min-height: 38px;
+}
+.mode-tab[aria-selected="true"] {
+  background: var(--bg-3);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* ---- Fighter identity without relying on colour (§15) ------------------ */
+.fighter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+.fighter-tag .swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+/* Distinct hatch patterns so the two fighters differ in shape, not just hue */
+.fighter-tag.a .swatch {
+  background: repeating-linear-gradient(45deg, var(--green) 0 3px, transparent 3px 6px),
+              var(--green);
+  border: 1px solid var(--green);
+}
+.fighter-tag.b .swatch {
+  background: repeating-linear-gradient(-45deg, var(--blue) 0 3px, transparent 3px 6px),
+              var(--blue);
+  border: 1px solid var(--blue);
+}
+
+/* ---- Scorecard + provenance tables (§1, §14) --------------------------- */
+.scorecard {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.scorecard .cell {
+  padding: 10px 12px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.scorecard .cell .k {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.scorecard .cell .v {
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: 2px;
+  word-break: break-word;
+}
+.prov-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.prov-table td {
+  padding: 3px 8px 3px 0;
+  color: var(--dim);
+  vertical-align: top;
+}
+.prov-table td:last-child { color: var(--text); }
+/* Provenance tables are two-column key/value pairs. On a phone the key
+   column has to be allowed to shrink or the whole table pushes the page
+   wider than the viewport (§16). */
+@media (max-width: 720px) {
+  .prov-table { font-size: 11.5px; word-break: break-word; }
+  .prov-table td:first-child { width: 34%; padding-right: 10px; }
+}
+
+/* ---- Integrity badge (§8) ---------------------------------------------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  color: var(--dim);
+}
+.badge.ok { border-color: var(--green); color: var(--green);
+            background: rgba(52, 245, 160, 0.08); }
+.badge.warn { border-color: var(--gold); color: var(--gold);
+              background: rgba(255, 197, 71, 0.08); }
+.badge.bad { border-color: var(--red); color: var(--red);
+             background: rgba(255, 61, 92, 0.08); }
+
+/* ---- Progress bar (§13) ------------------------------------------------- */
+.progress-track {
+  height: 6px;
+  width: 100%;
+  background: var(--bg-3);
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--red), var(--gold));
+  transition: width 0.4s ease;
+}
+
+/* ---- Modal (sample fight, §3) ------------------------------------------ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 4, 10, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+}
+.modal {
+  width: min(1100px, 96vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--bg-2-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: var(--shadow-card);
+}
+
+/* ---- Mobile (§16) ------------------------------------------------------ */
+@media (max-width: 720px) {
+  .hero { padding: 18px 14px; }
+  .hero-actions .fight-btn,
+  .hero-actions .btn-secondary { width: 100%; text-align: center; }
+  .scorecard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .seg { flex-wrap: wrap; }
+  .seg-btn { flex: 1 1 44%; }
+  main { padding-bottom: 40px; }
+}
+@media (max-width: 480px) {
+  .scorecard { grid-template-columns: 1fr; }
+}
+/* /dashboard, /status, /trust — these pages are dense with stat cells and
+   long sentences. Below 720px everything goes single-column, the stat grid
+   collapses to two, and long command blocks scroll instead of overflowing. */
+@media (max-width: 720px) {
+  .dash-grid,
+  .status-grid { grid-template-columns: 1fr !important; }
+  pre, code {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+  }
+  .site-footer { padding: 18px 12px 32px; }
+}
+
+/* Screen-reader-only utility */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ==========================================================================
+   Site chrome — shared nav + footer (action-plan §23/§28/§35).
+   The integrity pages are only credible if they are reachable from every
+   screen, not buried in one footer.
+   ========================================================================== */
+.site-nav {
+  border-bottom: 1px solid var(--line, #1c2030);
+  background: rgba(6, 7, 13, 0.85);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+.site-nav-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.site-nav-brand {
+  font-family: var(--font-display, inherit);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 14px;
+  color: var(--text, #e8ebf2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.site-nav-links {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.site-nav-link {
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #8b93a7);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.site-nav-link:hover { color: var(--text, #e8ebf2); background: rgba(255,255,255,0.04); }
+.site-nav-link.active {
+  color: var(--gold, #f0c060);
+  border-color: rgba(240, 192, 96, 0.35);
+  background: rgba(240, 192, 96, 0.08);
+}
+.site-nav-tag {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 16px 8px;
+  font-size: 11.5px;
+  color: var(--muted, #8b93a7);
+}
+.site-footer {
+  border-top: 1px solid var(--line, #1c2030);
+  margin-top: 48px;
+  padding: 22px 16px 40px;
+  text-align: center;
+}
+.site-footer-links {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.site-footer-links a { color: var(--muted, #8b93a7); text-decoration: none; }
+.site-footer-links a:hover { color: var(--gold, #f0c060); }
+.site-footer-note {
+  max-width: 720px;
+  margin: 14px auto 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted, #8b93a7);
+}
+@media (max-width: 640px) {
+  .site-nav-inner { padding: 8px 12px; }
+  .site-nav-link { padding: 5px 8px; font-size: 11.5px; }
+  .site-nav-tag { display: none; }
+}
+
+/* Weapon balance marker on the segmented weapon picker (§9). */
+.bal-mark {
+  margin-left: 5px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+.hint.warn {
+  color: var(--gold, #f0c060);
+  border-left: 2px solid var(--gold, #f0c060);
+  padding-left: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* =========================================================================
+   CONFIGURE / OBSERVE / JUDGE — workflow layer
+   Added with the UI-review pass: the setup panel previously referenced
+   classes (.container, .seg, .chip, .btn, .model-grid…) that did not exist
+   in this file, so every control rendered as a bare browser default at
+   equal visual weight. Everything below is real styling for the stepped
+   setup, the option cards, the progress timeline and the blind vote.
+   ========================================================================= */
+
+/* ---------- Action hero: the four-step workflow, up front ---------- */
+.workflow {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 2px 0 4px;
+}
+.workflow-step {
+  flex: 1 1 140px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  min-height: 48px;
+}
+.workflow-step[data-active="true"] {
+  border-color: var(--red);
+  background: rgba(255, 61, 92, 0.08);
+}
+.workflow-step .n {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 11px; font-weight: 700; letter-spacing: 1px;
+  color: var(--mute);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.workflow-step[data-active="true"] .n { color: var(--red); border-color: var(--red); }
+.workflow-step .t { font-size: 13px; font-weight: 600; }
+.workflow-step .s { font-size: 11px; color: var(--dim); }
+
+/* ---------- Stepped setup sections ---------- */
+.setup-step { gap: 12px; }
+.step-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line); padding-bottom: 10px;
+}
+.step-num {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 12px; font-weight: 700; letter-spacing: 2px;
+  color: var(--red); border: 1px solid rgba(255, 61, 92, 0.4);
+  border-radius: 4px; padding: 1px 7px;
+}
+.step-title {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 16px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
+}
+.step-desc { font-size: 12.5px; color: var(--dim); margin-left: auto; max-width: 46ch; }
+
+/* ---------- Option cards (weapons / arenas) ---------- */
+.cards { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.card {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+  min-height: 48px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.card:hover { border-color: var(--line-strong); background: rgba(255, 255, 255, 0.045); }
+.card[aria-checked="true"], .card[aria-pressed="true"] {
+  border-color: var(--red);
+  background: rgba(255, 61, 92, 0.10);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(255, 61, 92, 0.35);
+}
+.card .card-name {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+}
+.card .card-desc { font-size: 11.5px; color: var(--dim); line-height: 1.4; }
+
+/* ---------- Sharp-zone picker ---------- */
+.zone-picker { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 720px) { .zone-picker { grid-template-columns: 1fr; } }
+.zone-svg { width: 100%; height: auto; display: block; }
+.zone-svg .zseg { cursor: pointer; transition: fill 120ms ease, stroke 120ms ease; }
+.zone-svg .zseg[data-on="true"] { fill: rgba(255, 61, 92, 0.55); stroke: var(--red); }
+.zone-svg .zseg:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.zone-help { font-size: 12.5px; color: var(--dim); line-height: 1.5; }
+
+/* ---------- Chips (still used by BYOK / misc toggles) ---------- */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  padding: 7px 12px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: rgba(255,255,255,0.02); color: var(--text-2);
+  cursor: pointer; font-size: 12px; letter-spacing: 1px;
+}
+.chip[aria-pressed="true"] {
+  border-color: var(--red); color: var(--text);
+  background: rgba(255, 61, 92, 0.12);
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  padding: 10px 16px; min-height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary {
+  border-color: var(--red);
+  background: linear-gradient(180deg, rgba(255, 61, 92, 0.22), rgba(255, 61, 92, 0.10));
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) { background: rgba(255, 61, 92, 0.3); }
+.btn-ghost { background: transparent; }
+.btn-sm { min-height: 34px; padding: 6px 10px; font-size: 11px; }
+
+/* ---------- Fight bar (preflight feedback) ---------- */
+.fightbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.fight-summary {
+  font-size: 12px; color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.3px;
+}
+.fight-summary b { color: var(--text-2); font-weight: 600; }
+
+/* ---------- Model metadata line ---------- */
+.model-meta {
+  margin-top: 6px; font-size: 11.5px; color: var(--dim);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.badge {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 4px;
+  border: 1px solid var(--line-strong); color: var(--dim);
+}
+.badge.ok   { color: var(--green); border-color: rgba(52, 245, 160, 0.4); }
+.badge.warn { color: var(--gold);  border-color: rgba(255, 197, 71, 0.4); }
+.badge.off  { color: var(--red-2); border-color: rgba(255, 102, 128, 0.4); }
+
+/* ---------- Progress timeline (wait screen) ---------- */
+.timeline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tl-step {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--mute);
+  padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--line);
+}
+.tl-step .tl-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--mute);
+}
+.tl-step[data-state="done"] { color: var(--dim); border-color: var(--line-strong); }
+.tl-step[data-state="done"] .tl-dot { background: var(--green); }
+.tl-step[data-state="active"] {
+  color: var(--text); border-color: var(--red);
+  background: rgba(255, 61, 92, 0.10);
+}
+.tl-step[data-state="active"] .tl-dot { background: var(--red); animation: tl-pulse 1.4s ease-in-out infinite; }
+@keyframes tl-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+.tl-sep { color: var(--mute); }
+
+/* ---------- Live ticker, colour-coded by event type ---------- */
+.ticker {
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.28);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.75;
+  max-height: 220px; overflow-y: auto;
+}
+.tk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.tk-turn { color: var(--gold); font-weight: 700; }
+.tk-act  { color: var(--text-2); }
+.tk-miss { color: var(--mute); }
+.tk-hit     { color: var(--gold); }
+.tk-sharp   { color: var(--red-2); font-weight: 700; }
+.tk-lethal  { color: var(--red); font-weight: 700; }
+.tk-kd      { color: var(--blue); font-weight: 700; }
+.tk-fb      { color: var(--gold); background: rgba(255, 197, 71, 0.12); border-radius: 3px; padding: 0 4px; }
+
+/* ---------- Stalled-state recovery ---------- */
+.stalled {
+  border: 1px solid rgba(255, 197, 71, 0.45);
+  background: rgba(255, 197, 71, 0.07);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+}
+.stalled p { font-size: 13px; color: var(--text-2); flex: 1 1 260px; margin: 0; }
+
+/* ---------- Blind vote + reveal ---------- */
+.vote-q {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 18px; font-weight: 700; letter-spacing: 1px; text-align: center;
+}
+.vote-sub { font-size: 12.5px; color: var(--dim); text-align: center; max-width: 56ch; margin: 0 auto; }
+.reveal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .reveal-grid { grid-template-columns: 1fr; } }
+.reveal-cell { padding: 12px; background: rgba(255, 255, 255, 0.03); border-radius: var(--radius-sm); border: 1px solid var(--line); }
+.reveal-cell .side { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+.reveal-cell .who { font-size: 16px; font-weight: 700; margin-top: 4px; word-break: break-word; }
+.reveal-rows { display: grid; gap: 6px; font-size: 12.5px; color: var(--dim); }
+.reveal-rows b { color: var(--text); }
+.disagree {
+  border-left: 3px solid var(--gold);
+  padding: 8px 12px; font-size: 12.5px; color: var(--text-2);
+  background: rgba(255, 197, 71, 0.06); border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+
+/* ---------- Filter bar + summary ---------- */
+.filter-bar { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.filter-summary {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px; color: var(--text-2);
+  padding: 8px 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-xs);
+}
+
+/* ---------- Leaderboard drill-down ---------- */
+.why {
+  background: rgba(0, 0, 0, 0.22);
+  padding: 12px 14px;
+  font-size: 12.5px; color: var(--text-2);
+}
+.why dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
+.why dt { color: var(--dim); }
+.why dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+/* ---------- History cards ---------- */
+.hist { display: grid; gap: 10px; }
+.hist-card {
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 12px 14px; background: rgba(255, 255, 255, 0.02);
+  display: grid; gap: 8px;
+}
+.hist-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.hist-meta {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11.5px; color: var(--dim);
+}
+.hist-meta span { border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+
+/* ---------- Empty states ---------- */
+.empty {
+  text-align: center; padding: 28px 16px; color: var(--dim);
+  display: grid; gap: 10px; justify-items: center;
+}
+.empty .empty-t { font-size: 14px; color: var(--text-2); }
+
+/* ---------- Replay controls / event markers ---------- */
+.replay-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.marker-track { position: relative; height: 14px; margin: 2px 0 0; }
+.marker {
+  position: absolute; top: 2px; width: 2px; height: 10px;
+  background: var(--gold); opacity: 0.75;
+}
+.marker.sharp { background: var(--red-2); }
+.marker.lethal { background: var(--red); height: 14px; top: 0; }
+
+/* ---------- Accessibility: visible focus for everything ---------- */
+a:focus-visible, button:focus-visible, select:focus-visible,
+input:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---------- Mobile: full-width tap targets, no hover-only affordances ---------- */
+@media (max-width: 720px) {
+  .cards { grid-template-columns: 1fr 1fr; }
+  .fightbar { flex-direction: column; align-items: stretch; }
+  .fightbar .btn, .fightbar .fight-btn { width: 100%; }
+  .vote-row { flex-direction: column; }
+  .vote-row button { width: 100%; }
+  .step-desc { margin-left: 0; }
+  .controls { flex-wrap: wrap; }
+  .controls button, .controls select { flex: 1 1 auto; }
+}
+
+/* ---------- Utilities ---------- */
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}

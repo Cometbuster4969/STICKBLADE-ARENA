@@ -1,3 +1,22 @@
+# GitHub-recognized funding config. Once you fill in any of these,
+# GitHub adds a "❤ Sponsor" button to the top of the repo page and
+# to release/issue views. Costs nothing.
+#
+# --- Recommended setup (10 min, no fees, integrated with GitHub) ---
+#   1. Go to https://github.com/sponsors/Cometbuster4969/dashboard
+#   2. Complete account setup: bank/payout + tax info. Individual
+#      accounts are supported worldwide including India (INR payouts).
+#   3. Create tiers — recommended for this project:
+#        $1/month  "☕ Chip in for a match"    (fund one API call)
+#        $5/month  "🗡 Weekly bracket sponsor" (funds ~1 tournament)
+#        $20/month "🏆 Named tournament + logo on the wait screen"
+#   4. Uncomment the `github:` line below and push.
+#
+# --- Alternative: Ko-fi / Buy-Me-a-Coffee ---
+# Works immediately without GitHub Sponsors approval, but takes a small
+# platform cut (~5%). Good short-term while you wait for GH Sponsors
+# to activate. Fill in your handle and uncomment.
+
 github: [Cometbuster4969]
 # ko_fi: your-kofi-handle
 # buy_me_a_coffee: your-bmc-handle

@@ -165,8 +165,6 @@ uvicorn server:app --port 8000
 
 ## Scaling notes (when you outgrow free)
 
-- The sim worker is one background thread — fine for a hobby arena. For real
-  traffic: multiple workers, or move sims to a job queue.
-- Replays are ~100–250 KB gzipped; Supabase free storage (1 GB) holds
-  thousands. Add a cleanup job when you get there.
+- The sim worker runs in-process with a thread-safe task queue and database-backed recovery on restart. For horizontal scaling across multiple dynos / uvicorn workers, run simulation execution via an external queue (e.g. Celery / BullMQ / RQ with Redis or Postgres advisory locks) so background jobs are shared rather than tied to a single process.
+- Replays are ~100–250 KB gzipped; Supabase free storage (1 GB) holds thousands. Add a cleanup job when you get there.
 - Past one instance: move rate limiting to Redis/Upstash (free tier exists).

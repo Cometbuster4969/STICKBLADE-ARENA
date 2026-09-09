@@ -16,6 +16,7 @@ import os
 import queue
 import re as _re_top
 import threading
+import time
 
 
 def _safe_err(e) -> str:
@@ -55,12 +56,60 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
+from typing import Literal
 
 import config as C
 import security
+from benchmark import max_turns_for
 from storage import LocalStorage
+from benchmark import (BENCHMARK_VERSION,
+                       BENCHMARK_VERSION as BENCH_SPEC_VERSION,
+                       PHYSICS_VERSION as PHYSICS_SPEC_VERSION,
+                       SPEC_FINGERPRINT)
 
-VERSION = "1.3.0"   # weapons + joint mode + player polyfill + admin bypass
+VERSION = "1.4.0"   # benchmark spec v1.0: provenance, match lengths,
+                    # fallback policies, multi-axis votes, integrity audit
+
+# ----------------------------------------------------------------------
+# Observability (action-plan §19). In-process counters, cheap enough to
+# read on every status-page poll. Backed by SQLite aggregates in
+# storage.metrics_snapshot() for anything that must survive a restart.
+# ----------------------------------------------------------------------
+OBS = {
+    "started_at": time.time(),
+    "matches_created": 0, "matches_done": 0, "matches_error": 0,
+    "matches_cancelled": 0, "votes_recorded": 0, "vote_errors": 0,
+    "replays_served": 0, "replay_errors": 0, "export_rows": 0,
+    "turn_latency_ms": [],          # bounded ring of recent decision latencies
+    "provider_errors": {},          # provider -> count
+    "last_error": None, "last_error_at": None,
+}
+OBS_LOCK = threading.Lock()
+_OBS_RING_MAX = 500
+
+
+def _obs_bump(key, n=1):
+    with OBS_LOCK:
+        OBS[key] = OBS.get(key, 0) + n
+
+
+def _obs_error(err, where="", provider=None):
+    with OBS_LOCK:
+        OBS["last_error"] = f"{where}: {str(err)[:180]}"
+        OBS["last_error_at"] = time.time()
+        if provider:
+            OBS["provider_errors"][provider] = \
+                OBS["provider_errors"].get(provider, 0) + 1
+
+
+def _obs_latency(samples):
+    """Record per-turn decision latencies (bounded ring buffer)."""
+    if not samples:
+        return
+    with OBS_LOCK:
+        OBS["turn_latency_ms"].extend(float(x) for x in samples)
+        if len(OBS["turn_latency_ms"]) > _OBS_RING_MAX:
+            OBS["turn_latency_ms"] = OBS["turn_latency_ms"][-_OBS_RING_MAX:]
 
 app = FastAPI(title="Stickblade Arena", docs_url=None, redoc_url=None,
               openapi_url=None)
@@ -94,16 +143,25 @@ async def security_middleware(request: Request, call_next):
         response.headers[k] = v
     return response
 
-print(f"[server] STICKBLADE ARENA v1.3.0 — weapons: sword/flail/bow, "
-      f"modes: macro/joint")
+print(f"[server] STICKBLADE ARENA v{VERSION} — weapons: sword/flail/bow, "
+      f"modes: macro/joint, benchmark spec "
+      f"{BENCH_SPEC_VERSION}/{SPEC_FINGERPRINT}")
 if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
     from storage_supabase import SupabaseStorage
     store = SupabaseStorage()
     print("[server] storage: Supabase (persistent)")
 else:
-    store = LocalStorage()
-    print("[server] storage: local SQLite (set SUPABASE_URL + SUPABASE_KEY "
-          "for persistence)")
+    # STICKBLADE_DATA_DIR lets tests / local runs keep match data out of the
+    # repo tree (the committed arena_data/ is a seed artifact).
+    store = LocalStorage(root=os.environ.get("STICKBLADE_DATA_DIR", "arena_data"))
+    print(f"[server] storage: local SQLite at {store.root} (set "
+          "SUPABASE_URL + SUPABASE_KEY for persistence)")
+
+try:
+    store.cleanup_stale_matches()
+except Exception as e:
+    print(f"[server] cleanup_stale_matches notice: {e}")
+
 jobs: "queue.Queue[str]" = queue.Queue()
 MATCH_MODES: dict = {}   # match_id -> "macro" | "joint" (in-memory; default macro)
 
@@ -141,9 +199,22 @@ LIVE_STATE_LOCK = threading.Lock()
 MAX_LOG_TICKS = 30   # ticker only shows last 5-8; keep a small tail for late joiners
 
 
+def _row_get(row, key, default=None):
+    """Safe accessor for match rows (dict-like; key may be absent)."""
+    try:
+        v = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if v is None else v
+
+
 def _live_init(mid):
     with LIVE_STATE_LOCK:
-        LIVE_STATE[mid] = {"quips": None, "turn": 0, "log": [], "queue_pos": None}
+        LIVE_STATE[mid] = {"quips": None, "turn": 0, "log": [],
+                           "queue_pos": None, "phase": "queued",
+                           "total_turns": None, "match_length": None,
+                           "seed": None, "started_at": None,
+                           "cancelled": False}
 
 
 def _live_set(mid, **fields):
@@ -176,7 +247,12 @@ def _live_snapshot(mid):
             return None
         # return a shallow copy so caller can serialize without lock
         return {"quips": st["quips"], "turn": st["turn"],
-                "log": list(st["log"]), "queue_pos": st["queue_pos"]}
+                "log": list(st["log"]), "queue_pos": st["queue_pos"],
+                "phase": st.get("phase", "queued"),
+                "total_turns": st.get("total_turns"),
+                "match_length": st.get("match_length"), "seed": st.get("seed"),
+                "started_at": st.get("started_at"),
+                "cancelled": st.get("cancelled", False)}
 
 
 def _live_publish_turn(mid, log_entry, f1, f2, flip):
@@ -214,6 +290,12 @@ def _live_publish_turn(mid, log_entry, f1, f2, flip):
             "damage": round(float(e.get("damage", 0)), 1),
             "sharp":  bool(e.get("sharp")),
         })
+    # Degraded-turn disclosure, live. The decision context that Match writes
+    # per turn carries the `_fallback` flag, so the wait screen can say
+    # "Fighter B used a scripted fallback on turn 4" WHILE the match is still
+    # running instead of only in the post-vote integrity banner. Benchmark
+    # integrity is the whole product; hiding it until the end isn't.
+    dec = log_entry.get("decision") or {}
     tick = {
         "turn":   turn,
         "action_a": _pick_action(f1.name),
@@ -221,6 +303,9 @@ def _live_publish_turn(mid, log_entry, f1, f2, flip):
         "hits":   hits,
         "hp_a":   round(float(f1.hp), 1),
         "hp_b":   round(float(f2.hp), 1),
+        "distance": (dec.get("a") or {}).get("distance"),
+        "fallback_a": bool((dec.get("a") or {}).get("fallback")),
+        "fallback_b": bool((dec.get("b") or {}).get("fallback")),
     }
     _live_append_turn(mid, tick)
 
@@ -267,13 +352,27 @@ def run_simulation(mid):
         # Popping here (not in finally) means we never re-read the key
         # even if the sim somehow got restarted for the same mid.
         byok = MATCH_API_KEYS.pop(mid, None)
+        mode = mm.get("mode") or m.get("mode") or "macro"
+        weapon = mm.get("weapon") or m.get("weapon") or "sword"
+        arena = mm.get("arena") or m.get("arena") or "normal"
+        blindfolded = mm.get("blindfolded") if "blindfolded" in mm else m.get("blindfolded", False)
+        # ---- benchmark spec v1.0 knobs (recorded at request time) ----
+        seed = mm.get("seed", None)
+        if seed is None:
+            seed = _row_get(m, "seed")
+        match_length = mm.get("match_length") or _row_get(m, "match_length") or "full"
+        fallback_policy = (mm.get("fallback_policy")
+                           or _row_get(m, "fallback_policy") or "operational")
         match = Match(slot_left, slot_right, sharp, fx,
                       log_path=os.path.join(store.root, f"log_{mid}.json"),
-                      mode=mm.get("mode", "macro"),
-                      weapon=mm.get("weapon", "sword"),
-                      arena=mm.get("arena", "normal"),
-                      blindfolded=mm.get("blindfolded", False),
-                      api_key=byok)
+                      mode=mode,
+                      weapon=weapon,
+                      arena=arena,
+                      blindfolded=blindfolded,
+                      api_key=byok,
+                      seed=seed,
+                      match_length=match_length,
+                      fallback_policy=fallback_policy)
         # blind mode: hide model identity in the replay itself
         if m["blind"]:
             match.f1.name = match.b1.label = BLIND_NAMES["a"]
@@ -324,6 +423,9 @@ def run_simulation(mid):
         # match is over. Watching len() avoids racing with the PH_SIM ->
         # PH_THINK phase transition.
         last_published = 0
+        _live_set(mid, total_turns=match.max_turns,
+                  match_length=match.match_length,
+                  seed=match.seed, started_at=_t.time())
         def _publish_finalized():
             nonlocal last_published
             # Everything before the last entry is guaranteed finalized.
@@ -334,15 +436,36 @@ def run_simulation(mid):
                 _live_publish_turn(mid, match.log[last_published],
                                    match.f1, match.f2, flip)
                 last_published += 1
+        last_phase = None
         while match.phase != Match.PH_OVER and _t.time() < deadline \
                 and sim_frames < 60 * 60 * 10:
+            # User-initiated cancel (action-plan §13). Checked every frame
+            # while we're waiting on inference; we can't interrupt an
+            # in-flight HTTP call, but we never start the next turn.
+            if store.is_cancelled(mid):
+                store.set_status(mid, "error", "cancelled by user")
+                _obs_bump("matches_cancelled")
+                _live_set(mid, cancelled=True)
+                return
             match.update(1 / 60, False)
             fx.update(1 / 60)
             rec.tick()
             _publish_finalized()
+            if match.phase != last_phase:
+                # Progress-timeline signal for the wait screen: THINKING =
+                # "models are deciding", SIM = "physics resolving". Cheap
+                # (only writes on transition) and it's the difference between
+                # a progress bar the user trusts and a spinner they don't.
+                last_phase = match.phase
+                _live_set(mid, phase=match.phase)
             if match.phase == Match.PH_THINK:
+                # Publish what the user is actually waiting for: "prompting
+                # the models", not a fake progress bar (action-plan §13).
+                _live_set(mid, phase="prompting",
+                          thinking_s=round(_t.time() - match._turn_started_at["1"], 1))
                 _t.sleep(0.02)      # don't burn CPU while LLMs think
             else:
+                _live_set(mid, phase="simulating")
                 sim_frames += 1
         _publish_finalized()   # flush the final turn(s)
         for _ in range(90):
@@ -381,11 +504,19 @@ def run_simulation(mid):
         except Exception as e:
             print(f"[commentary] failed: {e}")
 
+        replay = rec.build()
+        prov = match.build_provenance()
         store.finish_match(mid, side, res["method"], res["turns"],
-                           rec.build(), commentary=commentary)
+                           replay, commentary=commentary, provenance=prov)
+        _obs_bump("matches_done")
+        _obs_latency([prov.get("latency_ms_a"), prov.get("latency_ms_b")])
+        if prov.get("fallback_used"):
+            _obs_bump("matches_with_fallback")
     except Exception as e:
         import traceback
         traceback.print_exc()
+        _obs_bump("matches_error")
+        _obs_error(e, "run_simulation")
         store.set_status(mid, "error", _safe_err(e))
     finally:
         # Free the per-match config dict now that the sim is done. Without
@@ -551,9 +682,9 @@ class MatchReq(BaseModel):
     model_b: str = Field(min_length=1, max_length=120)
     sharp: list[str] = Field(default=["tip"], max_length=4)
     blind: bool = True
-    mode: str = Field(default="macro", max_length=8)    # macro | joint
-    weapon: str = Field(default="sword", max_length=8)  # sword | dagger | spear | flail | bow
-    arena: str = Field(default="normal", max_length=16) # normal | ice | low_gravity
+    mode: Literal["macro", "joint"] = "macro"
+    weapon: Literal["sword", "dagger", "spear", "flail", "bow"] = "sword"
+    arena: Literal["normal", "ice", "low_gravity"] = "normal"
     # Tier S #3: blindfolded variant. When true, build_state() strips
     # derived spatial hints (categorical enemy_is/enemy_height_relative/
     # facing_enemy + my_height/enemy_height/distance) so the model must
@@ -570,10 +701,43 @@ class MatchReq(BaseModel):
     # Length cap is generous — OpenRouter keys are ~48 chars but we allow
     # up to 200 for BYOK from other proxies with longer prefixes.
     api_key: str | None = Field(default=None, max_length=200)
+    # ---- benchmark spec v1.0 ----
+    # sprint=4 / standard=12 / full=24 turns. Sprint exists so a first-time
+    # user can watch a whole fight in ~20s instead of 60-90s.
+    match_length: Literal["sprint", "standard", "full"] = "full"
+    # Seed the RNG + scripted brains so the match is reproducible from the
+    # stored action log. NULL = unseeded.
+    seed: int | None = Field(default=None, ge=0, le=2 ** 31 - 1)
+    # strict = any provider fallback makes the match ranking-ineligible
+    # operational = fallback continues and is recorded (default)
+    # demo = scripted/demo match, never ranked
+    fallback_policy: Literal["strict", "operational", "demo"] = "operational"
+    # Research batches (tools/run_calibration_batch.py) pin the canvas side
+    # assignment so a seeded match is reproducible AND sides are balanced
+    # by design. None (default) = random coin flip at queue time, as
+    # before. False = model_a is green/left; True = model_a is blue/right.
+    # This leaks nothing the requester did not already have: they chose
+    # both models, and `blind=false` already reveals the sides.
+    flip: bool | None = None
 
 
 class VoteReq(BaseModel):
-    choice: str = Field(max_length=8)  # a | b | draw
+    """Multi-axis vote (action-plan §6).
+
+    Only `choice` (the tactical vote) moves a rating. The other axes are
+    collected so the dataset can separate "fought intelligently" from
+    "was fun to watch" — a viewer may prefer a dramatic fighter who made
+    worse decisions, and today that signal is silently discarded.
+    """
+    choice: Literal["a", "b", "draw"]
+    execution: Literal["a", "b", "draw"] | None = None
+    entertainment: Literal["a", "b", "draw"] | None = None
+    deserved: Literal["a", "b", "draw"] | None = None
+    confidence: int | None = Field(default=None, ge=1, le=5)
+    # §6 expert track: self-declared evaluator tier. Not verified (there is
+    # no identity here), which is exactly why it is *recorded and separable*
+    # rather than used to weight or override anyone's vote.
+    voter_tier: Literal["casual", "expert"] = "casual"
 
 
 @app.get("/api/version")
@@ -619,9 +783,71 @@ def health():
     }
 
 
+def _provider_of(mid: str) -> str:
+    """Best-effort upstream provider for a roster id.
+
+    Order: explicit host table in brains._PROVIDER_HOST (hand-curated from
+    OpenRouter's per-model host attribution) -> the id's own prefix. Used by
+    /api/models so the setup UI can say WHERE a turn is actually served from
+    instead of making the user guess why one model is slow.
+    """
+    from brains import _PROVIDER_HOST
+    if mid.startswith(("mock:", "bot:")):
+        return "scripted"
+    if mid.startswith("groq:"):
+        return "groq"
+    host = _PROVIDER_HOST.get(mid)
+    if host:
+        return host
+    return "openrouter"
+
+
+def _model_meta(mid: str, name: str) -> dict:
+    """The setup-screen metadata the UI needs to set expectations.
+
+    Every field is derived from something the backend already knows — no
+    hand-maintained copy that can drift:
+      provider     brains._PROVIDER_HOST / id prefix
+      tier         ':free' suffix -> free, mock:/bot: -> no-api, else paid
+      est_turn_s   brains._timeout_for(): the adaptive per-turn budget this
+                   model actually gets (10s tiny / 18s mid / 25s reasoning).
+                   Labelled in the UI as an upper bound per turn, not a
+                   promise, because that is exactly what it is.
+      reasoning    the same signal _timeout_for uses to widen the budget
+      cooldown_s   seconds left on the 429 circuit breaker (0 = not throttled)
+    """
+    import time as _t
+    from brains import _COOLDOWN, _timeout_for
+    no_api = mid.startswith(("mock:", "bot:"))
+    # The scripted baselines only speak macro: bots.py has no joint support,
+    # so in a joint match they get driven by the macro executor. Say so at
+    # the point of choice instead of letting the user find out mid-fight.
+    # mock:* brains DO have a joint form (joint_mode.MockJointBrain).
+    modes = ["macro"] if mid.startswith("bot:") else ["macro", "joint"]
+    low = mid.lower()
+    reasoning = any(t in low for t in ("reasoning", "thinking", "r1", "-pro"))
+    return {
+        "id": mid,
+        "name": name,
+        "provider": _provider_of(mid),
+        "tier": "no-api" if no_api else ("free" if mid.endswith(":free") else "paid"),
+        "est_turn_s": 0 if no_api else int(round(_timeout_for(mid))),
+        "reasoning": bool(reasoning and not no_api),
+        "no_api": no_api,
+        "modes": modes,
+        "cooldown_s": int(max(0.0, _COOLDOWN.get(mid, 0) - _t.time())),
+    }
+
+
 @app.get("/api/models")
 def models():
-    return [{"id": k, "name": v} for k, v in C.ARENA_MODELS.items()]
+    """Roster with per-model provider / latency / availability metadata.
+
+    The frontend renders `provider · up to Ns per turn · available` next to
+    each picker so a 60-90s match doesn't read as a hang, and so a model
+    currently in 429 cooldown is visibly marked before the user picks it.
+    """
+    return [_model_meta(k, v) for k, v in C.ARENA_MODELS.items()]
 
 
 # ----------------------------------------------------------------------
@@ -699,10 +925,218 @@ def debug_openrouter_ping(model: str = "meta-llama/llama-3.3-70b-instruct:free")
         return {"ok": False, "exception": str(e)[:200]}
 
 
+@app.get("/api/benchmark/spec")
+def benchmark_spec():
+    """The frozen benchmark specification (action-plan §1).
+
+    Returns the full ruleset plus a `fingerprint`. Two matches with
+    different fingerprints are NOT comparable — dataset consumers should
+    segment on it.
+    """
+    from benchmark import spec, fingerprint, MATCH_LENGTHS, FALLBACK_POLICIES
+    doc = spec()
+    return {**doc, "fingerprint": fingerprint(doc)}
+
+
+@app.get("/api/integrity/{mid}")
+def match_integrity(mid: str):
+    """Replay Integrity audit for one match (action-plan §8).
+
+    Verifies the replay is version-pinned, seeded, has a complete action
+    log, and that recorded HP never increases. Returns per-check booleans
+    so the UI can show exactly what passed.
+    """
+    _validate_id(mid)
+    from benchmark import verify_replay
+    r = store.get_replay(mid)
+    if not r:
+        raise HTTPException(404, "replay not ready")
+    rep = verify_replay(r)
+    # Adversarial / anti-gaming scan (action-plan §7): label matches won
+    # through stalling, spamming, boundary camping or injected output
+    # instead of treating a win as evidence of tactical skill.
+    try:
+        from anti_gaming import scan_replay
+        rep["anti_gaming"] = scan_replay(r)
+    except Exception as e:
+        rep["anti_gaming"] = {"error": str(e)[:160]}
+    m = store.get_match(mid) or {}
+    rep["match_id"] = mid
+    rep["ranking_eligible"] = bool(_row_get(m, "ranking_eligible", 1))
+    rep["fallback_policy"] = _row_get(m, "fallback_policy")
+    return rep
+
+
+@app.get("/api/metrics")
+def metrics():
+    """Operational metrics (action-plan §19) — status page + alerting.
+
+    Combines the durable SQLite rollup (storage.metrics_snapshot) with
+    in-process counters (queue depth, uptime, recent latency ring).
+    """
+    try:
+        snap = store.metrics_snapshot()
+    except Exception as e:
+        _obs_error(e, "metrics_snapshot")
+        snap = {}
+    with OBS_LOCK:
+        lats = sorted(OBS["turn_latency_ms"])
+        obs = {k: v for k, v in OBS.items() if k != "turn_latency_ms"}
+        obs["provider_errors"] = dict(OBS["provider_errors"])
+    if lats:
+        obs["turn_latency_ms"] = {
+            "n": len(lats),
+            "p50": round(lats[len(lats) // 2], 1),
+            "p95": round(lats[min(len(lats) - 1, int(0.95 * len(lats)))], 1),
+            "max": round(lats[-1], 1),
+        }
+    return {
+        "uptime_s": round(time.time() - OBS["started_at"], 1),
+        "version": VERSION,
+        "queue": {"matches": jobs.qsize(), "tournaments": tournament_jobs.qsize()},
+        "storage": snap,
+        "process": obs,
+        # Thresholds the action plan asks us to alert on (§19). Surfaced
+        # here so a status page can render green/amber/red without
+        # hard-coding them client-side.
+        "alert_thresholds": {
+            "match_failure_rate": 0.05,
+            "vote_failure_rate": 0.01,
+            "fallback_rate": 0.25,
+        },
+    }
+
+
+@app.get("/api/status")
+def status_page_data():
+    """Public status payload (action-plan §35): are we actually up?"""
+    from benchmark import BENCHMARK_VERSION, PHYSICS_VERSION, SPEC_FINGERPRINT
+    from brains import PROMPT_VERSION
+    providers = {
+        "openrouter": bool(C.OPENROUTER_API_KEY),
+        "groq": bool(C.GROQ_API_KEY),
+        "openai": bool(C.OPENAI_API_KEY),
+        "gemini": bool(C.GEMINI_API_KEY),
+    }
+    try:
+        snap = store.metrics_snapshot()
+        rates = snap.get("rates", {})
+    except Exception:
+        rates = {}
+    # Evidence level of the whole dataset, so a status page can show the
+    # "rankings are scripted / insufficient" banner from a single call.
+    try:
+        _, dq = _quality_cell(None, None, None, None, None)
+    except Exception:
+        dq = None
+    def _level(rate, warn, bad):
+        if rate is None:
+            return "unknown"
+        return "down" if rate >= bad else ("degraded" if rate >= warn else "ok")
+    # Replay storage: can the most recent finished match actually be
+    # replayed? A database that says "done" while the replay blob is gone
+    # is the failure mode users hit as "replay stuck loading".
+    replay_state = "unknown"
+    try:
+        recent = store.recent_matches(limit=1)
+        if not recent:
+            replay_state = "ok (no matches yet)"
+        else:
+            replay_state = "ok" if store.get_replay(recent[0]["id"]) \
+                else "degraded (latest replay missing)"
+    except Exception as e:                       # noqa: BLE001
+        replay_state = f"down ({_safe_err(e)[:60]})"
+    # Degraded modes the operator should know about, in plain words.
+    degraded = []
+    if not any(providers.values()):
+        degraded.append("no provider key configured — only scripted "
+                        "(mock:/bot:) fighters can run; every match is a "
+                        "scripted baseline")
+    if dq and dq.get("evidence_level") == "scripted_only":
+        degraded.append("rankings rest on scripted baselines only")
+    elif dq and dq.get("evidence_level") == "insufficient_real":
+        degraded.append("fewer than the board minimum of real-provider "
+                        "ranked matches — rankings are exploratory")
+    fb = rates.get("fallback")
+    if fb is not None and fb >= 0.25:
+        degraded.append(f"fallback rate {fb:.0%} (threshold 25%)")
+    fr = rates.get("failure_24h")
+    if fr is not None and fr >= 0.05:
+        degraded.append(f"match failure rate {fr:.0%} in the last 24 h")
+    if jobs.qsize() >= 5:
+        degraded.append(f"queue depth {jobs.qsize()}")
+    if not replay_state.startswith("ok"):
+        degraded.append(f"replay storage: {replay_state}")
+    with OBS_LOCK:
+        last_error = OBS.get("last_error")
+        last_error_at = OBS.get("last_error_at")
+        provider_errors = dict(OBS.get("provider_errors") or {})
+    overall = "ok"
+    if any(v.startswith("down") for v in (replay_state,)) or \
+            _level(fr, 0.05, 0.20) == "down":
+        overall = "down"
+    elif degraded:
+        overall = "degraded"
+    return {
+        "status": overall,
+        "version": VERSION,
+        "benchmark_version": BENCHMARK_VERSION,
+        "physics_version": PHYSICS_VERSION,
+        "prompt_version": PROMPT_VERSION,
+        "spec_fingerprint": SPEC_FINGERPRINT,
+        "components": {
+            "frontend": "ok",          # this response came through the API
+            "backend": "ok",
+            "providers": ("ok" if any(providers.values())
+                          else "degraded (no provider key configured)"),
+            "queue": ("ok" if jobs.qsize() < 5 else "degraded"),
+            "database": "ok",
+            "replays": replay_state,
+        },
+        "providers_configured": providers,
+        "provider_errors": provider_errors,
+        "queue_depth": jobs.qsize(),
+        # Last incident = last recorded backend error (bounded text, URLs
+        # and tokens scrubbed by _safe_err at the source). None = clean
+        # since process start.
+        "last_incident": ({"at": last_error_at, "what": last_error}
+                          if last_error else None),
+        "degraded_modes": degraded,
+        "failure_rate_24h": rates.get("failure_24h"),
+        "completion_rate": rates.get("completion"),
+        "health": {
+            "match_failures": _level(rates.get("failure_24h"), 0.05, 0.20),
+            "fallbacks": _level(rates.get("fallback"), 0.25, 0.60),
+        },
+        "data_quality": ({"evidence_level": dq["evidence_level"],
+                          "matches": dq["matches"],
+                          "real_provider_matches": dq["real_provider_matches"],
+                          "real_ranked_matches": dq["real_ranked_matches"],
+                          "scripted_matches": dq["scripted_matches"],
+                          "token_coverage": dq["token_coverage"],
+                          "last_match_at": dq["last_match_at"],
+                          "note": dq["note"]} if dq else None),
+        "uptime_s": round(time.time() - OBS["started_at"], 1),
+    }
+
+
 @app.get("/api/weapons")
 def weapons_list():
-    from weapons import WEAPONS, WEAPON_ZONES
-    return [{"id": w, "zones": WEAPON_ZONES[w]} for w in WEAPONS]
+    """Weapon catalogue with empirical balance status (action-plan §9).
+
+    `balance.status` is:
+      * "balanced"    — mirrored bot batch is statistically indistinguishable
+                        from a 50/50 split
+      * "provisional" — point estimate is off 50/50 but the 95% CI still
+                        contains it; widen the batch before claiming anything
+      * "asymmetric"  — 95% CI excludes 50/50: the configuration itself
+                        decides matches, so results are NOT a like-for-like
+                        model comparison
+    """
+    from weapons import WEAPONS, WEAPON_ZONES, WEAPON_BALANCE
+    return [{"id": w, "zones": WEAPON_ZONES[w],
+             "balance": WEAPON_BALANCE.get(w, {"status": "unmeasured"})}
+            for w in WEAPONS]
 
 
 import re
@@ -738,17 +1172,26 @@ def create_match(req: MatchReq, request: Request):
         security.check_model_spend_policy(mdl, C.ARENA_MODELS)
     security.check_match_allowed(request, jobs.qsize())
     from weapons import WEAPONS, WEAPON_ZONES
-    weapon = req.weapon if req.weapon in WEAPONS else "sword"
-    sharp = [z for z in req.sharp if z in WEAPON_ZONES[weapon]] \
-        or [WEAPON_ZONES[weapon][0]]
-    mode = req.mode if req.mode in ("macro", "joint") else "macro"
-    arena = req.arena if req.arena in ("normal", "ice", "low_gravity") else "normal"
+    if req.weapon not in WEAPONS:
+        raise HTTPException(400, f"invalid weapon '{req.weapon}'. Valid weapons: {WEAPONS}")
+    valid_zones = WEAPON_ZONES[req.weapon]
+    if not req.sharp or not all(z in valid_zones for z in req.sharp):
+        raise HTTPException(400, f"invalid sharp zones {req.sharp} for weapon '{req.weapon}'. Valid zones: {valid_zones}")
+    weapon = req.weapon
+    sharp = req.sharp
+    mode = req.mode
+    arena = req.arena
     blindfolded = bool(req.blindfolded)
     mid = store.create_match(req.model_a, req.model_b, sharp, req.blind,
                              weapon, mode=mode, arena=arena,
-                             blindfolded=blindfolded)
+                             blindfolded=blindfolded,
+                             seed=req.seed, match_length=req.match_length,
+                             fallback_policy=req.fallback_policy)
     MATCH_MODES[mid] = {"mode": mode, "weapon": weapon, "arena": arena,
-                        "blindfolded": blindfolded}
+                        "blindfolded": blindfolded, "seed": req.seed,
+                        "match_length": req.match_length,
+                        "fallback_policy": req.fallback_policy}
+    _obs_bump("matches_created")
     # BYOK: stash the user-supplied key in-memory for the worker to
     # consume. Basic sanity check (OR keys start with 'sk-or-') so we
     # don't accept obvious garbage; anything else with the sk- prefix
@@ -761,10 +1204,15 @@ def create_match(req: MatchReq, request: Request):
     # the worker that picks up the job can't pre-leak which colored
     # ragdoll the user's picks correspond to.
     import random as _r
-    MATCH_FLIP[mid] = _r.random() < 0.5
+    MATCH_FLIP[mid] = bool(req.flip) if req.flip is not None \
+        else _r.random() < 0.5
     jobs.put(mid)
     return {"match_id": mid, "status": "queued", "mode": mode,
-            "weapon": weapon, "arena": arena}
+            "weapon": weapon, "arena": arena,
+            "match_length": req.match_length, "seed": req.seed,
+            "fallback_policy": req.fallback_policy,
+            "flip_pinned": req.flip is not None,
+            "max_turns": max_turns_for(req.match_length)}
 
 
 @app.get("/api/match/{mid}")
@@ -779,6 +1227,20 @@ def match_status(mid: str):
     # ~5-15s in), queue position, and a spoiler-safe combat ticker. All
     # blind — canvas-side keys only, no model names — so we can safely
     # show these to the user BEFORE they cast their vote.
+    # Benchmark provenance (spec v1.0) — always exposed, so a viewer can
+    # see whether this match is a ranked, seeded, fully-LLM-controlled run.
+    out["benchmark"] = {
+        "benchmark_version": _row_get(m, "benchmark_version"),
+        "physics_version": _row_get(m, "physics_version"),
+        "prompt_version": _row_get(m, "prompt_version"),
+        "spec_fingerprint": _row_get(m, "spec_fingerprint"),
+        "seed": _row_get(m, "seed"),
+        "match_length": _row_get(m, "match_length"),
+        "max_turns": _row_get(m, "max_turns"),
+        "fallback_policy": _row_get(m, "fallback_policy"),
+        "ranking_eligible": bool(_row_get(m, "ranking_eligible", 1)),
+        "fallback_used": bool(_row_get(m, "fallback_used", 0)),
+    }
     if m["status"] in ("queued", "running"):
         snap = _live_snapshot(mid)
         if snap is None and m["status"] == "queued":
@@ -786,13 +1248,63 @@ def match_status(mid: str):
             # position from the FIFO's current size. Not exact under
             # concurrent enqueues, but plenty good enough for the UI's
             # "N ahead of you" text.
-            snap = {"quips": None, "turn": 0, "log": [],
+            snap = {"quips": None, "turn": 0, "log": [], "phase": "QUEUED",
                     "queue_pos": max(0, jobs.qsize() - 1)}
         if snap is not None:
+            # Honest progress: what phase we're in, how far through the
+            # turn budget we are, and how long we've been at it. No fake
+            # percentage — an LLM call has no progress bar (§13).
+            total = snap.get("total_turns") or max_turns_for(
+                _row_get(m, "match_length"))
+            turn = snap.get("turn") or 0
+            started = snap.get("started_at")
             out["live"] = snap
+            out["progress"] = {
+                "phase": snap.get("phase") or ("queued"
+                                               if m["status"] == "queued"
+                                               else "starting"),
+                "turn": turn,
+                "total_turns": total,
+                "percent": (round(100.0 * turn / total, 1)
+                            if total else None),
+                "elapsed_s": (round(time.time() - started, 1)
+                              if started else None),
+                "eta_s": None,
+                "queue_pos": snap.get("queue_pos"),
+                "cancelled": snap.get("cancelled", False),
+            }
+            # Rough ETA: measured per-turn cost so far x turns remaining.
+            # Only shown once at least one turn has landed — an estimate
+            # before that is a guess dressed up as data.
+            if started and turn > 0:
+                per_turn = (time.time() - started) / turn
+                out["progress"]["eta_s"] = round(max(0.0, per_turn
+                                                     * (total - turn)), 1)
     if m["status"] == "done":
         out.update({"engine_winner_side": m["winner_side"],
                     "method": m["method"], "turns": m["turns"]})
+        fb_a = int(m.get("fallback_turns_a") or 0)
+        fb_b = int(m.get("fallback_turns_b") or 0)
+        t_turns = int(m.get("turns") or 0)
+        out["evaluation_integrity"] = {
+            "fully_llm_controlled": (fb_a == 0 and fb_b == 0),
+            "fallback_turns_a": fb_a,
+            "fallback_turns_b": fb_b,
+            "total_turns": t_turns,
+        }
+        out["integrity"] = {
+            "fallback_turns_a": int(_row_get(m, "fallback_turns_a") or 0),
+            "fallback_turns_b": int(_row_get(m, "fallback_turns_b") or 0),
+            "invalid_actions_a": int(_row_get(m, "invalid_actions_a") or 0),
+            "invalid_actions_b": int(_row_get(m, "invalid_actions_b") or 0),
+            "latency_ms_a": _row_get(m, "latency_ms_a"),
+            "latency_ms_b": _row_get(m, "latency_ms_b"),
+            "model_used_a": _row_get(m, "model_used_a"),
+            "model_used_b": _row_get(m, "model_used_b"),
+            "provider_used_a": _row_get(m, "provider_used_a"),
+            "provider_used_b": _row_get(m, "provider_used_b"),
+            "completed_turns": int(_row_get(m, "turns") or 0),
+        }
         if not m["blind"] or m["voted"]:
             # Expose BOTH axes:
             #   * model_a / model_b        = user's original pick order (Slot 1/2)
@@ -813,24 +1325,64 @@ def match_status(mid: str):
     return out
 
 
+@app.post("/api/match/{mid}/cancel")
+def cancel_match(mid: str):
+    """Cancel a queued/running match (action-plan §13).
+
+    Sets a flag the worker polls between turns; we can't abort an API call
+    that's already in flight, so the match stops at the next turn
+    boundary. Finished matches are immutable — they're published data.
+    """
+    _validate_id(mid)
+    m = store.get_match(mid)
+    if not m:
+        raise HTTPException(404, "no such match")
+    if m["status"] in ("done", "error"):
+        return {"cancelled": False, "reason": f"match already {m['status']}"}
+    try:
+        ok = store.cancel_match(mid)
+    except AttributeError:      # storage backend without cancel support
+        raise HTTPException(501, "cancel not supported by this backend")
+    return {"cancelled": bool(ok), "status": "error",
+            "detail": "stopping at the next turn boundary"}
+
+
 @app.get("/api/replay/{mid}")
 def replay(mid: str):
     _validate_id(mid)
     r = store.get_replay(mid)
     if not r:
+        _obs_bump("replay_errors")
         raise HTTPException(404, "replay not ready")
+    _obs_bump("replays_served")
     return JSONResponse(r)
 
 
 @app.post("/api/vote/{mid}")
 def vote(mid: str, req: VoteReq, request: Request):
+    """Cast a vote. `choice` is the TACTICAL vote and is the only axis
+    that moves a rating; execution / entertainment / deserved are stored
+    alongside it for research use (action-plan §6)."""
     _validate_id(mid)
     security.check_vote_allowed(request)
     if req.choice not in ("a", "b", "draw"):
         raise HTTPException(400, "choice must be a|b|draw")
-    res = store.record_vote(mid, req.choice)
+    axes = {"execution": req.execution,
+            "entertainment": req.entertainment,
+            "deserved": req.deserved}
+    try:
+        res = store.record_vote(mid, req.choice, axes=axes,
+                                confidence=req.confidence,
+                                voter_tier=req.voter_tier)
+    except TypeError:
+        # Drop-in storage backends that haven't implemented multi-axis
+        # votes yet: fall back to the tactical vote only rather than
+        # losing the vote entirely.
+        res = store.record_vote(mid, req.choice)
     if res is None:
+        _obs_bump("vote_errors")
         raise HTTPException(400, "match not finished or not found")
+    _obs_bump("votes_recorded")
     # add display names — for both the user's original pick axis AND the
     # canvas (green/blue) axis so the UI can say "Fighter A (green) was X".
     all_models = {res["model_a"], res["model_b"],
@@ -878,6 +1430,93 @@ def _wilson_ci(wins: int, losses: int, draws: int, z: float = 1.96):
     return p_hat, lo, hi
 
 
+# ----------------------------------------------------------------------
+# Data-quality labels (next-step priority 2). Every ranking row states
+# what kind of evidence produced it — scripted baseline, mixed provider,
+# or real provider — plus fallback / missing-token counts, last-updated
+# date and benchmark version. A rating without that context reads as a
+# model result even when nothing but scripted brains ever played.
+# ----------------------------------------------------------------------
+# Keys copied from the per-model rollup onto each ranking row. The full
+# record stays available at /api/data_quality.
+_DQ_ROW_KEYS = (
+    "evidence", "evidence_label", "status", "status_label",
+    "real_provider_matches", "mixed_provider_matches", "scripted_matches",
+    "ranking_eligible_matches", "real_ranked_matches", "fallback_matches",
+    "token_missing_matches", "last_match_at", "benchmark_versions",
+)
+
+
+def _quality_cell(sharp, weapon, mode, arena, blindfolded):
+    """(per-model rollup, board summary) for one leaderboard cell.
+
+    Never raises: a storage backend without quality_rows() (or a failed
+    query) yields empty labels rather than a 500 on the leaderboard.
+    """
+    import data_quality as DQ
+    try:
+        rows = store.quality_rows(sharp, weapon, mode, arena, blindfolded)
+    except Exception as e:                      # noqa: BLE001
+        print(f"[data_quality] unavailable: {e}")
+        rows = []
+    return DQ.rollup_models(rows), DQ.summary(rows)
+
+
+def _label_rows(rows, rollup):
+    import data_quality as DQ
+    for r in rows:
+        rec = DQ.model_record(rollup, r.get("model"))
+        r["data_quality"] = {k: rec.get(k) for k in _DQ_ROW_KEYS}
+    return rows
+
+
+@app.get("/api/data_quality")
+def data_quality(sharp: str | None = None, weapon: str | None = None,
+                 mode: str | None = None, arena: str | None = None,
+                 blindfolded: bool | None = None):
+    """Data-quality report for a leaderboard cell (next-step priority 2).
+
+    Distinguishes *infrastructure validated* from *model conclusions
+    validated*. `summary.evidence_level` is what the UI banner reads:
+
+        scripted_only      no real-provider match exists in this cell
+        insufficient_real  some exist, but too few are ranking-eligible
+        real               enough real-provider ranked matches to discuss
+                           model behaviour (pairs still need to separate)
+
+    `models` carries, per model: matches by evidence class, ranking-
+    eligible count, fallback count, missing-token count, last match date
+    and the benchmark versions it played under. Declared bots are labelled
+    `reference_baseline`; a requested model whose slot was served by a
+    scripted stand-in counts as scripted here, because the label describes
+    the decisions the data actually contains.
+    """
+    from weapons import WEAPONS
+    if weapon is not None and weapon not in WEAPONS:
+        raise HTTPException(400, f"weapon must be one of {WEAPONS}")
+    if mode is not None and mode not in ("macro", "joint"):
+        raise HTTPException(400, "mode must be 'macro' or 'joint'")
+    if arena is not None and arena not in ("normal", "ice", "low_gravity"):
+        raise HTTPException(400, "arena must be 'normal', 'ice' or 'low_gravity'")
+    import data_quality as DQ
+    rollup, summ = _quality_cell(sharp, weapon, mode, arena, blindfolded)
+    models = []
+    for rec in sorted(rollup.values(), key=lambda m: -m["matches"]):
+        rec = dict(rec)
+        rec["name"] = C.ARENA_MODELS.get(rec["model"], rec["model"])
+        models.append(rec)
+    from brains import PROMPT_VERSION
+    return {"benchmark_version": BENCHMARK_VERSION,
+            "physics_version": PHYSICS_SPEC_VERSION,
+            "prompt_version": PROMPT_VERSION,
+            "spec_fingerprint": SPEC_FINGERPRINT,
+            "generated_at": time.time(),
+            "labels": {"evidence": DQ.EVIDENCE_LABELS,
+                       "status": DQ.STATUS_LABELS},
+            "summary": summ,
+            "models": models}
+
+
 @app.get("/api/leaderboard")
 def leaderboard(sharp: str | None = None, weapon: str | None = None,
                 mode: str | None = None, arena: str | None = None,
@@ -902,9 +1541,12 @@ def leaderboard(sharp: str | None = None, weapon: str | None = None,
       * prompt_version — the eval prompt schema that produced this Elo
     """
     from brains import PROMPT_VERSION
+    from weapons import WEAPONS
     # Validate the enum-ish filters — no need to hit the storage layer
     # with a garbage value, and 400ing bad input is cheaper than a wide
     # empty result set later.
+    if weapon is not None and weapon not in WEAPONS:
+        raise HTTPException(400, f"weapon must be one of {WEAPONS}")
     if mode is not None and mode not in ("macro", "joint"):
         raise HTTPException(400, "mode must be 'macro' or 'joint'")
     if arena is not None and arena not in ("normal", "ice", "low_gravity"):
@@ -926,7 +1568,19 @@ def leaderboard(sharp: str | None = None, weapon: str | None = None,
         # point every row here was earned under the CURRENT version,
         # so tagging with today's version is truthful.
         r["prompt_version"] = PROMPT_VERSION
-    return rows
+        # benchmark spec v1.0: every rating row states which ruleset it
+        # was earned under and whether it has enough data to be ranked.
+        # `provisional` is what the UI greys out; `eligible` is the hard
+        # floor below which we refuse to call it a ranking at all.
+        r["benchmark_version"] = BENCH_SPEC_VERSION
+        r["physics_version"] = PHYSICS_SPEC_VERSION
+        r["provisional"] = n < 10
+        r["eligible"] = n >= 5
+    # Data-quality labels: who actually made the decisions behind this
+    # rating (scripted / mixed / real provider), fallback and missing-token
+    # counts, last match date. See /api/data_quality.
+    rollup, _ = _quality_cell(sharp, weapon, mode, arena, blindfolded)
+    return _label_rows(rows, rollup)
 
 
 @app.get("/api/head_to_head")
@@ -954,10 +1608,10 @@ def head_to_head(a: str, b: str):
 class TournamentReq(BaseModel):
     name:   str = Field(default="Untitled Bracket", min_length=1, max_length=80)
     models: list[str] = Field(min_length=4, max_length=8)
-    weapon: str = Field(default="sword", max_length=8)
+    weapon: Literal["sword", "dagger", "spear", "flail", "bow"] = "sword"
     sharp:  list[str] = Field(default=["tip"], max_length=4)
-    arena:  str = Field(default="normal", max_length=16)
-    mode:   str = Field(default="macro", max_length=8)
+    arena:  Literal["normal", "ice", "low_gravity"] = "normal"
+    mode:   Literal["macro", "joint"] = "macro"
 
 
 @app.post("/api/tournament")
@@ -976,11 +1630,15 @@ def create_tournament(req: TournamentReq, request: Request):
         raise HTTPException(400, "duplicate model entries not allowed")
 
     from weapons import WEAPONS, WEAPON_ZONES
-    weapon = req.weapon if req.weapon in WEAPONS else "sword"
-    sharp  = [z for z in req.sharp if z in WEAPON_ZONES[weapon]] \
-             or [WEAPON_ZONES[weapon][0]]
-    arena  = req.arena if req.arena in ("normal", "ice", "low_gravity") else "normal"
-    mode   = req.mode  if req.mode  in ("macro", "joint")               else "macro"
+    if req.weapon not in WEAPONS:
+        raise HTTPException(400, f"invalid weapon '{req.weapon}'. Valid weapons: {WEAPONS}")
+    valid_zones = WEAPON_ZONES[req.weapon]
+    if not req.sharp or not all(z in valid_zones for z in req.sharp):
+        raise HTTPException(400, f"invalid sharp zones {req.sharp} for weapon '{req.weapon}'. Valid zones: {valid_zones}")
+    weapon = req.weapon
+    sharp  = req.sharp
+    arena  = req.arena
+    mode   = req.mode
 
     tid = store.create_tournament(req.name, req.models, weapon, sharp,
                                   arena, mode)
@@ -1030,6 +1688,9 @@ def leaderboard_objective(sharp: str | None = None, weapon: str | None = None,
 
     Rows sorted by damage_per_turn desc by default; frontend can re-sort.
     """
+    from weapons import WEAPONS
+    if weapon is not None and weapon not in WEAPONS:
+        raise HTTPException(400, f"weapon must be one of {WEAPONS}")
     if mode is not None and mode not in ("macro", "joint"):
         raise HTTPException(400, "mode must be 'macro' or 'joint'")
     if arena is not None and arena not in ("normal", "ice", "low_gravity"):
@@ -1037,7 +1698,157 @@ def leaderboard_objective(sharp: str | None = None, weapon: str | None = None,
     rows = store.objective_leaderboard(sharp, weapon, mode, arena, blindfolded)
     for r in rows:
         r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
-    return rows
+    rollup, _ = _quality_cell(sharp, weapon, mode, arena, blindfolded)
+    return _label_rows(rows, rollup)
+
+
+@app.get("/api/leaderboard/bradley_terry")
+def leaderboard_bradley_terry(sharp: str | None = None,
+                              weapon: str | None = None,
+                              mode: str | None = None,
+                              arena: str | None = None,
+                              blindfolded: bool | None = None,
+                              bootstraps: int = 200,
+                              tier: str | None = None):
+    """Uncertainty-aware ranking (action-plan §5).
+
+    Elo is a good live scoreboard and a weak scientific claim: it has no
+    confidence interval, it is order-dependent, and it cannot say "we don't
+    know yet". This endpoint fits a Bradley-Terry model (with Davidson ties)
+    by maximum likelihood over ALL voted matches in the cell at once, and
+    reports a bootstrap 95% interval per model.
+
+    Because it refits the whole match set rather than updating sequentially,
+    two models with the same record get the same rating regardless of the
+    order the matches happened to arrive in — which Elo does not guarantee.
+
+    Read the output as: `rating` is the point estimate on an Elo-like scale
+    (only for readability — it is NOT Elo), and [ci_low, ci_high] is where
+    the model plausibly sits. Overlapping intervals mean "not separable",
+    and the UI says so rather than implying an ordering that isn't there.
+    """
+    from ratings import fit_with_ci, preference_pairs_from_votes
+    from weapons import WEAPONS
+    if weapon is not None and weapon not in WEAPONS:
+        raise HTTPException(400, f"weapon must be one of {WEAPONS}")
+    if mode is not None and mode not in ("macro", "joint"):
+        raise HTTPException(400, "mode must be 'macro' or 'joint'")
+    if arena is not None and arena not in ("normal", "ice", "low_gravity"):
+        raise HTTPException(400, "arena must be 'normal', 'ice' or 'low_gravity'")
+    if tier is not None and tier not in ("casual", "expert"):
+        raise HTTPException(400, "tier must be 'casual' or 'expert'")
+    bootstraps = max(0, min(int(bootstraps or 0), 1000))
+
+    rows = store.preference_pairs(sharp, weapon, mode, arena, blindfolded,
+                                  tier)
+    pairs = preference_pairs_from_votes(rows)
+    out = fit_with_ci(pairs, bootstraps=bootstraps)
+    for r in out:
+        r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
+    rollup, summ = _quality_cell(sharp, weapon, mode, arena, blindfolded)
+    _label_rows(out, rollup)
+    return {"benchmark_version": BENCHMARK_VERSION,
+            "model": "bradley-terry-davidson",
+            "scale": "elo-like (400/ln10 per logit, centred on 1000)",
+            "comparisons": len(pairs),
+            "bootstraps": bootstraps,
+            "voter_tier": tier or "all",
+            "data_quality": summ,
+            "rows": out}
+
+
+@app.get("/api/model_stats")
+def model_stats(sharp: str | None = None, weapon: str | None = None,
+                mode: str | None = None, arena: str | None = None,
+                blindfolded: bool | None = None):
+    """Full per-model metric table (action-plan §5).
+
+    Every number the plan asks to publish beside a rating: win rate,
+    human preference rate, damage per turn, hit rate, lethal rate,
+    survival rate, timeout rate, invalid-action rate, decision latency,
+    fallback rate, and sample size. `/api/leaderboard/objective` remains as
+    the smaller tab the UI already renders.
+    """
+    from weapons import WEAPONS
+    if weapon is not None and weapon not in WEAPONS:
+        raise HTTPException(400, f"weapon must be one of {WEAPONS}")
+    if mode is not None and mode not in ("macro", "joint"):
+        raise HTTPException(400, "mode must be 'macro' or 'joint'")
+    if arena is not None and arena not in ("normal", "ice", "low_gravity"):
+        raise HTTPException(400, "arena must be 'normal', 'ice' or 'low_gravity'")
+    rows = store.model_stats(sharp, weapon, mode, arena, blindfolded)
+    for r in rows:
+        r["name"] = C.ARENA_MODELS.get(r["model"], r["model"])
+    rollup, summ = _quality_cell(sharp, weapon, mode, arena, blindfolded)
+    _label_rows(rows, rollup)
+    return {"benchmark_version": BENCHMARK_VERSION,
+            "data_quality": summ, "rows": rows}
+
+
+@app.get("/api/events")
+def list_events(past: int = 3, future: int = 4, bootstraps: int = 100):
+    """Recurring event calendar + archive of decided champions (§31).
+
+    The schedule is derived from `stickblade/events.py` — there is no table
+    to fall out of sync and no cron that can silently stop. Standings come
+    from the same Bradley-Terry estimator as the leaderboard, and an event
+    with too little data reports *why* it is undecided rather than naming a
+    winner anyway.
+    """
+    from events import calendar as _calendar, champions as _champions
+    past = max(0, min(int(past or 0), 24))
+    future = max(0, min(int(future or 0), 24))
+    bootstraps = max(0, min(int(bootstraps or 0), 500))
+    cal = _calendar(store, past=past, future=future, bootstraps=bootstraps)
+    return {"benchmark_version": BENCHMARK_VERSION,
+            "events": cal,
+            "champions": _champions(store, bootstraps=min(bootstraps, 100))}
+
+
+@app.get("/api/events/{event_id}")
+def event_detail(event_id: str, past: int = 6, bootstraps: int = 200):
+    """One event's windows and standings (§31)."""
+    from events import EVENTS, calendar as _calendar
+    if not any(e["id"] == event_id for e in EVENTS):
+        raise HTTPException(404, f"unknown event: {event_id}")
+    past = max(0, min(int(past or 0), 60))
+    bootstraps = max(0, min(int(bootstraps or 0), 500))
+    cal = _calendar(store, past=past, future=1, bootstraps=bootstraps)
+    windows = [c for c in cal if c["event_id"] == event_id]
+    meta = next(e for e in EVENTS if e["id"] == event_id)
+    return {"benchmark_version": BENCHMARK_VERSION,
+            "event": {k: v for k, v in meta.items() if k != "cadence"},
+            "windows": windows}
+
+
+@app.get("/api/costs")
+def costs(days: int = 30):
+    """Measured operating cost + budget state (action-plan §33).
+
+    Tokens come from the providers' own usage blocks, accumulated across
+    retries and buddy fallbacks, so a match that degraded still reports
+    what it cost. If any billable match reported no usage, `complete` is
+    false and every figure is a **lower bound** — unreported is never
+    treated as free.
+    """
+    from costs import rollup, budget_state, budgets, ACCESS_TIERS
+    import time as _time
+    days = max(1, min(int(days or 30), 365))
+    # Filtered in SQL: a cost endpoint that loads the whole match table is
+    # exactly the kind of self-inflicted load this project keeps auditing.
+    rows = store.export_matches(since=_time.time() - days * 86400,
+                                limit=50000, include_votes=False)
+    full = rollup(rows, days=days)
+    today = rollup(rows, days=1)
+    month = rollup(rows, days=30)
+    return {"benchmark_version": BENCHMARK_VERSION,
+            "window": full,
+            "budget": budget_state(today["usd_total"], month["usd_total"]),
+            "limits": budgets(),
+            # §34: the access model is published, not implied. The core
+            # benchmark is never paywalled; what would be metered is
+            # volume and hosting.
+            "access_tiers": ACCESS_TIERS}
 
 
 @app.get("/api/export")
@@ -1071,7 +1882,9 @@ def export_matches(
     prompt_version tag.
 
     No PII: no IPs, no user ids, no BYOK residue. Votes are
-    anonymous (id + match_id + created + choice only). Same
+    anonymous (id + match_id + created + choice + the optional
+    execution/entertainment/deserved axes + self-reported confidence +
+    self-declared voter_tier — nothing identifying). Same
     exposure profile as /api/leaderboard.
 
     Rate-limited by the same middleware as other endpoints. If
@@ -1079,10 +1892,68 @@ def export_matches(
     yet needed at 200 monthly visitors.
     """
     lim = max(1, min(int(limit or 10000), 50000))
-    if fmt not in ("json", "jsonl"):
-        raise HTTPException(400, "fmt must be 'json' or 'jsonl'")
+    if fmt not in ("json", "jsonl", "csv"):
+        raise HTTPException(400, "fmt must be 'json', 'jsonl', or 'csv'")
     rows = store.export_matches(since=since, until=until, limit=lim,
                                 include_votes=bool(include_votes))
+    _obs_bump("export_rows", len(rows))
+    # Data-quality label per row (next-step priority 2/3): downstream
+    # analysts must be able to filter scripted-baseline rows out without
+    # re-deriving our provider heuristics.
+    import data_quality as DQ
+    for r in rows:
+        r["evidence"] = DQ.evidence_class(r)
+    if fmt == "csv":
+        # Flat analysis-oriented export (action-plan §27). Every scalar
+        # match column becomes a column; nested vote objects are
+        # collapsed to counts so the file opens cleanly in pandas/Excel.
+        import csv as _csv
+        import io as _io
+        from fastapi.responses import PlainTextResponse
+        cols = [
+            "id", "created", "benchmark_version", "physics_version",
+            "prompt_version", "spec_fingerprint", "seed", "match_length",
+            "max_turns", "fallback_policy", "model_a", "model_b",
+            "model_used_a", "model_used_b", "provider_used_a",
+            "provider_used_b", "fallback_used", "latency_ms_a",
+            "latency_ms_b", "invalid_actions_a", "invalid_actions_b",
+            "ranking_eligible", "sharp", "weapon", "mode", "arena",
+            "blindfolded", "status", "winner_side", "method", "turns",
+            "damage_dealt_a", "damage_dealt_b", "hits_landed_a",
+            "hits_landed_b", "hits_attempted_a", "hits_attempted_b",
+            "fallback_turns_a", "fallback_turns_b", "avg_distance",
+            "voted", "flip", "votes_a", "votes_b", "votes_draw",
+            "votes_total", "votes_expert", "votes_casual",
+            # §33: billed tokens, so anyone can re-derive our cost numbers
+            # instead of taking them on trust.
+            "prompt_tokens_a", "completion_tokens_a", "prompt_tokens_b",
+            "completion_tokens_b", "api_calls_a", "api_calls_b",
+            # data-quality evidence class: real_provider | mixed_provider |
+            # scripted_baseline (who actually decided, not who was asked)
+            "evidence",
+        ]
+        buf = _io.StringIO()
+        w = _csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore",
+                            restval="")
+        w.writeheader()
+        for r in rows:
+            votes = r.get("votes") or []
+            r["votes_a"] = sum(1 for v in votes if v.get("choice") == "a")
+            r["votes_b"] = sum(1 for v in votes if v.get("choice") == "b")
+            r["votes_draw"] = sum(1 for v in votes if v.get("choice") == "draw")
+            r["votes_total"] = len(votes)
+            # §6: expert and casual votes travel as separate columns, not
+            # one pooled total — otherwise a downstream analyst cannot
+            # reproduce either tier's leaderboard.
+            r["votes_expert"] = sum(
+                1 for v in votes
+                if (v.get("voter_tier") or "casual") == "expert")
+            r["votes_casual"] = r["votes_total"] - r["votes_expert"]
+            w.writerow(r)
+        return PlainTextResponse(
+            buf.getvalue(), media_type="text/csv",
+            headers={"Content-Disposition":
+                     'attachment; filename="stickblade-matches.csv"'})
     if fmt == "jsonl":
         # Streaming-friendly one-line-per-match. HF Datasets ingests
         # this directly with `load_dataset("json", data_files=url)`.
@@ -1102,6 +1973,17 @@ def export_matches(
         "exported_at": _time.time(),
         "prompt_version": PROMPT_VERSION,
         "since": since, "until": until, "limit": lim,
+        # Data license declared explicitly so downstream consumers know
+        # the terms without having to guess or ask. Match data is under
+        # CC-BY-SA 4.0 (attribution + share-alike), separate from the
+        # Apache 2.0 code license. See research/DATA_LICENSE.md in the
+        # repo for the human-readable version + citation format.
+        "license": "CC-BY-SA-4.0",
+        "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "cite": "See https://github.com/Cometbuster4969/STICKBLADE-ARENA/blob/main/CITATION.cff",
+        # Board-level evidence summary so a downloader knows up front how
+        # much of this file is scripted baseline vs real-provider data.
+        "data_quality": DQ.summary(rows),
         "matches": rows,
     }
 
@@ -1128,15 +2010,39 @@ def stats_vote_rate(days: int = 7):
 
 @app.get("/api/recent")
 def recent():
+    """Recent duels for the history list.
+
+    Carries the full ruleset of each match (weapon / sharp / arena / mode /
+    blindfolded), the winner side, the integrity summary and a timestamp so
+    the history cards are scannable without opening every replay. Model
+    names stay hidden until the match has been voted on — that's the blind
+    boundary, and it applies to the history list too.
+    """
     rows = store.recent_matches()
     out = []
     for m in rows:
-        out.append({"match_id": m["id"], "sharp": m["sharp"],
-                    "turns": m["turns"], "method": m["method"],
-                    "voted": bool(m["voted"]),
-                    "models": ([C.ARENA_MODELS.get(m["model_a"], m["model_a"]),
-                                C.ARENA_MODELS.get(m["model_b"], m["model_b"])]
-                               if m["voted"] or not m["blind"] else None)})
+        fb_a = int(m.get("fallback_turns_a") or 0)
+        fb_b = int(m.get("fallback_turns_b") or 0)
+        turns = int(m.get("turns") or 0)
+        out.append({
+            "match_id": m["id"],
+            "created": m.get("created"),
+            "sharp": m["sharp"],
+            "weapon": m.get("weapon") or "sword",
+            "arena": m.get("arena") or "normal",
+            "mode": m.get("mode") or "macro",
+            "blindfolded": bool(m.get("blindfolded")),
+            "turns": turns,
+            "method": m["method"],
+            "winner_side": m.get("winner_side"),
+            "voted": bool(m["voted"]),
+            "fallback_turns": fb_a + fb_b,
+            "total_turns": turns,
+            "fully_llm_controlled": (fb_a + fb_b) == 0,
+            "models": ([C.ARENA_MODELS.get(m["model_a"], m["model_a"]),
+                        C.ARENA_MODELS.get(m["model_b"], m["model_b"])]
+                       if m["voted"] or not m["blind"] else None),
+        })
     return out
 
 

@@ -16,6 +16,7 @@
 const PROVISIONAL_N = 5;
 
 import { useState } from "react";
+import { EvidenceChip } from "@/components/DataQuality";
 
 const COLUMNS = [
   { key: "matches",         label: "N",     help: "Total completed matches (both sides)" },
@@ -77,6 +78,7 @@ export default function ObjectiveLeaderboardTable({ rows }) {
           <tr>
             <th>#</th>
             <th>Model</th>
+            <th title="Who actually made the decisions: real providers, a mix, or scripted baselines. Hover a chip for counts.">Evidence</th>
             {COLUMNS.map((c) => (
               <th key={c.key} className="r"
                   onClick={() => toggleSort(c.key)}
@@ -115,6 +117,7 @@ export default function ObjectiveLeaderboardTable({ rows }) {
                     </span>
                   )}
                 </td>
+                <td><EvidenceChip dq={r.data_quality} compact /></td>
                 {COLUMNS.map((c) => (
                   <td key={c.key} className="r"
                       style={c.key === "wins" ? { color: "var(--green)" }

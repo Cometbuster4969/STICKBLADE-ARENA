@@ -90,6 +90,14 @@ class Fighter:
         self.lean_target = 0.0
         self.foot_mode = "hold"
         self.last_action = "ready"
+        # Consecutive turns this fighter has chosen `hold` footwork. Backend-
+        # derived mobility signal: build_state() publishes it as
+        # ranged_hint.consecutive_hold_turns so a model (or the scripted
+        # policy) can see it is turning into a statue and reposition. Reset
+        # by any non-hold footwork. Updated once per turn by the controllers
+        # (moves.MoveController / joint_mode.JointController) — see
+        # Fighter.note_footwork().
+        self.foot_streak = 0
         self.bodies, self.shapes, self.servos = {}, {}, {}
         self.filter = pymunk.ShapeFilter(group=fid)
         self._build(space, x, facing)
@@ -174,6 +182,17 @@ class Fighter:
     def set_arm_power(self, mult):
         for j in ARM_JOINTS:
             self.servos[j].set_power(mult)
+
+    def note_footwork(self, footwork):
+        """Record the footwork chosen for this turn (once per turn).
+
+        Only `hold` extends `foot_streak`; every moving footwork resets it.
+        build_state() reads the streak to publish
+        ranged_hint.consecutive_hold_turns — the signal that stops both the
+        scripted bow policy and real models from parking in one spot for the
+        whole match (the "bow agents stopped repositioning" regression).
+        """
+        self.foot_streak = self.foot_streak + 1 if footwork == "hold" else 0
 
     def take_hit(self, dmg):
         if self.dead:

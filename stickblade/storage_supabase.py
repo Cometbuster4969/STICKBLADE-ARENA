@@ -62,8 +62,28 @@ class SupabaseStorage:
 
     # ------------------------------------------------------------ matches
     def create_match(self, model_a, model_b, sharp, blind=True, weapon="sword",
-                     mode="macro", arena="normal", blindfolded=False):
+                     mode="macro", arena="normal", blindfolded=False,
+                     seed=None, match_length="full", max_turns=None,
+                     fallback_policy="operational"):
+        """Create a match row, carrying the benchmark-spec provenance.
+
+        The version triple + seed + length + fallback policy are recorded at
+        CREATION time (not finish) so a match that dies mid-flight still
+        leaves an auditable record of what it was meant to be. Unknown
+        columns are stripped and retried, so an un-migrated Supabase schema
+        keeps working — the provenance fields are additive.
+        """
+        from benchmark import (BENCHMARK_VERSION, PHYSICS_VERSION,
+                               SPEC_FINGERPRINT, max_turns_for,
+                               FALLBACK_POLICIES, DEFAULT_FALLBACK_POLICY,
+                               MATCH_LENGTHS, DEFAULT_MATCH_LENGTH)
+        from brains import PROMPT_VERSION
         mid = uuid.uuid4().hex[:12]
+        ml = (match_length or DEFAULT_MATCH_LENGTH).lower()
+        if ml not in MATCH_LENGTHS:
+            ml = DEFAULT_MATCH_LENGTH
+        pol = fallback_policy if fallback_policy in FALLBACK_POLICIES \
+            else DEFAULT_FALLBACK_POLICY
         body = {
             "id": mid, "created": time.time(),
             "model_a": model_a, "model_b": model_b,
@@ -71,7 +91,20 @@ class SupabaseStorage:
             "mode": mode, "arena": arena, "blindfolded": bool(blindfolded),
             "status": "queued",
             "blind": bool(blind), "voted": False, "flip": False,
+            # ---- benchmark spec v1.0 provenance ----
+            "benchmark_version": BENCHMARK_VERSION,
+            "physics_version": PHYSICS_VERSION,
+            "prompt_version": str(PROMPT_VERSION),
+            "spec_fingerprint": SPEC_FINGERPRINT,
+            "seed": seed,
+            "match_length": ml,
+            "max_turns": int(max_turns) if max_turns else max_turns_for(ml),
+            "fallback_policy": pol,
+            "ranking_eligible": pol != "demo",
         }
+        prov_keys = ("benchmark_version", "physics_version", "prompt_version",
+                     "spec_fingerprint", "seed", "match_length", "max_turns",
+                     "fallback_policy", "ranking_eligible")
         try:
             self._rest("POST", "matches", body=body)
         except Exception:
@@ -82,22 +115,95 @@ class SupabaseStorage:
             # match created this way (NULL fields, python COALESCEs).
             for k in ("weapon", "flip", "mode", "arena", "blindfolded"):
                 body.pop(k, None)
-            self._rest("POST", "matches", body=body)
+            try:
+                self._rest("POST", "matches", body=body)
+            except Exception:
+                # Pre-benchmark-spec schema: drop provenance too. The match
+                # still runs; it just won't carry a version stamp, which is
+                # exactly what /api/integrity reports as unverifiable.
+                for k in prov_keys:
+                    body.pop(k, None)
+                self._rest("POST", "matches", body=body)
         return mid
+
+    def cancel_match(self, mid):
+        """Mark a queued/running match cancelled (action-plan §13)."""
+        try:
+            self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
+                       body={"cancelled": True, "status": "error",
+                             "error": "cancelled by user"})
+            return True
+        except Exception as e:
+            print(f"[storage] cancel_match failed for {mid}: {e}")
+            return False
+
+    def is_cancelled(self, mid):
+        m = self.get_match(mid)
+        return bool(m and m.get("cancelled"))
+
+    def set_provenance(self, mid, prov: dict):
+        """Persist outcome-side provenance (model/provider actually used,
+        latency, fallback, invalid actions, ranking eligibility)."""
+        if not prov:
+            return
+        import json as _json
+        body = {
+            "model_used_a": prov.get("model_used_a"),
+            "model_used_b": prov.get("model_used_b"),
+            "provider_used_a": prov.get("provider_used_a"),
+            "provider_used_b": prov.get("provider_used_b"),
+            "fallback_used": bool(prov.get("fallback_used")),
+            "latency_ms_a": prov.get("latency_ms_a"),
+            "latency_ms_b": prov.get("latency_ms_b"),
+            "invalid_actions_a": int(prov.get("invalid_actions_a") or 0),
+            "invalid_actions_b": int(prov.get("invalid_actions_b") or 0),
+            "ranking_eligible": bool(prov.get("ranking_eligible", True)),
+        }
+        for k in ("models_used_a", "models_used_b"):
+            if prov.get(k):
+                try:
+                    body[k] = _json.dumps(prov[k])
+                except (TypeError, ValueError):
+                    pass
+        try:
+            self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
+                       body=body)
+        except Exception:
+            # Un-migrated schema: keep only the columns we know exist.
+            for k in list(body):
+                if k not in ("model_used_a", "model_used_b",
+                             "provider_used_a", "provider_used_b",
+                             "fallback_used"):
+                    body.pop(k, None)
+            try:
+                self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
+                           body=body)
+            except Exception as e:
+                print(f"[storage] set_provenance skipped for {mid}: {e}")
 
     def set_flip(self, mid, flip: bool):
         try:
             self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
                        body={"flip": bool(flip)})
-        except Exception:
-            pass   # column not present yet
+        except Exception as exc:
+            print(f"[storage] failed to persist flip for match {mid}: {exc}")
+            raise RuntimeError(f"Failed to persist match flip state for {mid}: {exc}") from exc
 
     def set_status(self, mid, status, error=None):
         self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
                    body={"status": status, "error": error})
 
+    def cleanup_stale_matches(self, error_msg="Server restarted while match was in progress"):
+        """Clean up matches that were left in 'queued' or 'running' state across server restarts."""
+        try:
+            self._rest("PATCH", "matches",
+                       params={"status": "in.(queued,running)"},
+                       body={"status": "error", "error": error_msg})
+        except Exception as e:
+            print(f"[storage] cleanup_stale_matches warning: {e}")
+
     def finish_match(self, mid, winner_side, method, turns, replay,
-                     commentary=None):
+                     commentary=None, provenance=None):
         data = json.dumps(replay, separators=(",", ":")).encode()
         r = self.http.post(
             f"{self.url}/storage/v1/object/{BUCKET}/{mid}.json",
@@ -126,6 +232,11 @@ class SupabaseStorage:
         for k in metric_keys:
             if k in metrics:
                 body[k] = metrics[k]
+        prov_keys = ["model_used_a", "model_used_b", "provider_used_a",
+                     "provider_used_b", "fallback_used", "latency_ms_a",
+                     "latency_ms_b", "invalid_actions_a",
+                     "invalid_actions_b", "ranking_eligible",
+                     "models_used_a", "models_used_b"]
         try:
             self._rest("PATCH", "matches", params={"id": f"eq.{mid}"}, body=body)
         except Exception:
@@ -135,6 +246,16 @@ class SupabaseStorage:
             for k in ["commentary"] + metric_keys:
                 body.pop(k, None)
             self._rest("PATCH", "matches", params={"id": f"eq.{mid}"}, body=body)
+        # benchmark spec v1.0: outcome-side provenance, best-effort.
+        if provenance:
+            self.set_provenance(mid, provenance)
+            if int(provenance.get("fallback_used") or 0):
+                try:
+                    self._rest("PATCH", "matches",
+                               params={"id": f"eq.{mid}"},
+                               body={"fallback_used": True})
+                except Exception:
+                    pass
 
     def get_match(self, mid):
         rows = self._rest("GET", "matches", params={"id": f"eq.{mid}"})
@@ -334,6 +455,17 @@ class SupabaseStorage:
                   "losses": row["losses"], "draws": row["draws"]})
 
     @staticmethod
+    def _exclusion_reason(m):
+        """Human-readable reason a match is not ranked."""
+        pol = m.get("fallback_policy") or "operational"
+        if pol == "demo":
+            return "demo match (scripted fighters) — not ranked"
+        if pol == "strict" and m.get("fallback_used"):
+            return ("strict fallback policy: a provider fallback occurred, "
+                    "so this match is excluded from rankings")
+        return "excluded from rankings"
+
+    @staticmethod
     def _unflip_choice(choice, flip):
         if choice == "draw":
             return "draw"
@@ -387,11 +519,11 @@ class SupabaseStorage:
         self._set_elo_row(rb)
         return d_a, d_b
 
-    def record_vote(self, mid, choice):
+    def record_vote(self, mid, choice, axes=None, confidence=None):
         m = self.get_match(mid)
         if not m or m["status"] != "done":
             return None
-        if m["voted"]:
+        if m.get("voted"):
             return {"already_voted": True, **self.reveal(mid)}
         sharp = m["sharp"]
         weapon = m.get("weapon") or "sword"
@@ -404,9 +536,42 @@ class SupabaseStorage:
         flip = bool(m.get("flip"))
         a, b = m["model_a"], m["model_b"]
         choice_model = self._unflip_choice(choice, flip)
-        self._rest("POST", "votes", body={
+        # Multi-axis vote (action-plan §6): `choice` is the tactical vote
+        # and the only ranked one; the rest are research signal.
+        axes = axes or {}
+        vote_body = {
             "id": uuid.uuid4().hex[:12], "match_id": mid,
-            "created": time.time(), "choice": choice})
+            "created": time.time(), "choice": choice}
+        for axis in ("execution", "entertainment", "deserved"):
+            v = axes.get(axis)
+            if v in ("a", "b", "draw"):
+                vote_body[axis] = v
+        try:
+            conf = int(confidence) if confidence is not None else None
+        except (TypeError, ValueError):
+            conf = None
+        if conf is not None:
+            vote_body["confidence"] = max(1, min(5, conf))
+        try:
+            self._rest("POST", "votes", body=vote_body)
+        except Exception as ve:
+            # Un-migrated votes table: retry with the tactical vote only.
+            for k in ("execution", "entertainment", "deserved", "confidence"):
+                vote_body.pop(k, None)
+            try:
+                self._rest("POST", "votes", body=vote_body)
+            except Exception:
+                pass
+        if m.get("ranking_eligible") is False:
+            # Recorded and revealed, but deliberately unranked.
+            try:
+                self._rest("PATCH", "matches", params={"id": f"eq.{mid}"},
+                           body={"voted": True})
+            except Exception:
+                pass
+            return {"elo_change": {}, "ranking_excluded": True,
+                    "exclusion_reason": self._exclusion_reason(m),
+                    **self.reveal(mid)}
         d_a = d_b = None
         if self._rpc_ok is not False:
             try:
@@ -456,7 +621,7 @@ class SupabaseStorage:
         params = {
             "status": "eq.done",
             "damage_dealt_a": "not.is.null",
-            "select": ("model_a,model_b,winner_side,turns,"
+            "select": ("model_a,model_b,flip,winner_side,turns,"
                        "damage_dealt_a,damage_dealt_b,"
                        "hits_landed_a,hits_landed_b,"
                        "hits_attempted_a,hits_attempted_b,"
@@ -479,7 +644,10 @@ class SupabaseStorage:
         for r in rows:
             t = int(r.get("turns") or 0)
             avg_d = float(r.get("avg_distance") or 0.0)
-            for side, model in (("a", r["model_a"]), ("b", r["model_b"])):
+            flip = bool(r.get("flip"))
+            side_a_model = r["model_b"] if flip else r["model_a"]
+            side_b_model = r["model_a"] if flip else r["model_b"]
+            for side, model in (("a", side_a_model), ("b", side_b_model)):
                 m = agg.setdefault(model, {
                     "model": model, "matches": 0, "turns": 0,
                     "damage": 0.0, "hits_landed": 0, "hits_attempted": 0,
@@ -497,8 +665,8 @@ class SupabaseStorage:
                 agg[r["model_a"]]["draws"] += 1
                 agg[r["model_b"]]["draws"] += 1
             else:
-                da = float(r.get("damage_dealt_a") or 0.0)
-                db = float(r.get("damage_dealt_b") or 0.0)
+                da = float((r.get("damage_dealt_b") if flip else r.get("damage_dealt_a")) or 0.0)
+                db = float((r.get("damage_dealt_a") if flip else r.get("damage_dealt_b")) or 0.0)
                 if da > db:
                     agg[r["model_a"]]["wins"]   += 1
                     agg[r["model_b"]]["losses"] += 1
@@ -529,6 +697,36 @@ class SupabaseStorage:
             })
         out.sort(key=lambda x: -x["damage_per_turn"])
         return out
+
+    def quality_rows(self, sharp=None, weapon=None, mode=None, arena=None,
+                     blindfolded=None, limit=50000):
+        """Mirror of LocalStorage.quality_rows: finished match rows with the
+        provenance columns the data-quality classifier reads. Falls back
+        to the pre-§33 column set on an un-migrated schema so the labels
+        still render (token coverage then reads as 'missing', which is the
+        truthful answer for a database that never stored tokens)."""
+        from storage import LocalStorage
+        cols = [c.strip() for c in LocalStorage.QUALITY_COLUMNS.split(",")]
+        params = {"status": "eq.done", "order": "created.asc",
+                  "limit": str(int(limit))}
+        if sharp:  params["sharp"]  = f"eq.{sharp}"
+        if weapon: params["weapon"] = f"eq.{weapon}"
+        if mode:   params["mode"]   = f"eq.{mode}"
+        if arena:  params["arena"]  = f"eq.{arena}"
+        if blindfolded is not None:
+            params["blindfolded"] = f"eq.{'true' if blindfolded else 'false'}"
+        try:
+            rows = self._rest("GET", "matches",
+                              params={**params, "select": ",".join(cols)})
+        except Exception:
+            legacy = [c for c in cols if not c.startswith(
+                ("prompt_tokens", "completion_tokens", "api_calls"))]
+            try:
+                rows = self._rest("GET", "matches",
+                                  params={**params, "select": ",".join(legacy)})
+            except Exception:
+                return []
+        return [dict(r) for r in rows]
 
     def leaderboard(self, sharp=None, weapon=None, mode=None, arena=None,
                     blindfolded=None):

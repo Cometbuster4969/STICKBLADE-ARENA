@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   getModels, createTournament, getTournament, listTournaments,
 } from "@/lib/api";
+import SiteNav, { SiteFooter } from "@/components/SiteNav";
 
 const WEAPON_ZONES = {
   sword:  ["tip", "edge", "back_edge", "pommel"],
@@ -93,6 +94,8 @@ function CreateBracket({ onCreated }) {
   }
 
   return (
+    <>
+      <SiteNav />
     <>
       <section className="tagline" style={{ marginBottom: 8 }}>
         <h1>🏆 Tournament</h1>
@@ -280,6 +283,8 @@ function CreateBracket({ onCreated }) {
           )}
       </div>
     </>
+      <SiteFooter />
+    </>
   );
 }
 
@@ -349,6 +354,8 @@ function BracketView({ tid, onPickOther }) {
     : null;
 
   return (
+    <>
+      <SiteNav />
     <>
       <section className="tagline" style={{ marginBottom: 8 }}>
         <h1>🏆 {t.name || "Bracket"}</h1>
@@ -439,6 +446,8 @@ function BracketView({ tid, onPickOther }) {
           ← Back to all tournaments
         </button>
       </div>
+    </>
+      <SiteFooter />
     </>
   );
 }

@@ -110,8 +110,14 @@ print("\n== PHASE 5 ==")
 print("log file:", log_file)
 print("keys:", sorted(log.keys()))
 t1 = log["turns"][0]
-names = [k for k in t1 if k not in ("turn", "hits")]
+# "decision" is the per-turn mobility audit trail added in prompt v2
+# ({a,b} -> {action, footwork, distance, fallback}); it sits alongside the
+# two fighter-name entries rather than inside them.
+names = [k for k in t1 if k not in ("turn", "hits", "decision")]
 print("per-turn entries for both fighters:", names)
 sample = t1[names[0]]
 print("model output schema ok:", sorted(sample.keys()) == ["action", "footwork", "thought"])
+dec = t1.get("decision") or {}
+print("decision context sides:", sorted(dec.keys()),
+      "| keys per side:", sorted(dec.get("a", {}).keys()))
 print("turns logged:", len(log["turns"]), "| sharp zones recorded:", log["sharp"])

@@ -4,6 +4,7 @@ Each brain receives a JSON game state and must return:
   {"thought": "...", "action": <ACTIONS>, "footwork": <FOOTWORK>}
 """
 import json
+import math
 import random
 import re
 import threading
@@ -32,8 +33,17 @@ from moves import ACTIONS, FOOTWORK, ACTION_ZONE
 # 3 arenas (normal/ice/low_gravity), macro/joint control modes, spatial
 # state with rounded ints + facing_enemy boolean + arena-aware bow drop
 # hints. See AGENTS.md §PROMPT_VERSION_LOG for the full change ledger.
+#
+# Version 2 (2026-09-08): additive ranged-mobility hints. ranged_hint gains
+# enemy_approaching / closing_speed_px_s / distance_band / space_ahead_px /
+# space_behind_px / recommended_footwork / consecutive_hold_turns, and the
+# bow range_hint was rewritten from "keep distance >260 and shoot" (which
+# produced matches where both archers stood still for 24 straight turns) to
+# an explicit repositioning rule. No v1 field was removed or redefined, so
+# this is a SOFT cutover — old ratings stay readable, they just aren't
+# directly comparable to v2 bow cells. See AGENTS.md §10.5.
 # ============================================================================
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 
 
 # Ring buffer of recent brain failures. Exposed via /api/debug/brain_errors
@@ -85,6 +95,15 @@ how many pixels the arrow will drop for each specific shot type — pick
 the shot, then aim `drop` pixels HIGHER than the target head. All drop
 values are arena-aware (low_gravity gives ~35% of normal drop).
 
+MOVEMENT: `footwork` is the ONLY thing that moves you — no attack action
+repositions your feet on its own, so a turn spent attacking with `hold`
+footwork is a turn spent standing still. `ranged_hint.recommended_footwork`
+is the backend's read of the current geometry (is the enemy closing, how
+much floor is behind you, which band you are in) — treat it as a strong
+default, not a command. `ranged_hint.consecutive_hold_turns` counts how
+many turns in a row you have chosen `hold`; never let it exceed {max_holds}.
+A motionless fighter is a free target and gives away the arena.
+
 Distance guide: <70 = clinch range, 70-150 = strike range, 150-260 = closing range, >260 = far.
 {range_hint}
 ARENA MODIFIER (state.arena): `normal` = standard stone floor; `ice` = ~3x
@@ -96,11 +115,135 @@ aim flatter, knockdowns take longer to recover from.
 Reply with ONLY a JSON object, no markdown:
 {{"thought": "<your tactical reasoning, max 30 words>", "action": "...", "footwork": "..."}}"""
 
+# ---- ranged mobility tuning (used by RANGE_HINTS below + bow_footwork) ----
+MAX_CONSECUTIVE_HOLDS = 2      # standing still longer than this is a bug
+# Control dead-zone for the bow policy. Deliberately MUCH wider than the
+# "ideal" 300-450px shooting range, because one turn of footwork covers
+# ~270-330px (measured: advance ≈ +324, retreat ≈ -266, hop_back ≈ -331 —
+# see test_bow_mobility.py). A dead-zone narrower than a single stride makes
+# bang-bang control overshoot every turn, and the duel degenerates into a
+# limit cycle: too close → both back off → too far → both walk in → repeat,
+# swinging ~600px per turn across the whole arena.
+BOW_TOO_CLOSE = 200            # below this an archer is being overrun
+BOW_TOO_FAR = 620              # above this arrow drop is not worth trusting
+BOW_MID = 430                  # where a shuffling archer tries to keep the gap
+WALL_MARGIN = 70               # px of floor needed behind you to backpedal
+
 RANGE_HINTS = {
     "sword": "",
     "flail": "Your flail outranges a clinch — mid range (90-170) is your kill zone; spin_up first for spike-speed.\n",
-    "bow": "You are a RANGED fighter: keep distance >260 and shoot; if the enemy closes, hop_back or bow_bash.\n",
+    # Rewritten for prompt v2. The v1 text ("keep distance >260 and shoot;
+    # if the enemy closes, hop_back or bow_bash") made `hold` the obviously
+    # correct answer at every long-range turn, and because a shot action
+    # never moves the feet (moves.MoveController drives movement purely from
+    # `footwork`), two bow fighters would stand 420px apart and trade shots
+    # without moving for the entire match. See test_bow_mobility.py.
+    "bow": ("You are a RANGED fighter — shoot every turn you can, but DO NOT STAND STILL. "
+            "Keep distance, and shoot while alternating `advance`, `retreat` and `hop_back`. "
+            "At long range (>260): `retreat` if the enemy is closing, `advance` if they are "
+            "moving away or you are pinned near a wall. In closing range (70-260): `retreat` "
+            "to re-open the gap. Under 70: `hop_back`, and only use `bow_bash` when the enemy "
+            "is literally touching you (<50). "
+            f"Never choose `hold` for more than {MAX_CONSECUTIVE_HOLDS} consecutive turns — "
+            "check `ranged_hint.consecutive_hold_turns` and `ranged_hint.recommended_footwork` "
+            "every turn, and back off `space_behind_px` before retreating into the arena wall.\n"),
 }
+
+
+# ============================================================================
+# Ranged mobility policy (prompt v2)
+#
+# Shared by the scripted fallback (MockBrain), the ScriptedPro baseline bot,
+# and — as a suggestion — every real model via
+# ranged_hint.recommended_footwork in build_state(). One implementation so
+# the hint the model reads and the fallback that acts when the model fails
+# can never disagree about what "good spacing" means.
+#
+# Distance bands mirror the prompt's distance guide:
+#   clinch  <70   |   strike 70-150   |   closing 150-260   |   far >260
+# Constants (MAX_CONSECUTIVE_HOLDS / KITE_BAND / WALL_MARGIN) are defined
+# above RANGE_HINTS because the bow hint quotes the hold cap verbatim.
+# ============================================================================
+def distance_band(d):
+    """Name the band a distance falls in (same thresholds as the prompt)."""
+    if d < 70:
+        return "clinch"
+    if d < 150:
+        return "strike"
+    if d <= 260:
+        return "closing"
+    return "far"
+
+
+def side_phase(me_x, enemy_x):
+    """0 for the fighter currently on the left, 1 for the one on the right.
+
+    Used to de-synchronise the two archers' shuffle so they don't mirror
+    each other. Mirroring is what made the naive fix worse than the bug:
+    both retreating on the same turn adds ~270px of separation each, so the
+    pair sprinted to opposite walls and then sprinted back. With opposite
+    phases one advances while the other backpedals — both move, and the gap
+    barely changes (measured: advance ≈ +324px/turn, retreat ≈ -266px/turn),
+    which is the walk-forward-while-backpedalling dance a real ranged duel
+    looks like.
+    """
+    return 0 if me_x <= enemy_x else 1
+
+
+def bow_footwork(d, approaching=False, hold_streak=0, space_behind=None,
+                 turn=0, phase=0):
+    """Pick bow footwork so the archer shoots *while repositioning*.
+
+    d             separation in px
+    approaching   enemy closing on us this turn
+    hold_streak   consecutive `hold` turns so far (fighter.foot_streak)
+    space_behind  px of floor between us and the wall we would backpedal
+                  into (None = unknown / treat as roomy)
+    turn          match turn, drives the alternating shuffle
+    phase         side_phase() of this fighter, so the two archers shuffle
+                  out of step instead of mirroring each other
+
+    `hold` is only ever returned when nothing better is available (we are
+    already backed against the wall AND the enemy isn't pressing), and even
+    then the MAX_CONSECUTIVE_HOLDS cap forces a move on the next turn.
+    """
+    room = WALL_MARGIN if space_behind is None else space_behind
+    can_back_off = room > WALL_MARGIN
+    # Only ONE of the two archers corrects a bad gap at a time (the phase-0
+    # one, i.e. whoever is currently on the left). If both corrected, the gap
+    # would change by two strides a turn and blow straight past the dead-zone
+    # into the opposite error. Gating corrections this way is safe against a
+    # MELEE opponent too: a charging swordsman trips `approaching` (rule 2
+    # below), which is never gated, so the archer always kites out.
+    lead = (phase == 0)
+    # Exactly one archer shuffles per turn; the other holds. Both moving in
+    # the same direction pins them against opposite walls, and one chasing
+    # the other collapses the gap into a clinch (measured: 420 -> 100px in
+    # three turns). Alternating the mover keeps the gap breathing inside the
+    # band while still putting a visible step on the floor every turn.
+    mover = ((turn + phase) % 2 == 0)
+
+    if d < 70:                      # clinch — both get off them
+        foot = "hop_back" if can_back_off else "advance"
+    elif approaching:               # they're closing — kite, no gating
+        foot = "retreat" if can_back_off else "advance"
+    elif d < BOW_TOO_CLOSE:         # being overrun — one of us backs off
+        foot = ("retreat" if can_back_off else "hold") if lead else "hold"
+    elif d > BOW_TOO_FAR:           # out of effective range — one walks in
+        foot = "advance" if lead else "hold"
+    elif not mover:                 # partner is stepping this turn: plant
+        foot = "hold"
+    else:
+        # Our turn to shuffle: step toward the middle of the band so the gap
+        # breathes instead of drifting into a wall or a clinch.
+        foot = ("retreat" if can_back_off else "advance") if d < BOW_MID \
+            else "advance"
+
+    # Hard cap on standing still. If the policy above said `hold` and we're
+    # already at the cap, take whichever direction still has floor.
+    if foot == "hold" and hold_streak >= MAX_CONSECUTIVE_HOLDS:
+        foot = "retreat" if can_back_off else "advance"
+    return foot
 
 
 def _xy(v):
@@ -218,6 +361,34 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal",
     flight_t = round(d / 980.0, 2)
     gravity_drop = round(0.5 * g_eff * flight_t * flight_t)
 
+    # ---------- Ranged MOBILITY helpers (prompt v2) ----------
+    # The v1 state told a model everything about where things ARE and
+    # nothing about where it should GO. With `hold` a legal answer at every
+    # distance, both the scripted policy and real models converged on
+    # standing still and shooting — a 24-turn bow match where nobody moved.
+    # These fields are the backend's read of the same geometry the model
+    # could compute itself, published so it doesn't have to:
+    #   closing_speed_px_s  >0 = the gap is shrinking this instant
+    #   space_ahead/behind  floor left before the arena wall (px)
+    #   consecutive_hold_turns  how statue-like we've been
+    #   recommended_footwork    bow_footwork() verdict for this exact state
+    d_safe = d if d > 1e-6 else 1e-6
+    ux, uy = dx / d_safe, dy / d_safe
+    # Radial closing speed along the me->enemy axis: positive means the
+    # separation is shrinking (enemy walking at us faster than we retreat).
+    # me_vel/foe_vel are already the rounded [vx, vy] lists from _vel().
+    closing = (foe_vel[0] - me_vel[0]) * ux + (foe_vel[1] - me_vel[1]) * uy
+    enemy_approaching = closing > 20.0          # ~20 px/s: above idle drift
+    # How much floor is on each side of us. `facing` is +1 right / -1 left,
+    # so "behind" is the side we would backpedal into.
+    space_ahead = (C.WIDTH - me_torso.x) if me.facing > 0 else me_torso.x
+    space_behind = me_torso.x if me.facing > 0 else (C.WIDTH - me_torso.x)
+    hold_streak = int(getattr(me, "foot_streak", 0))
+    recommended = bow_footwork(d, approaching=enemy_approaching,
+                               hold_streak=hold_streak,
+                               space_behind=space_behind, turn=turn,
+                               phase=side_phase(me_torso.x, foe_torso.x))
+
     rel = []
     for e in last_events:
         rel.append({"by": e["attacker"], "zone": e["zone"], "hit_part": e["part"],
@@ -293,6 +464,18 @@ def build_state(me, foe, turn, max_turns, last_events, arena="normal",
             "gravity_scale": g_scale,   # 1.0 normal / ice, 0.35 low_gravity
             # aim point if you want to hit the enemy HEAD with a flat arrow
             "aim_at_enemy_head": _xy(foe_head),
+            # ---- prompt v2: mobility (see "Ranged MOBILITY helpers") ----
+            # Present in blindfolded mode too: these are movement facts, not
+            # the categorical spatial hints (enemy_is / height / facing) that
+            # blindfolding strips on purpose.
+            "enemy_approaching": bool(enemy_approaching),
+            "closing_speed_px_s": int(round(closing)),
+            "distance_band": distance_band(d),
+            "space_ahead_px": int(round(max(0.0, space_ahead))),
+            "space_behind_px": int(round(max(0.0, space_behind))),
+            "consecutive_hold_turns": hold_streak,
+            "recommended_footwork": recommended,
+            "max_consecutive_holds": MAX_CONSECUTIVE_HOLDS,
         },
     }
 
@@ -382,15 +565,100 @@ def _extract_json(text):
 
 
 def _sanitize(d, allowed=None):
+    """Coerce a model/bot reply into the engine's action vocabulary.
+
+    Invalid-action tracking (benchmark spec v1.0 §rules.invalid_action_handling):
+    when the caller's action/footwork is outside the weapon's vocabulary we
+    coerce it (as before) AND flag the reply with `_invalid_action` /
+    `_invalid_footwork`. Those flags are the raw material for the
+    invalid-action rate the action plan asks us to publish per model
+    (§1: "Invalid-action rate"). Flags are only added when they fire, so
+    well-behaved replies stay byte-identical to before.
+    """
     allowed = allowed or ACTIONS
-    a = d.get("action", "ready")
-    f = d.get("footwork", "hold")
-    if a not in allowed:
-        a = "ready"
-    if f not in FOOTWORK:
-        f = "hold"
+    raw_a = d.get("action", "ready")
+    raw_f = d.get("footwork", "hold")
+    a = raw_a if raw_a in allowed else "ready"
+    f = raw_f if raw_f in FOOTWORK else "hold"
     t = str(d.get("thought", ""))[:160]
-    return {"action": a, "footwork": f, "thought": t}
+    out = {"action": a, "footwork": f, "thought": t}
+    if a != raw_a:
+        out["_invalid_action"] = str(raw_a)[:40]
+    if f != raw_f:
+        out["_invalid_footwork"] = str(raw_f)[:40]
+    return out
+
+
+def _model_id_of(brain) -> str:
+    """Canonical model id for telemetry ('groq:' prefix re-added for Groq)."""
+    mid = getattr(brain, "model", "") or ""
+    if mid and isinstance(brain, GroqBrain) and not mid.startswith("groq:"):
+        mid = "groq:" + mid
+    if not mid:
+        # MockBrain / baseline bots carry no `.model`. Report the roster id
+        # ("mock:berserker", "bot:pro") so provenance lines up with the
+        # model ids users actually picked, not internal class labels.
+        pers = getattr(brain, "p", None)
+        if pers:
+            return f"mock:{pers}"
+        lbl = getattr(brain, "label", "") or ""
+        return {"RandomBot": "bot:random", "GreedyBot": "bot:greedy",
+                "DistanceBot": "bot:distance",
+                "ScriptedPro": "bot:pro"}.get(lbl, lbl or type(brain).__name__)
+    return mid
+
+
+def _provider_of(brain) -> str:
+    """Which infrastructure actually served a decision (for fallback stats)."""
+    cls = type(brain).__name__
+    if "Mock" in cls or cls.endswith("Bot") or "Bot" in cls:
+        return "scripted"
+    if isinstance(brain, GroqBrain):
+        return "groq"
+    if cls == "GPTBrain":
+        return "openai"
+    if cls == "GeminiBrain":
+        return "google"
+    return _PROVIDER_HOST.get(getattr(brain, "model", ""), "openrouter")
+
+
+def _phase_of(state):
+    """side_phase() for whoever `me` is in this state (left archer = 0)."""
+    me = (state.get("me") or {}).get("torso") or (0, 0)
+    en = (state.get("enemy") or {}).get("torso") or (0, 0)
+    return side_phase(me[0], en[0])
+
+
+def _distance_of(state):
+    """Torso separation in px, blindfolded-safe.
+
+    Blindfolded matches strip the derived `distance` field (the model is
+    supposed to compute it from raw coordinates), but the SCRIPTED brains —
+    MockBrain's fallback and the baseline bots — still need a number, and
+    reading state["distance"] directly raised KeyError on every blindfolded
+    turn. Falling back to the raw torso coords keeps those brains working
+    without weakening the blindfolded prompt for real models.
+    """
+    d = state.get("distance")
+    if isinstance(d, (int, float)):
+        return float(d)
+    me = (state.get("me") or {}).get("torso") or (0, 0)
+    en = (state.get("enemy") or {}).get("torso") or (0, 0)
+    return math.hypot(en[0] - me[0], en[1] - me[1])
+
+
+def _mobility_of(state):
+    """(hold_streak, space_behind, approaching) from state.ranged_hint.
+
+    Tolerant of hand-built states (older tests, frozen eval packs) that
+    predate prompt v2: missing fields degrade to "no floor constraint,
+    nobody pressing, haven't been standing still".
+    """
+    rh = state.get("ranged_hint") or {}
+    sb = rh.get("space_behind_px")
+    return (int(rh.get("consecutive_hold_turns") or 0),
+            None if sb is None else float(sb),
+            bool(rh.get("enemy_approaching")))
 
 
 def _trim(text, max_words=25):
@@ -661,8 +929,21 @@ def _timeout_for(model_id):
 
 class Brain:
     label = "BASE"
+    # True for brains that decide WITHOUT any network call (mocks + the
+    # scripted bot baselines). main.py uses this to resolve both fighters
+    # synchronously instead of in threads: the think phase steps physics
+    # once per frame while it waits, so a thread-scheduling delay would
+    # silently change how many physics steps happen before the turn starts
+    # and break seeded reproducibility (action-plan §8).
+    scripted = False
 
-    def __init__(self, sharp_zones, mode="macro", weapon="sword"):
+    def __init__(self, sharp_zones, mode="macro", weapon="sword", rng=None):
+        # Per-instance RNG. Decisions for the two fighters are computed in
+        # PARALLEL THREADS (main.py), so any scripted brain that draws from
+        # the GLOBAL random module makes a seeded match non-reproducible:
+        # which fighter consumes which draw depends on thread scheduling.
+        # Every scripted brain must therefore draw from self.rng.
+        self.rng = rng if rng is not None else random
         from weapons import (WEAPON_ACTIONS, WEAPON_ACTION_ZONE, WEAPON_HINTS)
         self.sharp = sharp_zones
         self.mode = mode
@@ -680,8 +961,36 @@ class Brain:
                 zone_hint=WEAPON_HINTS.get(weapon, ""),
                 zone_map=zmap,
                 actions=", ".join(self.actions), footwork=", ".join(FOOTWORK),
+                max_holds=MAX_CONSECUTIVE_HOLDS,
                 range_hint=RANGE_HINTS.get(weapon, ""))
         self.history = []
+        # Token accounting (action-plan §33): every provider that bills us
+        # also reports what it billed, so cost per match can be MEASURED
+        # instead of estimated from prompt length. Accumulated across every
+        # call this brain makes, including retries and buddy fallbacks —
+        # a match that fell back still cost the tokens it burned.
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0,
+                      "calls": 0}
+
+    def _record_usage(self, prompt_tokens, completion_tokens):
+        """Add one API call's reported token counts.
+
+        Only counts non-negative ints: a provider that omits usage must
+        contribute nothing rather than a bogus zero-weighted average.
+        """
+        try:
+            pt = int(prompt_tokens or 0)
+            ct = int(completion_tokens or 0)
+        except (TypeError, ValueError):
+            return
+        if pt < 0 or ct < 0:
+            return
+        self.usage["prompt_tokens"] += pt
+        self.usage["completion_tokens"] += ct
+        self.usage["calls"] += 1
+
+    def usage_snapshot(self):
+        return dict(self.usage)
 
     def _clean(self, raw):
         """Mode-aware sanitization of a parsed LLM reply."""
@@ -820,7 +1129,23 @@ class Brain:
                 if idx > 0:
                     print(f"[brain] {self.label} recovered on attempt {idx+1} "
                           f"using {getattr(brain,'model',brain.label)}")
-                return out["r"]
+                mv = out["r"]
+                # Provenance stamps (benchmark spec v1.0): which model and
+                # which provider actually produced this decision, and after
+                # how many ladder rungs. Consumed by Match._record_turn()
+                # and surfaced in the replay + dataset export.
+                try:
+                    mv["_model_used"] = _model_id_of(brain)
+                    mv["_provider_used"] = _provider_of(brain)
+                    mv["_attempt"] = idx + 1
+                    # §33: the tokens this decision actually billed, from the
+                    # provider's own usage block. Covers retries and buddy
+                    # fallbacks, because those cost money too.
+                    snap = brain.usage_snapshot()
+                    mv["_usage"] = snap
+                except Exception:
+                    pass
+                return mv
 
             last_err = out.get("err") or f"timeout({timeout_s:.0f}s)"
             print(f"[brain] {self.label} attempt {idx+1}/{len(attempts)} "
@@ -875,6 +1200,16 @@ class Brain:
               f"using mock {personality}: {last_err[:80]}")
         fb["thought"] = "[fallback] " + fb["thought"]
         fb["_fallback"] = True
+        fb["_model_used"] = f"scripted:{personality}"
+        fb["_provider_used"] = "scripted"
+        fb["_attempt"] = len(attempts)
+        # The failed provider calls are still billable. Attribute the
+        # primary brain's accumulated usage rather than hiding it: a match
+        # that fell back is exactly the case a budget needs to see.
+        try:
+            fb["_usage"] = self.usage_snapshot()
+        except Exception:
+            pass
         return fb
 
 
@@ -902,9 +1237,11 @@ _MOCK_QUIPS = {
 
 
 class MockBrain(Brain):
+    scripted = True
+
     def __init__(self, sharp_zones, personality="duelist", label=None,
-                 weapon="sword"):
-        super().__init__(sharp_zones, "macro", weapon)
+                 weapon="sword", rng=None):
+        super().__init__(sharp_zones, "macro", weapon, rng=rng)
         self.p = personality
         self.label = label or f"Mock-{personality}"
 
@@ -913,7 +1250,14 @@ class MockBrain(Brain):
         # canned line. Works for both pre-fight quips and the commentary
         # roast (commentator role plays a generic "duelist" pool).
         pool = _MOCK_QUIPS.get(self.p, _MOCK_QUIPS["duelist"])
-        return random.choice(pool)
+        # Flavour text must not advance the decision RNG — see the note in
+        # pre_fight_quip. Pick from a snapshot of the stream instead.
+        peek = random.Random()
+        try:
+            peek.setstate(self.rng.getstate())
+        except (AttributeError, TypeError, ValueError):
+            peek.seed()
+        return peek.choice(pool)
 
     def _sharp_attacks(self):
         atk = [a for a in self.actions
@@ -922,11 +1266,50 @@ class MockBrain(Brain):
                     "bow": ["draw_shot"]}
         return atk or fallback.get(self.weapon, ["thrust"])
 
+    def _bow_move(self, state, d):
+        """Bow policy: shoot every turn, and move while doing it.
+
+        The regression this replaces chose `footwork: "hold"` on every
+        long-range turn. A shot action never moves the fighter — movement
+        comes only from `footwork` (moves.MoveController.update) — so two
+        archers parked 420px apart and traded arrows for 24 turns without
+        either of them taking a step. footwork now comes from the shared
+        bow_footwork() policy, which alternates advance/retreat, kites when
+        the enemy closes, refuses to backpedal into a wall, and caps
+        consecutive holds at MAX_CONSECUTIVE_HOLDS.
+        """
+        hold_streak, space_behind, approaching = _mobility_of(state)
+        if d <= 50:
+            # in actual physical contact — only NOW use the bow as a club
+            action, thought = "bow_bash", "He's on top of me — bash and jump away."
+        elif d <= 120:
+            action, thought = "quick_shot", "Point-blank shot, then create distance."
+        elif d <= 260:
+            action, thought = "quick_shot", "He's closing — snap shot and give ground."
+        else:
+            # self.rng, not the module `random`: the two fighters decide in
+            # concurrent threads, so a global RNG makes a seeded match
+            # replay differently run to run. See Brain.__init__.
+            action = self.rng.choice(["draw_shot", "high_arc_shot"])
+            thought = "Full draw, then change distance — never a statue."
+        return {"action": action,
+                "footwork": bow_footwork(d, approaching=approaching,
+                                         hold_streak=hold_streak,
+                                         space_behind=space_behind,
+                                         turn=state.get("turn", 0),
+                                         phase=_phase_of(state)),
+                "thought": thought}
+
     def decide(self, state):
-        d = state["distance"]
+        # _distance_of / .get("my_height") instead of state["distance"] and
+        # state["my_height"]: blindfolded matches strip both derived fields,
+        # and this brain is (a) selectable as mock:duelist / mock:berserker
+        # and (b) the last-resort fallback for any model that times out — so
+        # a blindfolded match used to KeyError the moment it fell back.
+        d = _distance_of(state)
         hits_on_me = [h for h in state["last_turn_hits"] if h["by"] != self.label]
         atk = self._sharp_attacks()
-        if state["my_height"] == "knocked_down":
+        if state.get("my_height", "standing") == "knocked_down":
             return _sanitize({"action": "guard_high", "footwork": "hop_back",
                               "thought": "I'm down — cover up and create space."})
         if self.weapon == "bow":
@@ -934,31 +1317,16 @@ class MockBrain(Brain):
             # had bow_bash as a 50% pick at clinch range which looked weird —
             # archers don't beat people with their bow when an arrow at 0 ft
             # still works. Only bash if literally on top of the enemy.
-            if d > 280:
-                mv = {"action": random.choice(["draw_shot", "high_arc_shot"]),
-                      "footwork": "hold",
-                      "thought": "Long range — full draw, loose."}
-            elif d > 120:
-                mv = {"action": "quick_shot", "footwork": "retreat",
-                      "thought": "He's closing — snap shot and give ground."}
-            elif d > 50:
-                # close but not clinched — still shoot, just hop back first
-                mv = {"action": "quick_shot", "footwork": "hop_back",
-                      "thought": "Point-blank shot, then create distance."}
-            else:
-                # in actual physical contact — only NOW use the bow as a club
-                mv = {"action": "bow_bash", "footwork": "hop_back",
-                      "thought": "He's on top of me — bash and jump away."}
-            return _sanitize(mv, self.actions)
+            return _sanitize(self._bow_move(state, d), self.actions)
         if self.p == "berserker":
             if d > 200:
-                mv = {"action": random.choice(atk), "footwork": "lunge",
+                mv = {"action": self.rng.choice(atk), "footwork": "lunge",
                       "thought": "Close the gap hard, swing on arrival."}
             elif d > 90:
-                mv = {"action": random.choice(atk), "footwork": "advance",
+                mv = {"action": self.rng.choice(atk), "footwork": "advance",
                       "thought": "In range next step — commit to the kill zone."}
             else:
-                mv = {"action": random.choice(atk + atk + ["pommel_strike"]),
+                mv = {"action": self.rng.choice(atk + atk + ["pommel_strike"]),
                       "footwork": "advance", "thought": "Point blank. Overwhelm."}
         else:
             if hits_on_me and state["my_hp"] < 50:
@@ -970,13 +1338,13 @@ class MockBrain(Brain):
                 mv = {"action": "ready", "footwork": "advance",
                       "thought": "Walk in behind guard, no wasted swings."}
             elif d > 130:
-                mv = {"action": random.choice(atk), "footwork": "lunge",
+                mv = {"action": self.rng.choice(atk), "footwork": "lunge",
                       "thought": "Perfect entry distance — explosive sharp attack."}
             elif d < 70:
-                mv = {"action": random.choice(atk), "footwork": "hop_back",
+                mv = {"action": self.rng.choice(atk), "footwork": "hop_back",
                       "thought": "Too close, cut on the way out."}
             else:
-                mv = {"action": random.choice(atk), "footwork": random.choice(["hold", "advance"]),
+                mv = {"action": self.rng.choice(atk), "footwork": self.rng.choice(["hold", "advance"]),
                       "thought": "Strike range. Aim the sharp zone at his head."}
         # Pass self.actions so weapon-specific moves (wide_swing / spin_up
         # for flail, thrust_over for spear, etc.) survive sanitization. The
@@ -1017,6 +1385,12 @@ class GPTBrain(Brain):
                 model=self.model, messages=msgs, temperature=0.8, max_tokens=150,
                 response_format={"type": "json_object"})
         txt = r.choices[0].message.content
+        try:
+            u = getattr(r, "usage", None)
+            self._record_usage(getattr(u, "prompt_tokens", None),
+                               getattr(u, "completion_tokens", None))
+        except Exception:
+            pass
         self.history += [{"role": "user", "content": user},
                          {"role": "assistant", "content": txt}]
         return self._clean(_extract_json(txt))
@@ -1027,6 +1401,12 @@ class GPTBrain(Brain):
             messages=[{"role": "system", "content": system},
                       {"role": "user",   "content": user}],
             temperature=temperature, max_tokens=max_tokens)
+        try:
+            u = getattr(r, "usage", None)
+            self._record_usage(getattr(u, "prompt_tokens", None),
+                               getattr(u, "completion_tokens", None))
+        except Exception:
+            pass
         return r.choices[0].message.content or ""
 
 
@@ -1064,6 +1444,16 @@ class GeminiBrain(Brain):
                 response_mime_type="application/json")
         r = self.client.models.generate_content(
             model=self.model, contents=self.convo[-7:], config=cfg)
+        # Gemini reports usage as usageMetadata{promptTokenCount,
+        # candidatesTokenCount} rather than OpenAI's `usage` block.
+        try:
+            um = getattr(r, "usage_metadata", None) or {}
+            self._record_usage(um.get("prompt_token_count")
+                               or um.get("promptTokenCount"),
+                               um.get("candidates_token_count")
+                               or um.get("candidatesTokenCount"))
+        except Exception:
+            pass
         txt = r.text
         self.convo.append({"role": "model", "parts": [{"text": txt}]})
         return self._clean(_extract_json(txt))
@@ -1154,6 +1544,14 @@ class OpenRouterBrain(Brain):
                                retry_after or 15)  # default 15s if header absent
             raise ValueError(f"http_{r.status_code}: {err or r.reason_phrase}")
         data = r.json()
+        # OpenAI-compatible usage block: {"prompt_tokens", "completion_tokens"}.
+        # Recorded before anything else can fail, so a billing-relevant call
+        # is never lost to an exception downstream.
+        try:
+            self._record_usage((data.get("usage") or {}).get("prompt_tokens"),
+                               (data.get("usage") or {}).get("completion_tokens"))
+        except Exception:
+            pass
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
         txt = msg.get("content")
@@ -1200,7 +1598,13 @@ class OpenRouterBrain(Brain):
             if r.status_code == 429:
                 _mark_cooldown(self.model, retry_after or 15)
             raise ValueError(f"http_{r.status_code}: {err or r.reason_phrase}")
-        return r.json()["choices"][0]["message"]["content"] or ""
+        j = r.json()
+        try:
+            self._record_usage((j.get("usage") or {}).get("prompt_tokens"),
+                               (j.get("usage") or {}).get("completion_tokens"))
+        except Exception:
+            pass
+        return j["choices"][0]["message"]["content"] or ""
 
 
 # ============================================================
@@ -1220,7 +1624,20 @@ def pre_fight_quip(brain, opponent_label, weapon="sword"):
     user = (f"You are fighting a model called '{opponent_label}'. "
             f"Your weapon: {weapon}. Give your one line of pre-fight trash "
             "talk. Just the line, nothing else.")
-    fallback = random.choice(_MOCK_QUIPS["berserker"] + _MOCK_QUIPS["duelist"])
+    # Draw from a COPY of the brain's own rng state, so a seeded match stays
+    # reproducible even though the two fighters decide in parallel threads —
+    # and so the quip does not advance the decision stream. It used to draw
+    # from brain.rng directly, which meant the same seed produced a
+    # different fight through the server (which asks for quips) than
+    # through tools/simcore.py (which does not): the seeded-replay claim
+    # held offline and silently failed in production.
+    src = getattr(brain, "rng", random)
+    peek = random.Random()
+    try:
+        peek.setstate(src.getstate())
+    except (AttributeError, TypeError, ValueError):
+        peek.seed()
+    fallback = peek.choice(_MOCK_QUIPS["berserker"] + _MOCK_QUIPS["duelist"])
     return brain.chat_with_timeout(QUIP_SYS, user, max_tokens=60,
                                    temperature=1.0, fallback=fallback)
 
@@ -1397,21 +1814,54 @@ class GroqBrain(OpenRouterBrain):
         return r.json()["choices"][0]["message"]["content"] or ""
 
 
-def make_brain(kind, sharp_zones, mode="macro", weapon="sword", api_key=None):
+def make_brain(kind, sharp_zones, mode="macro", weapon="sword", api_key=None,
+               seed=None):
     """Build the right Brain subclass for a given kind.
 
     api_key: optional per-match BYOK OpenRouter key. If passed, OpenRouter
     calls draw from the caller's quota instead of the server's env var.
     Threaded via server.py -> Match -> make_brain -> OpenRouterBrain and
     is never stored anywhere persistent.
+
+    seed: when set, scripted baselines (bot:*) get a per-fighter seeded RNG
+    so a seeded match replays identically. LLM brains are unaffected —
+    their outputs are not reproducible from a seed.
     """
     kind = kind.lower()
+    # Scripted brains get their own Random seeded from the match seed so a
+    # seeded match replays identically even though the two fighters decide
+    # concurrently (see Brain.__init__). Without a seed we deliberately fall
+    # back to the global RNG — unseeded matches are meant to vary.
+    import random as _random
+    rng = _random.Random(seed) if seed is not None else None
 
     def _mock(personality="duelist", label=None):
         if mode == "joint":
             from joint_mode import MockJointBrain
-            return MockJointBrain(sharp_zones, label=label, weapon=weapon)
-        return MockBrain(sharp_zones, personality, label=label, weapon=weapon)
+            jb = MockJointBrain(sharp_zones, label=label, weapon=weapon,
+                                rng=rng)
+            # Same provenance id as the macro mock ("mock:duelist"), so a
+            # joint match lines up with the roster id the user picked
+            # instead of reporting the internal "Mock-jointer" label.
+            jb.p = personality
+            return jb
+        return MockBrain(sharp_zones, personality, label=label, weapon=weapon,
+                         rng=rng)
+
+    def _substitute(brain, reason):
+        """Tag a mock that is STANDING IN for a model the user actually picked.
+
+        Silent substitution is the one integrity failure the benchmark can't
+        survive: the user chose gpt-oss-120b, got heuristics, and the match
+        still reports `fully_llm_controlled: true`. Tagging the brain lets
+        Match stamp every one of its turns `_fallback`, so the live wait
+        screen, the reveal card's integrity row, and the leaderboard's
+        fallback_rate all disclose it. Declared baselines (`bot:*`,
+        `mock:*`) are NOT tagged — /api/models already labels them `no_api`.
+        """
+        brain.mock_substitute = True
+        brain.substitute_reason = reason
+        return brain
 
     # explicit mock personality: "mock:duelist" / "mock:berserker"
     if kind.startswith("mock:"):
@@ -1426,55 +1876,65 @@ def make_brain(kind, sharp_zones, mode="macro", weapon="sword", api_key=None):
     if kind.startswith("bot:"):
         from bots import make_bot
         return make_bot(kind.split(":", 1)[1], sharp_zones,
-                        mode=mode, weapon=weapon)
+                        mode=mode, weapon=weapon, seed=seed)
     # Groq model id: "groq:<groq-model-name>" — independent provider,
     # much larger free-tier ceiling. Routed through GroqBrain (subclass
     # of OpenRouterBrain) which just swaps base URL + auth key. If
     # GROQ_API_KEY isn't set, fall through to mock rather than pretending
     # to succeed — same shape as the OpenRouter branch below.
     if kind.startswith("groq:"):
+        reason = "no GROQ_API_KEY configured"
         if C.GROQ_API_KEY:
             try:
                 return GroqBrain(sharp_zones, kind, mode=mode, weapon=weapon)
             except Exception as e:
+                reason = f"Groq init failed: {e}"
                 print(f"[brains] Groq init failed ({e}); using mock.")
         else:
             print(f"[brains] No GROQ_API_KEY — '{kind}' slot uses mock.")
         label = kind.split(":", 1)[1].split("/")[-1][:20] + "(mock)"
-        return _mock("duelist", label=label)
+        return _substitute(_mock("duelist", label=label), reason)
     # OpenRouter model id (contains "/"), e.g. meta-llama/llama-3.3-70b:free
     if "/" in kind:
         # BYOK wins over env var: if the caller passed api_key, use it
         # even when the server has no OPENROUTER_API_KEY of its own
         # (letting a locally-hosted instance run purely on user keys).
         effective_key = api_key or C.OPENROUTER_API_KEY
+        reason = "no OpenRouter key (server env or BYOK)"
         if effective_key:
             try:
                 return OpenRouterBrain(sharp_zones, kind, mode=mode,
                                        weapon=weapon, api_key=api_key)
             except Exception as e:
+                reason = f"OpenRouter init failed: {e}"
                 print(f"[brains] OpenRouter init failed ({e}); using mock.")
         else:
             print(f"[brains] No OpenRouter key (server env or BYOK) — "
                   f"'{kind}' slot uses mock.")
         label = kind.split("/")[-1].replace(":free", "")[:20] + "(mock)"
-        return _mock("duelist", label=label)
+        return _substitute(_mock("duelist", label=label), reason)
     if kind == "gpt":
+        reason = "no OPENAI_API_KEY configured"
         if C.OPENAI_API_KEY:
             try:
                 return GPTBrain(sharp_zones, mode=mode, weapon=weapon)
             except Exception as e:
+                reason = f"GPT init failed: {e}"
                 print(f"[brains] GPT init failed ({e}); using mock.")
         else:
+            reason = "no OPENAI_API_KEY configured"
             print("[brains] No OPENAI_API_KEY — GPT slot uses mock.")
-        return _mock("duelist", label="GPT(mock)")
+        return _substitute(_mock("duelist", label="GPT(mock)"), reason)
     if kind == "gemini":
+        reason = "no GEMINI_API_KEY configured"
         if C.GEMINI_API_KEY:
             try:
                 return GeminiBrain(sharp_zones, mode=mode, weapon=weapon)
             except Exception as e:
+                reason = f"Gemini init failed: {e}"
                 print(f"[brains] Gemini init failed ({e}); using mock.")
         else:
+            reason = "no GEMINI_API_KEY configured"
             print("[brains] No GEMINI_API_KEY — Gemini slot uses mock.")
-        return _mock("berserker", label="GEMINI(mock)")
+        return _substitute(_mock("berserker", label="GEMINI(mock)"), reason)
     return _mock(kind if kind in PERSONALITIES else "duelist")

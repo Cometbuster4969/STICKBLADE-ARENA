@@ -18,6 +18,37 @@ import config as C
 
 WEAPONS = ["sword", "flail", "bow", "dagger", "spear"]
 
+# ---------------------------------------------------------------------------
+# Empirical balance status (action-plan §9: "if a weapon is intentionally
+# unusual, label it as an asymmetric challenge mode rather than allowing
+# users to mistake it for a balanced comparison").
+#
+# Measured with tools/weapon_balance.py on mirrored scripted-bot batches:
+# the same two bots swap canvas sides every other match, so a neutral
+# configuration trends to a 0.5 side-A win rate. `verdict` is only "biased"
+# when the 95% Wilson interval excludes 0.5; "provisional" means the point
+# estimate is off but the interval still contains 0.5 at this sample size.
+# Numbers live in research/balance_report.md — regenerate them with:
+#     python3 tools/weapon_balance.py --n 8 --md-out research/balance_report.md
+# ---------------------------------------------------------------------------
+WEAPON_BALANCE = {
+    "sword":  {"status": "provisional", "side_a_win_rate": 0.58,
+               "ci": [0.39, 0.75], "n": 24},
+    "dagger": {"status": "balanced", "side_a_win_rate": 0.48,
+               "ci": [0.30, 0.67], "n": 24},
+    "spear":  {"status": "balanced", "side_a_win_rate": 0.44,
+               "ci": [0.26, 0.63], "n": 24},
+    "flail":  {"status": "asymmetric", "side_a_win_rate": 0.19,
+               "ci": [0.08, 0.38], "n": 24,
+               "note": "Mirrored bot batch: side B wins ~81% of flail "
+                       "matches regardless of model. Treat flail matches as "
+                       "an asymmetric challenge, not a like-for-like "
+                       "comparison — momentum/spin-up makes side assignment "
+                       "decisive at this tuning."},
+    "bow":    {"status": "provisional", "side_a_win_rate": 0.31,
+               "ci": [0.16, 0.51], "n": 24},
+}
+
 WEAPON_ZONES = {
     "sword":  ["tip", "edge", "back_edge", "pommel"],
     "dagger": ["tip", "edge", "back_edge", "pommel"],   # same anatomy, shorter

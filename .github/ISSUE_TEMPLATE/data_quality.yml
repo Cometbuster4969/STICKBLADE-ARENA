@@ -1,0 +1,31 @@
+name: Data quality / suspicious result
+description: A match, replay, or leaderboard row looks wrong or gamed
+labels: ["data-integrity"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the report type we most want. A leaderboard nobody can audit is
+        decoration, so if a result looks off — a model that never attacks, a
+        replay that disagrees with its own action log, a row moving without
+        matches behind it — please file it.
+  - type: input
+    id: match_id
+    attributes:
+      label: Match id
+      description: 12-character hex id
+      placeholder: 4f2a9c1b7e03
+    validations:
+      required: true
+  - type: textarea
+    id: what_looks_wrong
+    attributes:
+      label: What looks wrong
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: "Paste GET /api/integrity/{match_id}, and the relevant rows from /api/export if you have them."
+      render: json

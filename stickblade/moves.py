@@ -138,6 +138,10 @@ class MoveController:
         self.arrow_mgr = arrow_mgr
         self.enemy = enemy
         fighter.last_action = self.action
+        # Mobility bookkeeping: remember how many turns in a row this fighter
+        # has stood still (published next turn as
+        # ranged_hint.consecutive_hold_turns).
+        fighter.note_footwork(self.footwork)
 
     def update(self, t_frac):
         f = self.f
