@@ -12,7 +12,7 @@
 > Never delete deprioritized items — keep them as ledger entries so future
 > sessions don't re-propose them.
 
-**Last updated:** 2026-09-09 · §5 ratings + §20 capacity measured (see shipping timeline). Prior entry 2026-09-08 · tip `a94062f` (PR #3, tag `v1.4.0`) · Benchmark spec v1.0 frozen + provenance everywhere + tooling + /trust,/status,/dashboard + 117-test suite (see shipping timeline). Earlier 2026-08-04: cross-benchmark correlation study shipped (null / underpowered finding — kills fabricated ρ ≈ 0.71 claim; grade unchanged). Earlier 2026-07-30: Apache-2.0 license swap + CITATION.cff + NOTICE + 3 Tier-B items + AGPL kill; and METHODOLOGY.md seed + SuperAnnotate/Databricks audit + 3 Tier-B items.
+**Last updated:** 2026-09-09 · issue #8 UX fix (prediction panel now hides after simulation end) + §5 ratings + §20 capacity measured (see shipping timeline). Prior entry 2026-09-08 · tip `a94062f` (PR #3, tag `v1.4.0`) · Benchmark spec v1.0 frozen + provenance everywhere + tooling + /trust,/status,/dashboard + 117-test suite (see shipping timeline). Earlier 2026-08-04: cross-benchmark correlation study shipped (null / underpowered finding — kills fabricated ρ ≈ 0.71 claim; grade unchanged). Earlier 2026-07-30: Apache-2.0 license swap + CITATION.cff + NOTICE + 3 Tier-B items + AGPL kill; and METHODOLOGY.md seed + SuperAnnotate/Databricks audit + 3 Tier-B items.
 **Live grades (per AGENTS.md §0.5 anchors, self-assessed 2026-09-08, re-derive independently):** Codebase 8.8 (was 8.4) · Security 8.7 · Research 8.6 (was 8.2)
 
 **Live vote-through rate (measured 2026-07-XX):**
@@ -171,6 +171,13 @@ curl -s https://raw.githubusercontent.com/Cometbuster4969/STICKBLADE-ARENA/main/
 
 Reverse chronological. Every ship gets: date · commit(s) · one-line summary.
 Long commits get a "Why it mattered" note.
+
+### Issue #8: prediction dialog hides after simulation end (Sep 9, 2026)
+
+- **2026-09-09** · branch `copilot/cb4969-fix-prediction-dialog` ·
+  `stickblade-web/app/page.js` now renders `PredictPanel` only while a duel
+  is still running (`isBusy && !replay && !voteResult`), so the prediction
+  prompt is gone once the simulation finishes and replay is available.
 
 ### Review priorities 1–5: calibration runner, data-quality labels, dataset release, status, research pages (Sep 9, 2026, second session)
 
