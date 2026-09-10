@@ -608,7 +608,7 @@ export default function Home() {
       )}
 
       {/* ================= JUDGE ================= */}
-      {replay && !voteResult && (
+      {isBusy && !replay && !voteResult && (
         <PredictPanel prediction={prediction} onPredict={setPrediction} streak={streak} />
       )}
       {replay && !voteResult && (
