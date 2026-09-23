@@ -836,6 +836,99 @@ class SupabaseStorage:
         rows_out.sort(key=lambda x: -(x["win_rate"] or 0))
         return rows_out
 
+    def preference_pairs(self, sharp=None, weapon=None, mode=None, arena=None,
+                         blindfolded=None, tier=None):
+        """Mirror of SQLite preference_pairs: voted matches as raw
+        (model_a, model_b, flip, choice) rows for the Bradley-Terry fit.
+
+        PostgREST has no JOIN, so matches and votes are fetched separately
+        and stitched in Python with the same rules as the SQLite side:
+        most recent vote per match wins (GROUP BY ... HAVING MAX(created)),
+        a match with no timed vote is dropped, and rows come back ordered
+        by match creation time. ranking_eligible rides along as a real
+        boolean (None reads as eligible, mirroring COALESCE(...,1)); the
+        downstream fit skips ineligible rows.
+
+        Tier note: Supabase votes carry no voter_tier column yet (the
+        local backend added it via migration; the Supabase schema and
+        record_vote never did), so every Supabase vote is effectively
+        casual. tier="casual" therefore retries without the column and
+        tier="expert" honestly returns []. Un-migrated schema: return [].
+        """
+        mparams = {
+            "status": "eq.done",
+            "voted": "eq.true",
+            "select": ("id,model_a,model_b,flip,ranking_eligible,created,"
+                       "match_length"),
+            "order": "created.asc",
+            "limit": "10000",
+        }
+        if sharp:  mparams["sharp"]  = f"eq.{sharp}"
+        if weapon: mparams["weapon"] = f"eq.{weapon}"
+        if mode:   mparams["mode"]   = f"eq.{mode}"
+        if arena:  mparams["arena"]  = f"eq.{arena}"
+        if blindfolded is not None:
+            mparams["blindfolded"] = f"eq.{'true' if blindfolded else 'false'}"
+        try:
+            matches = self._rest("GET", "matches", params=mparams)
+        except Exception:
+            return []
+        if not matches:
+            return []
+        mids = [m["id"] for m in matches]
+        want_tier = tier in ("casual", "expert")
+        try:
+            votes = self._rest("GET", "votes", params={
+                "match_id": f"in.({','.join(mids)})",
+                "select": ("match_id,choice,created" +
+                           (",voter_tier" if want_tier else "")),
+                "limit": "50000"})
+        except Exception:
+            if want_tier and tier == "casual":
+                # No voter_tier column (pre-tier schema): every vote counts
+                # as casual, mirroring COALESCE(voter_tier,'casual').
+                try:
+                    votes = self._rest("GET", "votes", params={
+                        "match_id": f"in.({','.join(mids)})",
+                        "select": "match_id,choice,created",
+                        "limit": "50000"})
+                except Exception:
+                    return []
+            else:
+                return []
+        # Most recent vote per match (first row wins created-ties —
+        # deterministic where the SQL GROUP BY is arbitrary). Matches with
+        # no timed vote are dropped, mirroring HAVING MAX(created).
+        by_mid = {}
+        for v in votes:
+            by_mid.setdefault(v["match_id"], []).append(v)
+        best = {}
+        for mid, vs in by_mid.items():
+            timed = [v for v in vs if v.get("created") is not None]
+            if not timed:
+                continue
+            best[mid] = max(timed, key=lambda v: v["created"])
+        by_id = {m["id"]: m for m in matches}
+        out = []
+        for mid, v in best.items():
+            m = by_id.get(mid)
+            if m is None:
+                continue
+            if want_tier and (v.get("voter_tier") or "casual") != tier:
+                continue
+            elig = m.get("ranking_eligible")
+            out.append({
+                "model_a": m["model_a"], "model_b": m["model_b"],
+                "flip": bool(m.get("flip")),
+                "choice": v.get("choice"),
+                "ranking_eligible": True if elig is None else bool(elig),
+                "created": m.get("created"),
+                "match_length": m.get("match_length"),
+            })
+        # NULLS-first to match SQLite's ORDER BY created ASC.
+        out.sort(key=lambda r: (r["created"] is not None, r["created"] or 0))
+        return out
+
     def quality_rows(self, sharp=None, weapon=None, mode=None, arena=None,
                      blindfolded=None, limit=50000):
         """Mirror of LocalStorage.quality_rows: finished match rows with the

@@ -351,7 +351,10 @@ def preference_pairs_from_votes(rows):
     """
     pairs = []
     for r in rows:
-        if r.get("ranking_eligible") is False:
+        # `in (False, 0)`, not `is False`: SQLite rows carry 0/1 ints while
+        # Supabase rows carry real booleans — both must exclude ineligible.
+        # Missing/None reads as eligible (back-compat for minimal rows).
+        if r.get("ranking_eligible") in (False, 0):
             continue
         flip = bool(r.get("flip"))
         a_model = r.get("model_b") if flip else r.get("model_a")
