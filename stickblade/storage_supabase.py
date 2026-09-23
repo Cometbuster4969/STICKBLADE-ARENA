@@ -698,6 +698,144 @@ class SupabaseStorage:
         out.sort(key=lambda x: -x["damage_per_turn"])
         return out
 
+    def model_stats(self, sharp=None, weapon=None, mode=None, arena=None,
+                    blindfolded=None):
+        """Mirror of SQLite model_stats. Pulls done matches with non-null
+        proxy metrics via PostgREST, rolls up per-model in Python. See
+        storage.py:LocalStorage.model_stats for definitions of every rate
+        (hit_rate can exceed 1.0 — contacts per decision, not a
+        probability; lethal_rate counts kills only, so an attrition
+        winner correctly shows lethal_rate 0 with a high win_rate).
+
+        Bounded to 10k match rows / 50k vote rows per query, same
+        convention as objective_leaderboard. Un-migrated schema (any
+        selected column missing from Supabase): return empty — operator
+        should re-run supabase_schema.sql.
+        """
+        params = {
+            "status": "eq.done",
+            "damage_dealt_a": "not.is.null",
+            "select": ("id,model_a,model_b,flip,winner_side,method,turns,"
+                       "damage_dealt_a,damage_dealt_b,"
+                       "hits_landed_a,hits_landed_b,"
+                       "hits_attempted_a,hits_attempted_b,"
+                       "fallback_turns_a,fallback_turns_b,"
+                       "latency_ms_a,latency_ms_b,"
+                       "invalid_actions_a,invalid_actions_b,"
+                       "fallback_used,ranking_eligible"),
+            "limit": "10000",
+        }
+        if sharp:  params["sharp"]  = f"eq.{sharp}"
+        if weapon: params["weapon"] = f"eq.{weapon}"
+        if mode:   params["mode"]   = f"eq.{mode}"
+        if arena:  params["arena"]  = f"eq.{arena}"
+        if blindfolded is not None:
+            params["blindfolded"] = f"eq.{'true' if blindfolded else 'false'}"
+        try:
+            rows = self._rest("GET", "matches", params=params)
+        except Exception:
+            # Un-migrated schema (a selected column doesn't exist yet):
+            # return empty. Operator should re-run supabase_schema.sql.
+            return []
+        try:
+            votes = {}
+            for v in self._rest("GET", "votes",
+                                params={"select": "match_id,choice",
+                                        "limit": "50000"}):
+                votes[v["match_id"]] = (v["choice"] or "").lower()
+        except Exception:
+            votes = {}
+
+        out = {}
+        for r in rows:
+            t = max(1, int(r.get("turns") or 1))
+            flip = bool(r.get("flip"))
+            side_a = r["model_b"] if flip else r["model_a"]
+            side_b = r["model_a"] if flip else r["model_b"]
+            lethal = (r.get("method") or "") == "kill"
+            timeout = (r.get("method") or "").startswith("timeout")
+            # ranking_eligible defaults true (mirrors the SQLite side's
+            # COALESCE(ranking_eligible, 1) for pre-migration rows).
+            eligible = r.get("ranking_eligible")
+            eligible = True if eligible is None else bool(eligible)
+            for side, model in (("a", side_a), ("b", side_b)):
+                m = out.setdefault(model, {
+                    "model": model, "matches": 0, "turns": 0,
+                    "damage": 0.0, "hits_landed": 0, "hits_attempted": 0,
+                    "fallback_turns": 0, "invalid_actions": 0,
+                    "latency_sum": 0.0, "latency_max": 0.0,
+                    "lethal_hits": 0, "survived": 0, "timeouts": 0,
+                    "wins": 0, "losses": 0, "draws": 0,
+                    "preferred": 0, "voted_matches": 0,
+                    "fallback_matches": 0,
+                })
+                m["matches"] += 1
+                m["turns"] += t
+                m["damage"] += float(r.get(f"damage_dealt_{side}") or 0.0)
+                m["hits_landed"] += int(r.get(f"hits_landed_{side}") or 0)
+                m["hits_attempted"] += int(r.get(f"hits_attempted_{side}") or 0)
+                m["fallback_turns"] += int(r.get(f"fallback_turns_{side}") or 0)
+                m["invalid_actions"] += int(r.get(f"invalid_actions_{side}") or 0)
+                lat = float(r.get(f"latency_ms_{side}") or 0.0)
+                m["latency_sum"] += lat
+                m["latency_max"] = max(m["latency_max"], lat)
+                winner_side = (r.get("winner_side") or "").lower()
+                # A kill is credited to the side that landed it; survival is
+                # "did not die", which is only false for the loser of a kill.
+                if lethal and winner_side == side:
+                    m["lethal_hits"] += 1
+                if not (lethal and winner_side != side):
+                    m["survived"] += 1
+                if timeout:
+                    m["timeouts"] += 1
+                if r.get("fallback_used"):
+                    m["fallback_matches"] += 1
+                # physics result on this side
+                if winner_side == "draw":
+                    m["draws"] += 1
+                elif winner_side == side:
+                    m["wins"] += 1
+                else:
+                    m["losses"] += 1
+                # human preference (only voted, ranking-eligible matches)
+                choice = votes.get(r.get("id"))
+                if choice and eligible:
+                    m["voted_matches"] += 1
+                    if choice == side:
+                        m["preferred"] += 1
+                    elif choice == "draw":
+                        m["preferred"] += 0.5
+
+        rows_out = []
+        for m in out.values():
+            n = m["matches"] or 1
+            turns = m["turns"] or 1
+            att = m["hits_attempted"] or 1
+            decided = (m["wins"] + m["losses"]) or 1
+            rows_out.append({
+                "model": m["model"],
+                "matches": m["matches"],
+                "wins": m["wins"], "losses": m["losses"], "draws": m["draws"],
+                "win_rate": round(m["wins"] / decided, 3),
+                "preference_rate": (round(m["preferred"] / m["voted_matches"], 3)
+                                    if m["voted_matches"] else None),
+                "voted_matches": m["voted_matches"],
+                "damage_per_turn": round(m["damage"] / turns, 2),
+                "hit_rate": round(m["hits_landed"] / att, 3),
+                "lethal_rate": round(m["lethal_hits"] / n, 3),
+                "survival_rate": round(m["survived"] / n, 3),
+                "timeout_rate": round(m["timeouts"] / n, 3),
+                "invalid_action_rate": round(m["invalid_actions"] / turns, 3),
+                "fallback_rate": round(m["fallback_turns"] / turns, 3),
+                "fallback_match_rate": round(m["fallback_matches"] / n, 3),
+                "latency_ms_mean": round(m["latency_sum"] / n, 1),
+                "latency_ms_max": round(m["latency_max"], 1),
+                "hits_landed": m["hits_landed"],
+                "hits_attempted": m["hits_attempted"],
+            })
+        rows_out.sort(key=lambda x: -(x["win_rate"] or 0))
+        return rows_out
+
     def quality_rows(self, sharp=None, weapon=None, mode=None, arena=None,
                      blindfolded=None, limit=50000):
         """Mirror of LocalStorage.quality_rows: finished match rows with the
