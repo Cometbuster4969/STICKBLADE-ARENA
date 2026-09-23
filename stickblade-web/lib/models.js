@@ -53,3 +53,41 @@ export function displayName(id) {
   if (!id) return "";
   return DISPLAY_NAMES[id] || id;
 }
+
+/**
+ * Normalize one /api/models row so the UI never renders `undefined`.
+ *
+ * Fresh backends send the full _model_meta() payload (provider, tier,
+ * est_turn_s, reasoning, no_api, modes, cooldown_s). Older deployed
+ * backends send only {id, name} — which used to surface as "up to
+ * undefineds per turn" plus a wrong "paid" badge on every model.
+ *
+ * Every field except est_turn_s is re-derived here from the id using
+ * the SAME rules as stickblade/server.py::_model_meta (prefix/suffix
+ * tests), so the UI stays correct against either backend version.
+ * est_turn_s can't be derived client-side (it comes from
+ * brains._timeout_for), so when absent the latency segment is hidden
+ * instead of printed (see ModelPicker). Idempotent — safe to apply
+ * to both raw rows and already-normalized ones.
+ */
+export function normalizeModel(m) {
+  if (!m || typeof m !== "object") return m;
+  const id = m.id || "";
+  const noApi = m.no_api ?? /^(mock|bot):/.test(id);
+  return {
+    ...m,
+    no_api: noApi,
+    provider:
+      m.provider ??
+      (noApi ? "scripted" : id.startsWith("groq:") ? "groq" : "openrouter"),
+    tier:
+      m.tier ??
+      (noApi ? "no-api" : id.endsWith(":free") ? "free" : "paid"),
+    modes:
+      m.modes ??
+      (id.startsWith("bot:") ? ["macro"] : ["macro", "joint"]),
+    // cooldown_s / est_turn_s / reasoning intentionally left as-is when
+    // absent: unknown cooldown reads as "not throttled", unknown latency
+    // hides the "up to Ns per turn" segment.
+  };
+}

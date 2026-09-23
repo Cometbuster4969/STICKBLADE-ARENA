@@ -20,6 +20,7 @@ import SampleFight from "@/components/SampleFight";
 import IntegrityBadge from "@/components/IntegrityBadge";
 import FAQ from "@/components/FAQ";
 import { readByokKey, readByokEnabled } from "@/lib/byok";
+import { normalizeModel } from "@/lib/models";
 import { getModels, createMatch, getMatch, getReplay, postVote,
          getLeaderboard, getLeaderboardObjective, startKeepalive,
          getIntegrity, getDataQuality } from "@/lib/api";
@@ -136,9 +137,12 @@ export default function Home() {
 
   useEffect(() => {
     getModels().then((ms) => {
-      setModels(ms);
-      const real = ms.filter((m) => !m.no_api);
-      const pool = real.length >= 2 ? real : ms;
+      // Normalize: stale backends send only {id, name}; re-derive
+      // provider/tier/no_api/modes from the id (see lib/models.js).
+      const roster = (ms || []).map(normalizeModel);
+      setModels(roster);
+      const real = roster.filter((m) => !m.no_api);
+      const pool = real.length >= 2 ? real : roster;
       setM1((prev) => prev || pool[0]?.id || "");
       setM2((prev) => prev || pool[1]?.id || "");
     }).catch((e) => setError(e.message));

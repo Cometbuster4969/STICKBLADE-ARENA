@@ -1,5 +1,6 @@
 "use client";
 import { useId } from "react";
+import { normalizeModel } from "@/lib/models";
 
 const CUSTOM = "__custom__";
 
@@ -27,7 +28,18 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
   const inputId = useId();
   const metaId = useId();
 
-  const picked = models.find((m) => m.id === value);
+  // Normalized defensively: stale backends send only {id, name}, and every
+  // render path below assumes the full metadata row. est_turn_s is the one
+  // field that can't be re-derived, so when it's absent the latency segment
+  // hides instead of printing "up to undefineds per turn".
+  const picked = normalizeModel(models.find((m) => m.id === value)) || null;
+  const latencyText = !picked
+    ? null
+    : picked.no_api
+      ? "no API call — instant"
+      : Number.isFinite(picked.est_turn_s)
+        ? `up to ${picked.est_turn_s}s per turn`
+        : null;
 
   return (
     <div>
@@ -85,12 +97,12 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
       {picked && (
         <div className="model-meta" id={metaId}>
           <span>{picked.provider}</span>
-          <span aria-hidden="true">·</span>
-          <span>
-            {picked.no_api
-              ? "no API call — instant"
-              : `up to ${picked.est_turn_s}s per turn`}
-          </span>
+          {latencyText && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>{latencyText}</span>
+            </>
+          )}
           {picked.reasoning && (
             <>
               <span aria-hidden="true">·</span>
