@@ -105,9 +105,9 @@ export const metadata = {
   alternates: {
     canonical: SITE_URL,
   },
-  // Favicon set — generated from /home/user/logos/stickblade-logo-1-action.png
-  // at 16/32/48/180/192/512 sizes. `favicon.ico` is multi-res 16/32/48 so
-  // browsers can pick the best. `apple-touch-icon.png` is 180x180 per iOS
+  // Favicon set — from logo-kit.zip (2026-09 rebrand: orange swordsman mark
+  // on warm-charcoal #0D0B09). favicon.ico is multi-res 16/32/48 so browsers
+  // can pick the best. `apple-touch-icon.png` is 180x180 per iOS
   // spec. Android/PWA gets 192 + 512 via site.webmanifest.
   icons: {
     icon: [
