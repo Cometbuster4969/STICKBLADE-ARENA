@@ -1,0 +1,353 @@
+diff --git a/stickblade/storage_supabase.py b/stickblade/storage_supabase.py
+index c09b46f..746a752 100644
+--- a/stickblade/storage_supabase.py
++++ b/stickblade/storage_supabase.py
+@@ -698,6 +698,144 @@ class SupabaseStorage:
+         out.sort(key=lambda x: -x["damage_per_turn"])
+         return out
+ 
++    def model_stats(self, sharp=None, weapon=None, mode=None, arena=None,
++                    blindfolded=None):
++        """Mirror of SQLite model_stats. Pulls done matches with non-null
++        proxy metrics via PostgREST, rolls up per-model in Python. See
++        storage.py:LocalStorage.model_stats for definitions of every rate
++        (hit_rate can exceed 1.0 — contacts per decision, not a
++        probability; lethal_rate counts kills only, so an attrition
++        winner correctly shows lethal_rate 0 with a high win_rate).
++
++        Bounded to 10k match rows / 50k vote rows per query, same
++        convention as objective_leaderboard. Un-migrated schema (any
++        selected column missing from Supabase): return empty — operator
++        should re-run supabase_schema.sql.
++        """
++        params = {
++            "status": "eq.done",
++            "damage_dealt_a": "not.is.null",
++            "select": ("id,model_a,model_b,flip,winner_side,method,turns,"
++                       "damage_dealt_a,damage_dealt_b,"
++                       "hits_landed_a,hits_landed_b,"
++                       "hits_attempted_a,hits_attempted_b,"
++                       "fallback_turns_a,fallback_turns_b,"
++                       "latency_ms_a,latency_ms_b,"
++                       "invalid_actions_a,invalid_actions_b,"
++                       "fallback_used,ranking_eligible"),
++            "limit": "10000",
++        }
++        if sharp:  params["sharp"]  = f"eq.{sharp}"
++        if weapon: params["weapon"] = f"eq.{weapon}"
++        if mode:   params["mode"]   = f"eq.{mode}"
++        if arena:  params["arena"]  = f"eq.{arena}"
++        if blindfolded is not None:
++            params["blindfolded"] = f"eq.{'true' if blindfolded else 'false'}"
++        try:
++            rows = self._rest("GET", "matches", params=params)
++        except Exception:
++            # Un-migrated schema (a selected column doesn't exist yet):
++            # return empty. Operator should re-run supabase_schema.sql.
++            return []
++        try:
++            votes = {}
++            for v in self._rest("GET", "votes",
++                                params={"select": "match_id,choice",
++                                        "limit": "50000"}):
++                votes[v["match_id"]] = (v["choice"] or "").lower()
++        except Exception:
++            votes = {}
++
++        out = {}
++        for r in rows:
++            t = max(1, int(r.get("turns") or 1))
++            flip = bool(r.get("flip"))
++            side_a = r["model_b"] if flip else r["model_a"]
++            side_b = r["model_a"] if flip else r["model_b"]
++            lethal = (r.get("method") or "") == "kill"
++            timeout = (r.get("method") or "").startswith("timeout")
++            # ranking_eligible defaults true (mirrors the SQLite side's
++            # COALESCE(ranking_eligible, 1) for pre-migration rows).
++            eligible = r.get("ranking_eligible")
++            eligible = True if eligible is None else bool(eligible)
++            for side, model in (("a", side_a), ("b", side_b)):
++                m = out.setdefault(model, {
++                    "model": model, "matches": 0, "turns": 0,
++                    "damage": 0.0, "hits_landed": 0, "hits_attempted": 0,
++                    "fallback_turns": 0, "invalid_actions": 0,
++                    "latency_sum": 0.0, "latency_max": 0.0,
++                    "lethal_hits": 0, "survived": 0, "timeouts": 0,
++                    "wins": 0, "losses": 0, "draws": 0,
++                    "preferred": 0, "voted_matches": 0,
++                    "fallback_matches": 0,
++                })
++                m["matches"] += 1
++                m["turns"] += t
++                m["damage"] += float(r.get(f"damage_dealt_{side}") or 0.0)
++                m["hits_landed"] += int(r.get(f"hits_landed_{side}") or 0)
++                m["hits_attempted"] += int(r.get(f"hits_attempted_{side}") or 0)
++                m["fallback_turns"] += int(r.get(f"fallback_turns_{side}") or 0)
++                m["invalid_actions"] += int(r.get(f"invalid_actions_{side}") or 0)
++                lat = float(r.get(f"latency_ms_{side}") or 0.0)
++                m["latency_sum"] += lat
++                m["latency_max"] = max(m["latency_max"], lat)
++                winner_side = (r.get("winner_side") or "").lower()
++                # A kill is credited to the side that landed it; survival is
++                # "did not die", which is only false for the loser of a kill.
++                if lethal and winner_side == side:
++                    m["lethal_hits"] += 1
++                if not (lethal and winner_side != side):
++                    m["survived"] += 1
++                if timeout:
++                    m["timeouts"] += 1
++                if r.get("fallback_used"):
++                    m["fallback_matches"] += 1
++                # physics result on this side
++                if winner_side == "draw":
++                    m["draws"] += 1
++                elif winner_side == side:
++                    m["wins"] += 1
++                else:
++                    m["losses"] += 1
++                # human preference (only voted, ranking-eligible matches)
++                choice = votes.get(r.get("id"))
++                if choice and eligible:
++                    m["voted_matches"] += 1
++                    if choice == side:
++                        m["preferred"] += 1
++                    elif choice == "draw":
++                        m["preferred"] += 0.5
++
++        rows_out = []
++        for m in out.values():
++            n = m["matches"] or 1
++            turns = m["turns"] or 1
++            att = m["hits_attempted"] or 1
++            decided = (m["wins"] + m["losses"]) or 1
++            rows_out.append({
++                "model": m["model"],
++                "matches": m["matches"],
++                "wins": m["wins"], "losses": m["losses"], "draws": m["draws"],
++                "win_rate": round(m["wins"] / decided, 3),
++                "preference_rate": (round(m["preferred"] / m["voted_matches"], 3)
++                                    if m["voted_matches"] else None),
++                "voted_matches": m["voted_matches"],
++                "damage_per_turn": round(m["damage"] / turns, 2),
++                "hit_rate": round(m["hits_landed"] / att, 3),
++                "lethal_rate": round(m["lethal_hits"] / n, 3),
++                "survival_rate": round(m["survived"] / n, 3),
++                "timeout_rate": round(m["timeouts"] / n, 3),
++                "invalid_action_rate": round(m["invalid_actions"] / turns, 3),
++                "fallback_rate": round(m["fallback_turns"] / turns, 3),
++                "fallback_match_rate": round(m["fallback_matches"] / n, 3),
++                "latency_ms_mean": round(m["latency_sum"] / n, 1),
++                "latency_ms_max": round(m["latency_max"], 1),
++                "hits_landed": m["hits_landed"],
++                "hits_attempted": m["hits_attempted"],
++            })
++        rows_out.sort(key=lambda x: -(x["win_rate"] or 0))
++        return rows_out
++
+     def quality_rows(self, sharp=None, weapon=None, mode=None, arena=None,
+                      blindfolded=None, limit=50000):
+         """Mirror of LocalStorage.quality_rows: finished match rows with the
+diff --git a/stickblade/test_model_stats_supabase.py b/stickblade/test_model_stats_supabase.py
+new file mode 100644
+index 0000000..cd34e54
+--- /dev/null
++++ b/stickblade/test_model_stats_supabase.py
+@@ -0,0 +1,198 @@
++"""Supabase model_stats regression test (headless, no network).
++
++Guards two stacked failures that 500'd GET /api/model_stats on every
++Supabase-backed deploy (the leaderboard "metrics" tab):
++
++  1. CODE GAP — SupabaseStorage never implemented model_stats() (only
++     LocalStorage had it), so the route raised AttributeError.
++  2. SCHEMA DRIFT — caught separately: on an un-migrated Supabase
++     (missing v1.0 metric columns) the method must return [] (HTTP 200
++     with empty rows), never raise. Operator re-runs supabase_schema.sql
++     to fill the columns.
++
++Checks:
++  1. AGG   — flip-aware attribution, kill/timeout/draw handling,
++             preference counting (side vote, draw vote = 0.5, vote on a
++             ranking-ineligible match ignored, NULL eligibility = eligible).
++  2. PARAMS — filter args map to the right PostgREST operators.
++  3. DEGRADE — matches-query failure -> []; votes-query failure -> rows
++             with preference_rate None (never a raise).
++  4. PARITY — byte-identical output to LocalStorage.model_stats on the
++             same dataset (the "mirror must match" property).
++
++Run:  python test_model_stats_supabase.py   (from stickblade/)
++Exits non-zero if any check fails.
++"""
++import json
++import sqlite3
++import sys
++import tempfile
++import types
++
++# storage_supabase imports httpx at module top; stub it — these tests
++# never touch the network (we bypass __init__ and fake _rest).
++sys.modules.setdefault("httpx", types.ModuleType("httpx"))
++
++from storage_supabase import SupabaseStorage  # noqa: E402
++from storage import LocalStorage  # noqa: E402
++
++FAILURES = []
++
++
++def check(name, cond, detail=""):
++    print(("PASS " if cond else "FAIL ") + name + (f" — {detail}" if detail and not cond else ""))
++    if not cond:
++        FAILURES.append(name)
++
++
++# ------------------------------------------------------------------ fixture
++# Canvas sides (a/b) are what winner_side/votes reference; flip swaps which
++# MODEL sits on which canvas side. M2 is flipped: canvas-a = C, canvas-b = B.
++MATCHES = [
++    {  # M1: A kills B, voted for canvas-a. fallback_used credits BOTH sides.
++        "id": "m1", "model_a": "A", "model_b": "B", "flip": False,
++        "winner_side": "a", "method": "kill", "turns": 10,
++        "damage_dealt_a": 100.0, "damage_dealt_b": 20.0,
++        "hits_landed_a": 8, "hits_landed_b": 2,
++        "hits_attempted_a": 10, "hits_attempted_b": 9,
++        "fallback_turns_a": 0, "fallback_turns_b": 3,
++        "latency_ms_a": 500.0, "latency_ms_b": 900.0,
++        "invalid_actions_a": 0, "invalid_actions_b": 1,
++        "fallback_used": True, "ranking_eligible": True,
++    },
++    {  # M2: flipped timeout, canvas-b (B) wins, draw vote, NULL eligibility.
++        "id": "m2", "model_a": "B", "model_b": "C", "flip": True,
++        "winner_side": "b", "method": "timeout_points", "turns": 24,
++        "damage_dealt_a": 30.0, "damage_dealt_b": 40.0,
++        "hits_landed_a": 3, "hits_landed_b": 4,
++        "hits_attempted_a": 12, "hits_attempted_b": 12,
++        "fallback_turns_a": 1, "fallback_turns_b": 1,
++        "latency_ms_a": 700.0, "latency_ms_b": 700.0,
++        "invalid_actions_a": 0, "invalid_actions_b": 0,
++        "fallback_used": False, "ranking_eligible": None,
++    },
++    {  # M3: draw, ranking-INeligible — its vote must not count anywhere.
++        "id": "m3", "model_a": "A", "model_b": "C", "flip": False,
++        "winner_side": "draw", "method": "points", "turns": 24,
++        "damage_dealt_a": 50.0, "damage_dealt_b": 50.0,
++        "hits_landed_a": 5, "hits_landed_b": 5,
++        "hits_attempted_a": 20, "hits_attempted_b": 20,
++        "fallback_turns_a": 0, "fallback_turns_b": 0,
++        "latency_ms_a": 600.0, "latency_ms_b": 650.0,
++        "invalid_actions_a": 2, "invalid_actions_b": 0,
++        "fallback_used": False, "ranking_eligible": False,
++    },
++]
++VOTES = [
++    {"match_id": "m1", "choice": "a"},
++    {"match_id": "m2", "choice": "draw"},
++    {"match_id": "m3", "choice": "a"},  # ignored: m3 ineligible
++]
++
++
++def make_store(matches=MATCHES, votes=VOTES, fail_on=()):
++    s = SupabaseStorage.__new__(SupabaseStorage)  # skip __init__ (env+network)
++    seen = {}
++
++    def fake_rest(method, table, params=None, body=None, prefer=None):
++        if table in fail_on:
++            raise RuntimeError(f"simulated {table} failure")
++        seen[table] = params
++        if table == "matches":
++            return [dict(r) for r in matches]
++        if table == "votes":
++            return [dict(v) for v in votes]
++        raise AssertionError(f"unexpected table {table}")
++
++    s._rest = fake_rest
++    return s, seen
++
++
++def by_model(rows):
++    return {r["model"]: r for r in rows}
++
++
++# ------------------------------------------------------------ 1. aggregation
++rows = make_store()[0].model_stats()
++m = by_model(rows)
++check("agg: three models", set(m) == {"A", "B", "C"}, sorted(m))
++
++a, b, c = m["A"], m["B"], m["C"]
++check("agg: A 2 matches, 1 win, 1 draw", (a["matches"], a["wins"], a["losses"], a["draws"]) == (2, 1, 0, 1), a)
++check("agg: A win_rate 1.0", a["win_rate"] == 1.0, a["win_rate"])
++check("agg: A lethal_rate 0.5 (kill in M1 only)", a["lethal_rate"] == 0.5, a["lethal_rate"])
++check("agg: A survived 1.0", a["survival_rate"] == 1.0, a["survival_rate"])
++check("agg: A preference 1.0 over 1 voted match (M3 ignored)",
++      (a["preference_rate"], a["voted_matches"]) == (1.0, 1), (a["preference_rate"], a["voted_matches"]))
++check("agg: A damage_per_turn", a["damage_per_turn"] == round(150.0 / 34, 2), a["damage_per_turn"])
++check("agg: A fallback_match_rate 0.5 (M1 only)", a["fallback_match_rate"] == 0.5, a["fallback_match_rate"])
++check("agg: A latency mean/max", (a["latency_ms_mean"], a["latency_ms_max"]) == (550.0, 600.0),
++      (a["latency_ms_mean"], a["latency_ms_max"]))
++
++check("agg: B win_rate 0.5", b["win_rate"] == 0.5, b["win_rate"])
++check("agg: B preference 0.25 (0 + 0.5 over 2)", b["preference_rate"] == 0.25, b["preference_rate"])
++check("agg: B timeout_rate 0.5", b["timeout_rate"] == 0.5, b["timeout_rate"])
++check("agg: B survived 0.5 (died in M1 kill)", b["survival_rate"] == 0.5, b["survival_rate"])
++
++check("agg: C win_rate 0.0", c["win_rate"] == 0.0, c["win_rate"])
++check("agg: C preference 0.5 (draw vote over 1)", c["preference_rate"] == 0.5, c["preference_rate"])
++check("agg: sorted by win_rate desc", [r["model"] for r in rows] == ["A", "B", "C"],
++      [r["model"] for r in rows])
++
++# ----------------------------------------------------------------- 2. params
++s, seen = make_store()
++s.model_stats(sharp="tip", weapon="sword", mode="macro", arena="ice", blindfolded=True)
++p = seen["matches"]
++check("params: base filters", p["status"] == "eq.done" and p["damage_dealt_a"] == "not.is.null", p)
++check("params: eq filters",
++      (p["sharp"], p["weapon"], p["mode"], p["arena"], p["blindfolded"]) ==
++      ("eq.tip", "eq.sword", "eq.macro", "eq.ice", "eq.true"), p)
++check("params: select has all 21 columns", len(p["select"].split(",")) == 21, p["select"])
++s2, seen2 = make_store()
++s2.model_stats()
++check("params: no filter keys when unfiltered",
++      not any(k in seen2["matches"] for k in ("sharp", "weapon", "mode", "arena", "blindfolded")),
++      seen2["matches"])
++
++# --------------------------------------------------------- 3. degradation
++check("degrade: matches failure -> []", make_store(fail_on=("matches",))[0].model_stats() == [])
++novote = make_store(fail_on=("votes",))[0].model_stats()
++check("degrade: votes failure still returns rows", len(novote) == 3, len(novote))
++check("degrade: votes failure -> preference None",
++      all(r["preference_rate"] is None and r["voted_matches"] == 0 for r in novote), novote)
++
++# ------------------------------------------------ 4. parity with LocalStorage
++tmp = tempfile.mkdtemp(prefix="msb_parity_")
++local = LocalStorage(root=tmp)
++cols = ("id,model_a,model_b,flip,winner_side,method,turns,status,"
++        "damage_dealt_a,damage_dealt_b,hits_landed_a,hits_landed_b,"
++        "hits_attempted_a,hits_attempted_b,fallback_turns_a,fallback_turns_b,"
++        "latency_ms_a,latency_ms_b,invalid_actions_a,invalid_actions_b,"
++        "fallback_used,ranking_eligible")
++with local._conn() as conn:
++    for r in MATCHES:
++        vals = [r["id"], r["model_a"], r["model_b"], int(r["flip"]),
++                r["winner_side"], r["method"], r["turns"], "done",
++                r["damage_dealt_a"], r["damage_dealt_b"],
++                r["hits_landed_a"], r["hits_landed_b"],
++                r["hits_attempted_a"], r["hits_attempted_b"],
++                r["fallback_turns_a"], r["fallback_turns_b"],
++                r["latency_ms_a"], r["latency_ms_b"],
++                r["invalid_actions_a"], r["invalid_actions_b"],
++                int(r["fallback_used"]),
++                (None if r["ranking_eligible"] is None else int(r["ranking_eligible"]))]
++        conn.execute(f"INSERT INTO matches ({cols}) VALUES ({','.join('?' * len(vals))})", vals)
++    for i, v in enumerate(VOTES):
++        conn.execute("INSERT INTO votes (id, match_id, choice) VALUES (?,?,?)",
++                     (f"v{i}", v["match_id"], v["choice"]))
++expected = local.model_stats()
++got = make_store()[0].model_stats()
++check("parity: identical output to LocalStorage",
++      json.dumps(got, sort_keys=True) == json.dumps(expected, sort_keys=True),
++      f"\n got={json.dumps(got, sort_keys=True)}\n exp={json.dumps(expected, sort_keys=True)}")
++
++print()
++if FAILURES:
++    print(f"{len(FAILURES)} FAILURES: {FAILURES}")
++    sys.exit(1)
++print("all model_stats supabase checks passed")
