@@ -1,5 +1,6 @@
 "use client";
 import { useId } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { normalizeModel } from "@/lib/models";
 
 const CUSTOM = "__custom__";
@@ -82,20 +83,32 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
         ))}
         <option value={CUSTOM}>✏ Custom model id…</option>
       </select>
-      {isCustom && (
-        <input
-          id={inputId}
-          aria-label={`${label} custom model id`}
-          type="text"
-          placeholder="OpenRouter id, e.g. qwen/qwen3-coder:free"
-          value={custom}
-          onChange={(e) => onCustomChange(e.target.value)}
-          style={{ marginTop: 6 }}
-          autoFocus
-        />
-      )}
+      <AnimatePresence initial={false}>
+        {isCustom && (
+          <motion.input
+            key="custom-input"
+            id={inputId}
+            aria-label={`${label} custom model id`}
+            type="text"
+            placeholder="OpenRouter id, e.g. qwen/qwen3-coder:free"
+            value={custom}
+            onChange={(e) => onCustomChange(e.target.value)}
+            autoFocus
+            initial={{ opacity: 0, y: -6, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: "auto" }}
+            exit={{ opacity: 0, y: -6, height: 0 }}
+            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+            style={{ marginTop: 6, overflow: "hidden" }}
+          />
+        )}
+      </AnimatePresence>
       {picked && (
-        <div className="model-meta" id={metaId}>
+        <motion.div
+          className="model-meta" id={metaId}
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        >
           <span>{picked.provider}</span>
           {latencyText && (
             <>
@@ -131,7 +144,7 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
               {picked.tier === "free" ? "free tier" : "paid"}
             </span>
           )}
-        </div>
+        </motion.div>
       )}
       {isCustom && (
         <div className="model-meta">

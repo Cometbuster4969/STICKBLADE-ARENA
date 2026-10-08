@@ -6,6 +6,8 @@ import TurnTranscript from "@/components/TurnTranscript";
 import { PredictPanel, VotePanel, RevealPanel } from "@/components/JudgePanels";
 import { getMatch, getReplay, postVote } from "@/lib/api";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
+import { MotionSection, SlideIn } from "@/components/MotionSection";
+import { motion } from "framer-motion";
 
 /* Replay + judge stage (review items 11-15, 22).
 
@@ -114,16 +116,37 @@ function ReplayInner() {
 
   if (err && !replay) {
     return (
-      <div className="panel empty">
+      <motion.div className="panel empty"
+        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}>
         <div className="empty-t">This replay could not be loaded.</div>
         <p style={{ color: "var(--dim)", fontSize: 13, margin: 0 }}>{err}</p>
-        <a className="btn btn-sm" href="/" style={{ textDecoration: "none" }}>
+        <motion.a className="btn btn-sm" href="/" style={{ textDecoration: "none" }}
+          whileHover={{ scale: 1.05, y: -1 }} whileTap={{ scale: 0.97 }}>
           Start a duel
-        </a>
+        </motion.a>
+      </motion.div>
+    );
+  }
+  if (!replay) {
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        {/* Skeleton mirrors the real layout so nothing jumps when data lands. */}
+        {[0, 1, 2].map((i) => (
+          <motion.div key={i}
+            className="panel"
+            style={{ height: i === 0 ? 320 : 90, borderRadius: 16,
+                     background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)" }}
+            animate={{ opacity: [0.45, 0.9, 0.45] }}
+            transition={{ duration: 1.6, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
+          />
+        ))}
+        <div className="status" role="status">
+          <span className="dots">Loading replay</span>
+        </div>
       </div>
     );
   }
-  if (!replay) return <div className="status" role="status">Loading replay…</div>;
 
   // Already voted (e.g. reopening a shared link): reconstruct a reveal from
   // /api/match. It carries canvas_*_model + names, so identities are still
@@ -136,9 +159,15 @@ function ReplayInner() {
 
   return (
     <div style={{ width: "100%" }}>
-      {err && <div className="status" role="alert">✖ {err}</div>}
+      {err && (
+        <motion.div className="status" role="alert"
+          initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
+        >✖ {err}</motion.div>
+      )}
 
-      <ReplayPlayer replay={replay} />
+      <SlideIn direction="up">
+        <ReplayPlayer replay={replay} />
+      </SlideIn>
       {/* §10: the debug overlay is the difference between "trust us" and
           "check for yourself". Hidden by default so it never gets in a
           casual viewer's way, but one click (or the "d" key) away. */}
@@ -155,7 +184,9 @@ function ReplayInner() {
 
       {/* Turn-by-turn transcript: the same events the ticker showed live.
           Data source: replay.thoughts + replay.events. Blind-safe. */}
-      <TurnTranscript replay={replay} />
+      <MotionSection delay={0.05}>
+        <TurnTranscript replay={replay} />
+      </MotionSection>
 
       <div ref={voteRef} style={{ scrollMarginTop: 80 }}>
         {canVote && !prediction && (

@@ -14,6 +14,66 @@ cross-version leaderboard comparison, regardless of the API version.
 
 ## [Unreleased] — benchmark spec v1.0 (fingerprint `09de66effd02` under prompt v2; `029281ed627a` under prompt v1)
 
+### Changed — full frontend redesign on a motion design system (2026-10-08)
+
+The UI was rebuilt around motion rather than re-skinned. No prior layout was
+preserved for its own sake; every page was restyled and every surface now has
+an entry, a hover response, or a scroll behaviour.
+
+- **Design system rewritten** (`stickblade-web/app/globals.css`): new token set
+  (`--ease-out-expo`, `--ease-spring`, `--glass`, `--purple`, glow tokens,
+  `--radius-lg`), ambient layered background, 16px radii, glass sticky nav,
+  hero with animated gradient wordmark, section-label / section-title scale,
+  and refreshed leaderboard, ticker, scorecard, modal and history styling.
+  All pre-existing component classes (`.lb`, `.scorecard`, `.prov-table`,
+  `.zone`, `.modal`, `.workflow`, `.reveal`, `.status`, `.hint.warn`,
+  `.rank-medal`, …) were re-skinned rather than dropped, plus `.why` and
+  `.visually-hidden` restored/utility-ised.
+- **Scroll reveals are CSS scroll-driven animations**, not JS. New
+  `data-reveal` / `data-reveal-stagger` / `data-lift` / `data-hero-in` system
+  built on `animation-timeline: view()` behind `@supports`, so the visible
+  state is the default. This was a deliberate correctness choice: an
+  IntersectionObserver reveal ships `opacity:0` inline from the server and only
+  releases it after hydration, which would have made the whole site unreadable
+  to a non-JS reader or a text-extracting crawler and put LCP behind JS timing.
+  Verified: **0 elements ship invisible across all 16 static pages** while 118
+  reveal hooks are active.
+- **framer-motion (`v14`) added for what CSS cannot do**: the scroll progress
+  rail, hero scroll-linked drift/scale/fade, the nav's `layoutId` active-pill
+  slide, tournament seed reordering, `AnimatePresence` mount/unmount
+  choreography (advanced panel, FAQ answers, self-play warning, errors), spring
+  hover/tap on buttons and cards, and the vote-reveal sequence.
+- **Reveal moment** (`components/JudgePanels.js`): fighter cells slide in from
+  their own side, model ids decode through a scramble, and Elo deltas count up
+  from zero with a colour that tracks sign.
+- **Accessibility is now wired, not just present.** `components/A11yControls.js`
+  existed but was rendered by no page — the ♿ Motion popover in the nav mounts
+  it on every screen, and the new `MotionProvider` bridges `data-motion` into
+  framer-motion's `MotionConfig`, so reduced motion drops transforms site-wide
+  rather than only muting CSS. `lib/prefs.js` gained a subscription hook so the
+  toggle propagates to JS-driven motion; `applyPrefs` moved into
+  `MotionProvider` so first paint respects the OS setting even with the popover
+  closed. Ambient orbs unmount under `data-fx="off"` via a MutationObserver.
+- **Perf decisions from the previous audit were kept, not re-litigated**:
+  `backdrop-filter` stays off `.panel` (measured ~6 ms/frame on mobile) and is
+  used only on the single sticky nav and the modal; the fullscreen grid layer is
+  still dropped on phones. `.glass-card` was removed as dead CSS carrying an
+  expensive property. `body` moved from `overflow-x: hidden` to `clip` so the
+  sticky nav keeps working, and `contain: paint` came off `.panel` because it
+  clipped the `glow-*` border rings.
+- Nav and footer break out of the 1200px container with the `calc(50% - 50vw)`
+  trick so the glass bar reads as chrome instead of an inset card.
+- Restyled/motion-added pages: `/`, `/leaderboard`, `/history`, `/status`,
+  `/events`, `/dashboard`, `/tournament`, `/replay`, `/trust`, plus the
+  `DocPage` shell used by `/research`, `/methodology`, `/data`,
+  `/reproducibility`, `/limitations`.
+
+Benchmark semantics untouched: no route, API call, payload field, blind-voting
+rule, or stored value changed. `npm run check:player`, the CI JSX balance
+check, and `next build` under `NEXT_PUBLIC_API_BASE=https://ci-placeholder.invalid`
+all pass. First Load JS for `/` is 196 kB (framer-motion ≈ +48 kB); every page
+remains statically prerendered.
+
 ### Added — next-step priorities 1–5 (2026-09-09, second session)
 
 - **P1 · calibration batch runner** `tools/run_calibration_batch.py`:

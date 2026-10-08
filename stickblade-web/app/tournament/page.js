@@ -1,6 +1,8 @@
 "use client";
 import { Suspense, useEffect, useId, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { MotionSection, HeroAnimation, FloatingOrb } from "@/components/MotionSection";
 import {
   getModels, createTournament, getTournament, listTournaments,
 } from "@/lib/api";
@@ -93,16 +95,27 @@ function CreateBracket({ onCreated }) {
     }
   }
 
+  const reduce = useReducedMotion();
+
   return (
     <>
       <SiteNav />
     <>
-      <section className="tagline" style={{ marginBottom: 8 }}>
-        <h1>🏆 Tournament</h1>
-        <p>Bracket of {size} models · single elimination · pure carnage.</p>
-      </section>
+      <div style={{ position: "relative" }}>
+        <FloatingOrb size={260} color="rgba(255, 184, 48, 0.06)" top="-40px" left="-60px" />
+        <HeroAnimation>
+          <section className="tagline" style={{ marginBottom: 8 }}>
+            <h1>🏆 Tournament</h1>
+            <p>Bracket of {size} models · single elimination · pure carnage.</p>
+          </section>
+        </HeroAnimation>
+      </div>
 
-      <div className="row">
+      <motion.div className="row"
+        initial={reduce ? false : { opacity: 0, y: 28 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+      >
         {/* Setup panel */}
         <div className="panel glow-red">
           <div className="panel-head">
@@ -178,9 +191,11 @@ function CreateBracket({ onCreated }) {
             </div>
           </div>
 
-          <button className="fight-btn" onClick={start} disabled={busy || picked.length !== size}>
-            {busy ? "⚙ Queuing" : `🏆 Start ${size}-Bracket`}
-          </button>
+          <motion.button className="fight-btn" onClick={start} disabled={busy || picked.length !== size}
+            whileHover={reduce || busy || picked.length !== size ? {} : { scale: 1.02, y: -2 }}
+            whileTap={reduce ? {} : { scale: 0.98 }}>
+            {busy ? <span className="dots">⚙ Queuing</span> : `🏆 Start ${size}-Bracket`}
+          </motion.button>
           {err && <div className="status" style={{ color: "var(--red-2)" }}>✖ {err}</div>}
         </div>
 
@@ -197,11 +212,17 @@ function CreateBracket({ onCreated }) {
 
           {/* picked / seeded list */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+            <AnimatePresence initial={false}>
             {picked.map((id, i) => (
-              <div key={id} style={{
+              <motion.div key={id} layout={reduce ? false : "position"}
+                initial={{ opacity: 0, x: -16, height: 0 }}
+                animate={{ opacity: 1, x: 0, height: "auto" }}
+                exit={{ opacity: 0, x: 16, height: 0 }}
+                transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                style={{
                 display: "flex", alignItems: "center", gap: 8, padding: "8px 10px",
                 background: "var(--bg-3)", borderRadius: "var(--radius-xs)",
-                border: "1px solid var(--line)",
+                border: "1px solid var(--line)", overflow: "hidden",
               }}>
                 <span style={{
                   width: 22, height: 22, borderRadius: 4, display: "inline-flex",
@@ -219,8 +240,9 @@ function CreateBracket({ onCreated }) {
                   style={{ width: "auto", padding: "4px 8px", fontSize: 12,
                            color: "var(--red-2)", borderColor: "var(--red-2)" }}
                   aria-label="Remove">×</button>
-              </div>
+              </motion.div>
             ))}
+            </AnimatePresence>
             {!picked.length && (
               <div style={{ color: "var(--dim)", fontSize: 13, textAlign: "center", padding: 8 }}>
                 no models chosen yet — click to add from below
@@ -251,9 +273,10 @@ function CreateBracket({ onCreated }) {
             </div>
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Recent tournaments */}
+      <MotionSection delay={0.1}>
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title"><span className="tick" /> Recent Brackets</span>
@@ -282,6 +305,7 @@ function CreateBracket({ onCreated }) {
             </table>
           )}
       </div>
+      </MotionSection>
     </>
       <SiteFooter />
     </>

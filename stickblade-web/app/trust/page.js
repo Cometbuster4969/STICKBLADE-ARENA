@@ -1,5 +1,9 @@
 import Link from "next/link";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
+// MotionSection is a client component, but a server page may render it as a
+// wrapper — the trust copy stays a server render (and keeps its metadata
+// export) while the panels still scroll-reveal like the rest of the site.
+import { MotionSection } from "@/components/MotionSection";
 
 export const metadata = {
   title: "Trust & data handling — STICKBLADE ARENA",
@@ -56,6 +60,7 @@ export default function TrustPage() {
     <>
       <SiteNav />
     <div className="container">
+      <MotionSection>
       <div className="panel">
         <span className="panel-title">
           <span className="tick" /> Trust, privacy &amp; data handling
@@ -73,9 +78,11 @@ export default function TrustPage() {
           </a>.
         </p>
       </div>
+      </MotionSection>
 
-      {SECTIONS.map((sec) => (
-        <div className="panel" key={sec.h}>
+      {SECTIONS.map((sec, i) => (
+        <MotionSection key={sec.h} delay={0.05 + i * 0.05}>
+        <div className="panel">
           <span className="panel-title">
             <span className="tick" /> {sec.h}
           </span>
@@ -92,8 +99,10 @@ export default function TrustPage() {
             </tbody>
           </table>
         </div>
+        </MotionSection>
       ))}
 
+      <MotionSection delay={0.05}>
       <div className="panel">
         <span className="panel-title">
           <span className="tick" /> BYOK (bring your own key)
@@ -113,7 +122,9 @@ export default function TrustPage() {
             panel. Clearing site data also removes it.</li>
         </ol>
       </div>
+      </MotionSection>
 
+      <MotionSection delay={0.05}>
       <div className="panel">
         <span className="panel-title">
           <span className="tick" /> Retention, deletion &amp; contact
@@ -150,6 +161,8 @@ export default function TrustPage() {
         </table>
       </div>
 
+      </MotionSection>
+      <MotionSection delay={0.05}>
       <div className="panel">
         <span className="panel-title">
           <span className="tick" /> Known limitations
@@ -173,6 +186,7 @@ export default function TrustPage() {
           </Link>
         </p>
       </div>
+      </MotionSection>
     </div>
       <SiteFooter />
     </>

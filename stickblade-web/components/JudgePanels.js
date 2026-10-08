@@ -1,4 +1,6 @@
 "use client";
+import { useEffect, useState } from "react";
+import { motion, useReducedMotion, useMotionValue, useTransform, animate } from "framer-motion";
 import ShareButton from "@/components/ShareButton";
 
 /* Judge stage: optional prediction -> blind vote -> reveal (review items 11-15).
@@ -34,9 +36,15 @@ export function PredictPanel({ prediction, onPredict, streak }) {
         question, separate from the vote below — and entirely optional.
       </p>
       <div className="vote-row">
-        <button className="vote-a" onClick={() => onPredict("a")}>Fighter A wins</button>
-        <button className="vote-draw" onClick={() => onPredict("draw")}>Draw</button>
-        <button className="vote-b" onClick={() => onPredict("b")}>Fighter B wins</button>
+        {[["a", "vote-a", "Fighter A wins"],
+          ["draw", "vote-draw", "Draw"],
+          ["b", "vote-b", "Fighter B wins"]].map(([side, cls, label]) => (
+          <motion.button key={side} className={cls} onClick={() => onPredict(side)}
+            whileHover={{ y: -3, scale: 1.01 }} whileTap={{ scale: 0.97 }}
+            transition={{ type: "spring", stiffness: 400, damping: 26 }}>
+            {label}
+          </motion.button>
+        ))}
       </div>
     </div>
   );
@@ -108,7 +116,15 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
   const fmtElo = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v}`);
 
   return (
-    <div className="panel reveal">
+    <motion.div
+      className="panel reveal"
+      initial={{ opacity: 0, scale: 0.985 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      style={{ position: "relative", overflow: "hidden" }}
+    >
+      {/* One-shot flash as the identities land — the payoff of a blind vote. */}
+      <RevealFlash />
       <span className="panel-title gold"><span className="tick" /> Reveal — who they were</span>
 
       {prediction && (
@@ -138,24 +154,34 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
       )}
 
       <div className="reveal-grid">
-        <div className="reveal-cell">
+        <motion.div className="reveal-cell"
+          initial={{ opacity: 0, x: -28, rotateY: 8 }}
+          animate={{ opacity: 1, x: 0, rotateY: 0 }}
+          transition={{ delay: 0.18, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+          style={{ position: "relative" }}
+        >
           <div className="side" style={{ color: "var(--green)" }}>Fighter A was</div>
-          <div className="who">{nameA}</div>
+          <div className="who"><ScrambleText text={nameA} delay={0.35} /></div>
           <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 6 }}>
-            Human-Voted Elo {fmtElo(eloA)}
+            Human-Voted Elo <EloDelta value={eloA} />
             {winnerSide === "a" && <b style={{ color: "var(--gold)" }}> · won the fight</b>}
             {votedSide === "a" && <b style={{ color: "var(--green)" }}> · your vote</b>}
           </div>
-        </div>
-        <div className="reveal-cell">
+        </motion.div>
+        <motion.div className="reveal-cell"
+          initial={{ opacity: 0, x: 28, rotateY: -8 }}
+          animate={{ opacity: 1, x: 0, rotateY: 0 }}
+          transition={{ delay: 0.26, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+          style={{ position: "relative" }}
+        >
           <div className="side" style={{ color: "var(--blue)" }}>Fighter B was</div>
-          <div className="who">{nameB}</div>
+          <div className="who"><ScrambleText text={nameB} delay={0.5} /></div>
           <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 6 }}>
-            Human-Voted Elo {fmtElo(eloB)}
+            Human-Voted Elo <EloDelta value={eloB} />
             {winnerSide === "b" && <b style={{ color: "var(--gold)" }}> · won the fight</b>}
             {votedSide === "b" && <b style={{ color: "var(--blue)" }}> · your vote</b>}
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {disagreement && (
@@ -166,7 +192,11 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
         </div>
       )}
 
-      <div className="reveal-rows">
+      <motion.div className="reveal-rows"
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      >
         <div>
           Physical winner:{" "}
           <b>{winnerSide == null ? "Unknown" : winnerSide === "draw" ? "Draw"
@@ -199,7 +229,7 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
           Human-Voted Elo reflects human judgements of tactical decision
           quality, not only match wins.
         </div>
-      </div>
+      </motion.div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <ShareButton
@@ -211,6 +241,94 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
           See the leaderboard
         </a>
       </div>
-    </div>
+    </motion.div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Reveal-only motion helpers. Both are no-ops when the visitor has asked for
+ * reduced motion (OS setting or the ♿ Motion switch in the nav).
+ * ------------------------------------------------------------------------ */
+
+/** Brief white-out along the panel edge the moment identities appear. */
+function RevealFlash() {
+  const reduce = useReducedMotion();
+  if (reduce) return null;
+  return (
+    <motion.span
+      aria-hidden="true"
+      initial={{ opacity: 0.9, scaleX: 0 }}
+      animate={{ opacity: 0, scaleX: 1 }}
+      transition={{ duration: 0.9, ease: "easeOut" }}
+      style={{
+        position: "absolute", top: 0, left: 0, right: 0, height: 2,
+        transformOrigin: "0%", pointerEvents: "none",
+        background: "linear-gradient(90deg, var(--green), var(--gold), var(--blue))",
+      }}
+    />
+  );
+}
+
+const SCRAMBLE_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_·";
+
+/**
+ * Decodes a model id into its final text. A cheap suspense beat that makes
+ * the reveal feel like a reveal; the finished string is always the real one,
+ * and it never affects what is stored or rated.
+ */
+function ScrambleText({ text, delay = 0 }) {
+  const reduce = useReducedMotion();
+  const [out, setOut] = useState(reduce ? text : "");
+
+  useEffect(() => {
+    if (reduce || !text) { setOut(text); return; }
+    let frame = 0;
+    let raf;
+    let start;
+    const total = text.length;
+    const step = (t) => {
+      if (start == null) start = t;
+      const elapsed = t - start - delay * 1000;
+      if (elapsed < 0) { raf = requestAnimationFrame(step); return; }
+      const settled = Math.min(total, Math.floor(elapsed / 26));
+      let s = text.slice(0, settled);
+      for (let i = settled; i < total; i++) {
+        s += text[i] === " " || text[i] === "/" || text[i] === ":"
+          ? text[i]
+          : SCRAMBLE_POOL[(Math.random() * SCRAMBLE_POOL.length) | 0];
+      }
+      setOut(s);
+      frame = settled;
+      if (frame < total) raf = requestAnimationFrame(step);
+      else setOut(text);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [text, delay, reduce]);
+
+  return <span aria-label={text}>{out || text}</span>;
+}
+
+/** Elo delta that ticks from 0 to its value — up green, down red. */
+function EloDelta({ value }) {
+  const reduce = useReducedMotion();
+  const mv = useMotionValue(0);
+  const [shown, setShown] = useState(0);
+  const color = useTransform(mv, (v) => (v >= 0 ? "var(--green)" : "var(--red)"));
+
+  useEffect(() => {
+    if (value == null) { setShown(null); return; }
+    if (reduce) { setShown(value); return; }
+    const controls = animate(mv, value, { duration: 0.9, ease: [0.16, 1, 0.3, 1] });
+    const unsub = mv.on("change", (v) => setShown(Math.round(v)));
+    return () => { controls.stop(); unsub(); };
+  }, [value, reduce, mv]);
+
+  if (value == null) return <>—</>;
+  const sign = shown >= 0 ? "+" : "";
+  return (
+    <motion.b style={{ color, fontVariantNumeric: "tabular-nums" }}>
+      {sign}{shown}
+    </motion.b>
   );
 }

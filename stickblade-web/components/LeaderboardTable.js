@@ -1,5 +1,6 @@
 "use client";
 import { Fragment, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { EvidenceChip, EvidenceMeta, fmtDate } from "@/components/DataQuality";
 
 // Minimum votes before a rating is considered non-provisional. Below this
@@ -138,6 +139,9 @@ function WhyThisRank({ row, obj, columns }) {
 export default function LeaderboardTable({ rows, compact = false, objective = {},
                                            emptyAction = null }) {
   const [open, setOpen] = useState(null);
+  // Row reveals + rating rails are decorative; useReducedMotion lets the
+  // whole table drop them (and render plain rows) for visitors who asked.
+  const reduce = useReducedMotion();
   // `compact` = drop the "D"raws column and cap to top 10 so the sidebar
   // leaderboard on the fight page stays vertical without horizontal scroll.
   if (!rows?.length) {
@@ -203,7 +207,28 @@ export default function LeaderboardTable({ rows, compact = false, objective = {}
                     style={isProvisional ? { opacity: 0.82 } : undefined}>
                   <td><Medal rank={rank} /></td>
                   <td className="model">{r.name || r.model}</td>
-                  <td className="r elo">
+                  <td className="r elo" style={{ position: "relative" }}>
+                    {/* Rating rail — length is relative to the top of this
+                        page, so rows stay comparable at a glance. */}
+                    {!reduce && rank <= 12 && r.rating != null && (
+                      <motion.span
+                        aria-hidden="true"
+                        initial={{ scaleX: 0 }}
+                        whileInView={{ scaleX: 1 }}
+                        viewport={{ once: true }}
+                        transition={{ duration: 0.7, delay: 0.15 + i * 0.035,
+                                       ease: [0.16, 1, 0.3, 1] }}
+                        style={{
+                          position: "absolute", right: 8, bottom: 3,
+                          width: `${Math.max(6, Math.min(100, (r.rating / (rows[0]?.rating || 1200)) * 70))}%`,
+                          height: 2, borderRadius: 2, transformOrigin: "right",
+                          background: rank === 1
+                            ? "linear-gradient(90deg, var(--gold), transparent)"
+                            : "linear-gradient(90deg, var(--red), transparent)",
+                          opacity: 0.5,
+                        }}
+                      />
+                    )}
                     {r.rating}
                     <TrendArrow rating={r.rating} />
                     <div>
