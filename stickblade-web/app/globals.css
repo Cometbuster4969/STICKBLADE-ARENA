@@ -1446,12 +1446,13 @@ input:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
   position: absolute;
   left: -9999px;
   top: 0;
-  background: var(--gold);
-  color: #05060b;
+  /* solid ink chip: always max-contrast, whatever the accent is doing */
+  background: var(--text);
+  color: #fdfcf6;
   padding: 8px 14px;
   font-weight: 700;
   z-index: 200;
-  border-radius: 0 0 8px 0;
+  border-radius: 0 0 4px 0;
 }
 .skip-link:focus { left: 8px; top: 8px; }
 
