@@ -67,7 +67,7 @@ export default function ByokPanel() {
       <div style={{
         marginTop: 8, padding: "8px 12px", borderRadius: 6,
         border: `1px solid ${enabled ? "var(--gold, #d4b962)" : "var(--line)"}`,
-        background: enabled ? "rgba(212, 185, 98, 0.08)" : "rgba(255,255,255,0.02)",
+        background: enabled ? "rgba(138, 100, 0, 0.08)" : "var(--wash)",
         display: "flex", justifyContent: "space-between", alignItems: "center",
         flexWrap: "wrap", gap: 8, fontSize: 13,
       }}>
@@ -103,7 +103,7 @@ export default function ByokPanel() {
             letter-spacing: 1px;
             text-transform: uppercase;
           }
-          .byok-btn:hover { background: rgba(255,255,255,0.06); }
+          .byok-btn:hover { background: rgba(24, 26, 28, 0.08); }
         `}</style>
       </div>
     );
@@ -130,11 +130,11 @@ export default function ByokPanel() {
   return (
     <div style={{
       marginTop: 8, padding: 12, borderRadius: 6,
-      border: "1px solid var(--gold, #d4b962)",
-      background: "rgba(212, 185, 98, 0.06)",
+      border: "1px solid rgba(138, 100, 0, 0.4)",
+      background: "rgba(138, 100, 0, 0.06)",
     }}>
-      <div style={{ fontSize: 11, letterSpacing: 2, color: "var(--gold, #d4b962)",
-                    fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>
+      <div style={{ fontSize: 13, letterSpacing: 0.3, color: "var(--gold)",
+                    fontWeight: 700, marginBottom: 6 }}>
         🔑 Bring your own OpenRouter key
       </div>
       <p style={{ fontSize: 12, color: "var(--dim)", margin: "0 0 8px",
@@ -164,7 +164,7 @@ export default function ByokPanel() {
         spellCheck={false}
         style={{
           width: "100%", padding: "8px 10px", borderRadius: 4,
-          border: "1px solid var(--line)", background: "rgba(0,0,0,0.3)",
+          border: "1px solid var(--line)", background: "var(--wash)",
           color: "var(--text)", fontFamily: "ui-monospace, Consolas, monospace",
           fontSize: 12,
         }}

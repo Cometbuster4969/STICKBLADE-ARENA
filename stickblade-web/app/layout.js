@@ -25,14 +25,17 @@ const inter = localFont({
   preload: true,
 });
 
-const rajdhani = localFont({
+// Big Shoulders: a condensed, engineering-plate display face. Sentence-case
+// headings in it read like drawing title blocks — that's why it took over the
+// display slot in the "kinematics plate" redesign.
+const bigShoulders = localFont({
   src: [
-    { path: "../node_modules/@fontsource/rajdhani/files/rajdhani-latin-500-normal.woff2",
+    { path: "../node_modules/@fontsource/big-shoulders/files/big-shoulders-latin-500-normal.woff2",
       weight: "500", style: "normal" },
-    { path: "../node_modules/@fontsource/rajdhani/files/rajdhani-latin-600-normal.woff2",
-      weight: "600", style: "normal" },
-    { path: "../node_modules/@fontsource/rajdhani/files/rajdhani-latin-700-normal.woff2",
+    { path: "../node_modules/@fontsource/big-shoulders/files/big-shoulders-latin-700-normal.woff2",
       weight: "700", style: "normal" },
+    { path: "../node_modules/@fontsource/big-shoulders/files/big-shoulders-latin-800-normal.woff2",
+      weight: "800", style: "normal" },
   ],
   display: "swap",
   variable: "--font-display",
@@ -40,7 +43,7 @@ const rajdhani = localFont({
 });
 
 export const viewport = {
-  themeColor: "#05060b",
+  themeColor: "#e7e9e2",
   width: "device-width",
   initialScale: 1,
 };
@@ -139,7 +142,7 @@ const JSON_LD = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${inter.variable} ${rajdhani.variable}`}>
+    <html lang="en" className={`${inter.variable} ${bigShoulders.variable}`}>
       <head>
         <script
           type="application/ld+json"

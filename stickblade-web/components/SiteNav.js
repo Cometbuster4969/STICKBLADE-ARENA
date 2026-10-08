@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import MotionControls from "@/components/MotionControls";
 
 const LINKS = [
-  ["/", "⚔ Fight"],
+  ["/", "Fight"],
   ["/tournament", "🏆 Tournament"],
   ["/leaderboard", "📊 Leaderboard"],
   ["/history", "🕘 History"],
@@ -46,7 +46,7 @@ export default function SiteNav({ compact = false }) {
       aria-label="Site"
       data-hero-in=""
       style={{
-        background: scrolled ? "rgba(5, 6, 11, 0.88)" : "rgba(5, 6, 11, 0.75)",
+        background: scrolled ? "rgba(238, 240, 233, 0.92)" : "rgba(238, 240, 233, 0.8)",
         borderBottomColor: scrolled ? "var(--line-strong)" : "var(--line)",
         transition: "background 0.35s var(--ease-smooth), border-color 0.35s var(--ease-smooth)",
       }}
@@ -92,7 +92,7 @@ export default function SiteNav({ compact = false }) {
                  height: scrolled ? 0 : "auto",
                  transition: "opacity 0.3s var(--ease-smooth), height 0.3s var(--ease-smooth)" }}
       >
-        Blind-voted LLM duels · deterministic physics · published integrity data
+        Blind-voted LLM duels on deterministic physics, with published integrity data.
       </p>
     </nav>
   );
@@ -117,7 +117,7 @@ export function SiteFooter() {
   ];
 
   return (
-    <footer className="site-footer" data-reveal="up">
+    <footer className="site-footer">
       <div className="site-footer-links">
         {FOOT.map(([href, label]) => (
           <a key={href} href={href} data-press style={{ "--hy": "-1px" }}>

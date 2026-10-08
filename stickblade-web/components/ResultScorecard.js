@@ -78,7 +78,7 @@ export default function ResultScorecard({ matchId, voteResult, replay,
           fontSize: 13, lineHeight: 1.55, color: "var(--text)",
         }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5,
-                         color: "var(--gold, #ffc547)", textTransform: "uppercase",
+                         color: "var(--gold, #ffc547)",
                          display: "block", marginBottom: 4 }}>
             🎙 AI Commentator Post-Fight Roast
           </span>

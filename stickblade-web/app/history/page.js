@@ -69,7 +69,8 @@ export default function HistoryPage() {
       <MotionSection>
         <h2 style={{ margin: "24px 0 4px",
                      fontFamily: "var(--font-display), system-ui, sans-serif",
-                     letterSpacing: 2, textTransform: "uppercase", fontSize: 28, fontWeight: 700 }}>
+                     letterSpacing: 0.4, fontSize: 32, fontWeight: 800,
+                     color: "var(--text)" }}>
           Recent duels
         </h2>
       </MotionSection>
@@ -173,7 +174,7 @@ export default function HistoryPage() {
                   {m.blindfolded && <span>🙈 Blindfolded</span>}
                   <span>{m.turns ?? "—"} turns</span>
                   {winner ? (
-                    <span style={{ borderColor: "rgba(46, 232, 165, 0.45)", color: "var(--green)" }}>
+                    <span style={{ borderColor: "rgba(14, 125, 91, 0.45)", color: "var(--green)" }}>
                       ✓ {METHOD_LABEL[m.method] || m.method} — {winner}
                     </span>
                   ) : (

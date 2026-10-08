@@ -85,8 +85,8 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
       <div
         className={reduce ? undefined : "loop-fade"}
         style={{ "--loop-d": "2.4s", "--loop-mid": "0.65",
-                 fontSize: 11, letterSpacing: 2, fontWeight: 700,
-                 color: "var(--gold)", textTransform: "uppercase",
+                 fontSize: 12, letterSpacing: 0.3, fontWeight: 700,
+                 color: "var(--gold)",
                  marginBottom: 8, display: "flex", alignItems: "center",
                  justifyContent: "center", gap: 6 }}
       >
@@ -157,7 +157,7 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
             <div style={{ textAlign: "left", maxWidth: 620,
                           margin: "10px auto 0", padding: 12, borderRadius: 8,
                           border: "1px solid var(--line)",
-                          background: "rgba(0,0,0,0.2)" }}>
+                          background: "var(--wash-2)" }}>
               {AXES.map((ax) => (
                 <fieldset key={ax.key} style={{ border: "none", marginBottom: 10,
                                                 padding: 0 }}>

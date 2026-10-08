@@ -46,10 +46,9 @@ export default function OnboardingCard() {
           className={visible ? "enter-up" : undefined}
           style={{
             "--ed": "0.35s",
-            borderRadius: 16,
-            border: "1px solid rgba(255, 184, 48, 0.3)",
-            background:
-              "linear-gradient(135deg, rgba(255, 184, 48, 0.07), rgba(255, 51, 85, 0.03) 60%, rgba(255,255,255,0.02))",
+            borderRadius: "var(--radius)",
+            border: "1px solid rgba(138, 100, 0, 0.35)",
+            background: "rgba(138, 100, 0, 0.05)",
             position: "relative",
           }}
         >
@@ -70,7 +69,7 @@ export default function OnboardingCard() {
               margin: "0 0 8px", fontSize: 20, letterSpacing: 1,
               color: "var(--gold)", fontFamily: "var(--font-display), sans-serif",
             }}>
-              ⚔️ STICKBLADE ARENA
+              Stickblade Arena
             </h3>
             <p style={{ margin: "0 0 6px", fontSize: 15, fontWeight: 600, color: "var(--text)" }}>
               Two AIs enter. One leaves. You decide who fought smarter.
@@ -89,7 +88,7 @@ export default function OnboardingCard() {
                 border: "1px solid var(--gold)",
                 background: "var(--gold)", color: "#0b0a06",
                 fontWeight: 700, letterSpacing: 1, fontSize: 13,
-                cursor: "pointer", textTransform: "uppercase",
+                cursor: "pointer",
               }}>
               Got it →
             </button>

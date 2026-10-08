@@ -14,6 +14,55 @@ cross-version leaderboard comparison, regardless of the API version.
 
 ## [Unreleased] — benchmark spec v1.0 (fingerprint `09de66effd02` under prompt v2; `029281ed627a` under prompt v1)
 
+### Changed — "kinematics plate" visual redesign of the web app (2026-10-08)
+
+A second pass over `stickblade-web`, this one on visual language rather than
+motion mechanics (benchmark semantics, routes, API and stored values are
+untouched). The dark "fluid glass" theme was replaced with a system grounded
+in what the product is: a motion-study plate.
+
+- **Tokens rewritten** (`app/globals.css`): drafting-paper surfaces
+  (`--bg-0` #e7e9e2, sheet `--bg-2-solid` #f1f3ec), ink text, 1px
+  pencil/ink rules (`--line`, `--line-strong`), semantic accents only —
+  signal red #c7351f for danger annotations, fighter green #0e7d5b / blue
+  #1f5fc4 matching the canvas, pencil amber #8a6400 for provisional state.
+  Radii are drafting-scale (3–6px); `--shadow-*` are now `none`: elevation
+  is a hairline, not a shadow. Text tokens verified AA on paper
+  (body 15.6:1, secondary 8.7:1, muted 4.7:1+).
+- **Type**: Big Shoulders (self-hosted via `@fontsource/big-shoulders`,
+  weights 500/700/800) replaces Rajdhani as `--font-display`, set in
+  sentence case with tracking near zero; Inter stays the body face;
+  monospace is reserved for measurements (turns, seeds, Elo).
+- **Hero rebuilt** as a split plate: headline + `components/HeroPlate.js`,
+  an inline-SVG motion-study figure of the duel (fighters, weapon, red
+  dashed tip arc, turn-budget bracket) with a `figcaption`. The animated
+  gradient wordmark, "Live Physics Arena" badge, floating glow orbs and all
+  `⚔ ▶ ⚡ →` CTA decorations were removed; copy now states the mechanics
+  and the CTAs name what happens ("Set up a duel", "Watch a sample fight").
+- **Chrome flattened**: glass nav re-tinted to paper glass with an ink
+  bottom rule; the active-link glow became a red 2px underline; panels,
+  cards, chips, zone tiles, badges, ticker, modal and tables lost their
+  gradient washes, inset highlights and glows; buttons are solid ink
+  plates (the fight button lost its shine sweep); the replay canvas is the
+  one dark surface — a monitor, framed by a hairline.
+- **Motion de-scattered**: `MotionSection` reveals are now opt-in (pass a
+  direction explicitly or a section simply appears), and every direction
+  resolves to `reveal-fade` — the per-section fade-and-slide entrance is
+  retired. The hero keeps the single orchestrated `data-hero-in`
+  stagger; response-motion (`[data-press]`, `.swap`, `.collapse`,
+  `.sel-rail`, vote confirmations) is unchanged. The now-unused
+  `FloatingOrb`, `Parallax` and `HeroScrollFade` primitives and their CSS
+  were deleted.
+- **Accessibility modes re-derived for light**: `high` contrast is now
+  max-ink-on-white, `fx-off` drops the drafting grid, focus rings moved
+  to amber. Inline styles across 14 components switched from white washes
+  to `--wash`/`--wash-2` ink tints.
+
+Verified: `next build` 18/18 static, `/` First Load 143 kB, all 14 routes
+200, zero elements inline-hidden for no-JS readers, `npm run check:player`
+PASS, JSX balance audited.
+
+
 ### Changed — full frontend redesign on a motion design system (2026-10-08)
 
 The UI was rebuilt around motion rather than re-skinned. No prior layout was

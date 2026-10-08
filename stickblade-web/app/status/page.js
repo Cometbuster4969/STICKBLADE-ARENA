@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import { getStatus, getMetrics, getDataQuality } from "@/lib/api";
 import DataQualityBanner from "@/components/DataQuality";
-import { MotionSection, StaggerContainer, StaggerItem, FloatingOrb } from "@/components/MotionSection";
+import { MotionSection, StaggerContainer, StaggerItem } from "@/components/MotionSection";
 
 /**
  * Status page (action-plan §35) — motion redesign.
@@ -46,7 +46,7 @@ function StatCard({ k, v }) {
         className="cell"
         data-press data-press-edge
         style={{ padding: "14px 12px", borderRadius: 12, textAlign: "center",
-                 border: "1px solid var(--line)", background: "rgba(255,255,255,0.02)",
+                 border: "1px solid var(--line)", background: "var(--wash)",
                  "--hy": "-2px", "--ph": "1.01" }}
       >
         <div className="k">{k}</div>
@@ -90,7 +90,6 @@ export default function StatusPage() {
     <>
       <SiteNav />
     <div className="container" style={{ position: "relative" }}>
-      <FloatingOrb size={280} color="rgba(46, 232, 165, 0.05)" top="-60px" right="-80px" />
 
       <MotionSection>
         <div className="panel" style={{ overflow: "hidden", position: "relative" }}>
@@ -112,8 +111,8 @@ export default function StatusPage() {
           {err && (
             <div className="enter-up"
                  style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10,
-                          border: "1px solid rgba(255, 51, 85, 0.4)",
-                          background: "rgba(255, 51, 85, 0.08)",
+                          border: "1px solid rgba(199, 53, 31, 0.45)",
+                          background: "rgba(199, 53, 31, 0.08)",
                           color: "var(--text)", fontSize: 13 }}
             >
               ⚠ Backend unreachable: {err}. The site still loads; matches
@@ -199,7 +198,7 @@ export default function StatusPage() {
                                display: "flex", justifyContent: "space-between",
                                alignItems: "center", padding: "10px 12px",
                                borderRadius: 10, border: "1px solid var(--line)",
-                               background: "rgba(255,255,255,0.015)" }}
+                               background: "var(--wash)" }}
                     >
                       <span style={{ color: "var(--text)" }}>{label}</span>
                       <Level value={status.components?.[key]} />

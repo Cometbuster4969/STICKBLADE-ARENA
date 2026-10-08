@@ -35,7 +35,7 @@ export default function MotionControls() {
           display: "inline-flex", alignItems: "center", gap: 6,
           padding: "7px 11px", borderRadius: 10,
           border: `1px solid ${open ? "var(--red)" : "var(--line)"}`,
-          background: open ? "rgba(255, 51, 85, 0.1)" : "transparent",
+          background: open ? "var(--wash-2)" : "transparent",
           color: open ? "var(--text)" : "var(--dim)",
           fontSize: 12, fontWeight: 600, cursor: "pointer",
           whiteSpace: "nowrap",

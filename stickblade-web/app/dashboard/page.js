@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import { exportUrl, getBenchmarkSpec } from "@/lib/api";
-import { MotionSection, StaggerContainer, StaggerItem, SlideIn, FloatingOrb } from "@/components/MotionSection";
+import { MotionSection, StaggerContainer, StaggerItem, SlideIn } from "@/components/MotionSection";
 
 const fmtPct = (x) => (x == null ? "—" : `${Math.round(x * 100)}%`);
 
@@ -71,7 +71,6 @@ export default function DashboardPage() {
     <>
       <SiteNav />
     <div className="container" style={{ position: "relative" }}>
-      <FloatingOrb size={300} color="rgba(77, 166, 255, 0.05)" top="-80px" left="-60px" />
 
       <MotionSection>
         <div className="panel">
@@ -130,11 +129,11 @@ export default function DashboardPage() {
                 gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginTop: 12 }}>
                 {statCards.map(([k, v]) => (
                   <div key={k} className="cell"
-                    style={{ padding: 14, borderRadius: 10, border: "1px solid var(--line)",
-                             background: "rgba(255,255,255,0.02)", textAlign: "center" }}
+                    style={{ padding: 14, borderRadius: 6, border: "1px solid var(--line)",
+                             background: "var(--wash)", textAlign: "center" }}
                     data-press-edge
                   >
-                    <div style={{ fontSize: 11, letterSpacing: 1.2, textTransform: "uppercase",
+                    <div style={{ fontSize: 12,
                                   color: "var(--dim)", marginBottom: 6 }}>{k}</div>
                     <div style={{ fontSize: 20, fontWeight: 700,
                                   fontFamily: "var(--font-display), system-ui",
@@ -160,12 +159,11 @@ export default function DashboardPage() {
                 gap: 12, marginTop: 12 }} staggerDelay={0.08}>
                 {coverageGroups.map(([title, counts]) => (
                   <StaggerItem key={title} direction="scale">
-                    <div style={{ padding: 14, borderRadius: 10,
+                    <div style={{ padding: 14, borderRadius: 6,
                             border: "1px solid var(--line)",
-                            background: "rgba(255,255,255,0.02)" }}
+                            background: "var(--wash)" }}
                       data-press-edge>
-                      <div style={{ fontSize: 11, letterSpacing: 1.4,
-                                    textTransform: "uppercase",
+                      <div style={{ fontSize: 12,
                                     color: "var(--dim)", marginBottom: 8 }}>{title}</div>
                       {counts.length === 0 && (
                         <div style={{ fontSize: 12, color: "var(--mute)" }}>no data</div>
@@ -193,7 +191,7 @@ export default function DashboardPage() {
             <span className="tick" /> Reproduce these numbers
           </span>
           <pre style={{ marginTop: 10, padding: 14, borderRadius: 10,
-                        background: "rgba(0,0,0,0.35)", overflowX: "auto",
+                        background: "var(--wash-2)", overflowX: "auto",
                         fontSize: 12, color: "var(--text-2)",
                         border: "1px solid var(--line)" }}>
 {`# download the dataset (JSON / JSONL / CSV)

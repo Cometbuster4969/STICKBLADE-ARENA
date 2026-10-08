@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { getEvents } from "@/lib/api";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
-import { MotionSection, StaggerContainer, StaggerItem, FloatingOrb } from "@/components/MotionSection";
+import { MotionSection, StaggerContainer, StaggerItem } from "@/components/MotionSection";
 
 const STATUS = {
   active:   { label: "RUNNING",        tone: "var(--green)" },
@@ -35,7 +35,7 @@ function Window({ w, delay = 0 }) {
       data-reveal="up"
       style={{
         padding: 16, marginBottom: 12,
-        borderColor: isActive ? "rgba(46, 232, 165, 0.25)" : undefined,
+        borderColor: isActive ? "rgba(14, 125, 91, 0.35)" : undefined,
         "--r-in": `${Math.round(delay * 340)}px`,
       }}
     >
@@ -122,8 +122,8 @@ function Window({ w, delay = 0 }) {
 function SectionHeading({ children }) {
   return (
     <MotionSection>
-      <h3 style={{ fontSize: 13, letterSpacing: 2, color: "var(--text-2)",
-                   margin: "22px 0 10px", textTransform: "uppercase",
+      <h3 style={{ fontSize: 14, letterSpacing: 0.3, color: "var(--text-2)",
+                   margin: "22px 0 10px",
                    fontFamily: "var(--font-display), system-ui, sans-serif",
                    display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ width: 16, height: 2, background: "var(--red)", borderRadius: 1 }} />
@@ -152,12 +152,12 @@ export default function EventsPage() {
     <>
       <SiteNav />
       <div style={{ width: "100%", maxWidth: 760, position: "relative" }}>
-        <FloatingOrb size={300} color="rgba(46, 232, 165, 0.05)" top="-60px" right="-80px" />
 
         <MotionSection>
           <h2 style={{ margin: "24px 0 4px",
                        fontFamily: "var(--font-display), system-ui, sans-serif",
-                       letterSpacing: 2, textTransform: "uppercase", fontSize: 28, fontWeight: 700 }}>
+                       letterSpacing: 0.4, fontSize: 32, fontWeight: 800,
+                       color: "var(--text)" }}>
             Events
           </h2>
         </MotionSection>

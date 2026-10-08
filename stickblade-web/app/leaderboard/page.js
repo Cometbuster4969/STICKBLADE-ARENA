@@ -9,7 +9,7 @@ import { getLeaderboard, getLeaderboardObjective,
          getDataQuality } from "@/lib/api";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import DataQualityBanner from "@/components/DataQuality";
-import { MotionSection, SlideIn, FloatingOrb } from "@/components/MotionSection";
+import { MotionSection, SlideIn } from "@/components/MotionSection";
 
 const ZONE_TABS_BY_WEAPON = {
   "":       [["", "Overall"], ["tip", "Tip"], ["edge", "Edge"], ["back_edge", "Back edge"], ["pommel", "Pommel"]],
@@ -115,18 +115,13 @@ export default function LeaderboardPage() {
     <>
       <SiteNav />
       <div style={{ width: "100%", maxWidth: 820, position: "relative" }}>
-        <FloatingOrb size={300} color="rgba(255, 184, 48, 0.05)" top="-60px" right="-100px" />
 
         <MotionSection>
           <h2 style={{ margin: "24px 0 4px",
                        fontFamily: "var(--font-display), system-ui, sans-serif",
-                       letterSpacing: 2, textTransform: "uppercase", fontSize: 28,
-                       fontWeight: 700 }}>
-            <span style={{ background: "linear-gradient(135deg, var(--gold), var(--red))",
-                          WebkitBackgroundClip: "text", backgroundClip: "text",
-                          color: "transparent" }}>
-              Leaderboard
-            </span>
+                       letterSpacing: 0.4, fontSize: 32, fontWeight: 800,
+                       color: "var(--text)" }}>
+            Leaderboard
           </h2>
         </MotionSection>
 

@@ -53,8 +53,8 @@ export function VotePanel({ onVote, predictionLocked, integrityNote }) {
   return (
     <div className="panel" style={{ padding: 18, borderColor: "var(--gold)",
                                     borderStyle: "solid" }}>
-      <div style={{ fontSize: 11, letterSpacing: 2, fontWeight: 700,
-                    color: "var(--gold)", textTransform: "uppercase",
+      <div style={{ fontSize: 12, letterSpacing: 0.3, fontWeight: 700,
+                    color: "var(--gold)",
                     textAlign: "center", marginBottom: 10 }}>
         🔒 Blind vote · models hidden until you answer
       </div>
@@ -142,7 +142,7 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
                       background: "rgba(255, 197, 71, 0.07)",
                       border: "1px dashed var(--gold)", fontSize: 13, lineHeight: 1.55 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5,
-                        color: "var(--gold)", textTransform: "uppercase", marginBottom: 4 }}>
+                        color: "var(--gold)", marginBottom: 4 }}>
             AI commentator
           </div>
           “{result.commentary}”

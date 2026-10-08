@@ -23,8 +23,9 @@ import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import DataQualityBanner from "@/components/DataQuality";
 import {
   MotionSection, StaggerContainer, StaggerItem,
-  MotionCard, SlideIn, HeroAnimation, FloatingOrb, HeroScrollFade
+  MotionCard, SlideIn, HeroAnimation
 } from "@/components/MotionSection";
+import HeroPlate from "@/components/HeroPlate";
 
 /* Fight page — modern motion redesign:
    CONFIGURE  ->  OBSERVE  ->  JUDGE BLIND  ->  REVEAL  ->  INSPECT */
@@ -305,53 +306,50 @@ export default function Home() {
     <>
       <SiteNav />
 
-      {/* ================= HERO ================= */}
-      <section className="hero" style={{ position: "relative", overflow: "hidden" }}>
-        <FloatingOrb size={400} color="rgba(255, 51, 85, 0.08)" top="-100px" right="-100px" />
-        <FloatingOrb size={300} color="rgba(77, 166, 255, 0.06)" bottom="-50px" left="-80px" />
-
-        <HeroScrollFade>
+      {/* ================= HERO — the plate's title block =================
+          Left: what this is, sentence-case, no badge. Right: the subject
+          itself drawn as a motion-study figure. One entrance, staggered
+          three beats; nothing fades in later just to prove it can. */}
+      <section className="hero">
+        <div className="hero-copy">
           <HeroAnimation>
-            <div className="hero-badge">
-              <span className="pulse" />
-              Live Physics Arena
-            </div>
-          </HeroAnimation>
-
-          <HeroAnimation delay={0.1}>
             <h1>
-              <span className="gradient">AI Models</span> Fight<br />
-              With Real Physics
+              Physics duels between<br />
+              language models,<br />
+              judged blind.
             </h1>
           </HeroAnimation>
 
-          <HeroAnimation delay={0.2}>
+          <HeroAnimation delay={0.12}>
             <p className="hero-sub">
-              Watch language models duel in deterministic physics simulations.
-              Vote blind on tactical reasoning — not branding. Every match is
-              reproducible and auditable.
+              Two models pilot stick fighters through up to 24 turns of
+              deterministic 2D physics. You watch the fight, vote on who
+              decided better, and only then do the names come out. Elo moves
+              with the verdict — never the brand.
             </p>
           </HeroAnimation>
 
-          <HeroAnimation delay={0.3}>
+          <HeroAnimation delay={0.24}>
             <div className="hero-actions">
               <button
                 className="fight-btn"
-                data-press style={{ "--ph": "1.04", "--pt": "0.97" }}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
                 onClick={() => setupRef.current?.scrollIntoView({ behavior: "smooth" })}
               >
-                ⚔ Start a Duel
+                Set up a duel
               </button>
               <button
                 className="btn btn-ghost"
-                data-press style={{ "--ph": "1.04", "--pt": "0.97" }}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
                 onClick={() => setShowSample(true)}
               >
-                ▶ Watch Sample Fight
+                Watch a sample fight
               </button>
             </div>
           </HeroAnimation>
-        </HeroScrollFade>
+        </div>
+
+        <HeroPlate />
       </section>
 
       {/* ================= WORKFLOW STRIP ================= */}
@@ -409,12 +407,7 @@ export default function Home() {
 
       {/* ================= CONFIGURE ================= */}
       <MotionSection ref={setupRef} delay={0.05}>
-        <div className="panel setup-step" style={{ position: "relative", overflow: "hidden" }}>
-          <div style={{
-            position: "absolute", top: -40, right: -40, width: 160, height: 160,
-            borderRadius: "50%", background: "radial-gradient(circle, rgba(255,51,85,0.06), transparent 70%)",
-            pointerEvents: "none",
-          }} />
+        <div className="panel setup-step">
           <div className="step-head">
             <span className="step-num">1</span>
             <span className="step-title">Fighters</span>
@@ -610,15 +603,15 @@ export default function Home() {
                 </div>
                 <div>
                   <button className="btn btn-sm btn-ghost" onClick={() => setShowSample(true)}>
-                    ▶ Watch a sample fight first
+                    Watch a sample fight first
                   </button>
                 </div>
 
                 <div>
                   <div className="lbl">Raw configuration sent to the engine</div>
                   <pre style={{ fontSize: 11.5, color: "var(--dim)", overflowX: "auto",
-                                background: "rgba(0,0,0,0.3)", padding: 12,
-                                borderRadius: 10, border: "1px solid var(--line)" }}>
+                                background: "var(--wash-2)", padding: 12,
+                                borderRadius: 6, border: "1px solid var(--line)" }}>
 {JSON.stringify({ model_a: modelA || null, model_b: modelB || null, sharp,
                   weapon, mode, arena, blindfolded, blind: true,
                   match_length: matchLength,
@@ -641,7 +634,7 @@ export default function Home() {
             >
               {status === "submitting" ? "Starting duel…"
                 : isBusy ? "Duel running…"
-                : "⚔ Fight"}
+                : "Fight"}
             </button>
             <div className="fight-summary">
               <b>{filterSummary}</b>{" · "}{matchLength} length
@@ -658,7 +651,7 @@ export default function Home() {
             <button className="btn btn-sm" style={{ marginLeft: "auto", "--ph": "1.05", "--pt": "0.95" }}
                     onClick={runRecommended}
                     data-press>
-              ⚡ Run recommended duel
+              Run recommended duel
             </button>
           </div>
         </div>
@@ -751,13 +744,7 @@ export default function Home() {
 
       {/* ================= LEADERBOARD ================= */}
       <MotionSection delay={0.1}>
-        <div className="panel" style={{ position: "relative", overflow: "hidden" }}>
-          <div style={{
-            position: "absolute", bottom: -60, left: -60, width: 200, height: 200,
-            borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(255, 184, 48, 0.06), transparent 70%)",
-            pointerEvents: "none",
-          }} />
+        <div className="panel">
           <div className="step-head">
             <span className="panel-title gold"><span className="tick" /> Human-Voted Elo</span>
             <span style={{ fontSize: 12, color: "var(--dim)", marginLeft: "auto" }}
@@ -789,7 +776,7 @@ export default function Home() {
                      "--ph": "1.05", "--hx": "4px" }}
             data-press
           >
-            Full leaderboard & filters →
+            Full leaderboard & filters
           </a>
         </div>
       </MotionSection>

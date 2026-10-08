@@ -155,7 +155,7 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady,
                     alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontFamily: "var(--font-display), system-ui, sans-serif",
-                        fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>
+                        fontSize: 21, fontWeight: 800, letterSpacing: 0.3 }}>
             <span style={{ color: "var(--green)" }}>FIGHTER A</span>
             <span style={{ color: "var(--mute)", margin: "0 10px" }}>vs</span>
             <span style={{ color: "var(--blue)" }}>FIGHTER B</span>
@@ -265,8 +265,8 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady,
 
       {/* ---------- Degraded-turn disclosure, live ---------- */}
       {fallbackTurns.length > 0 && (
-        <div className="stalled" style={{ borderColor: "rgba(255, 102, 128, 0.45)",
-                                          background: "rgba(255, 61, 92, 0.07)" }}>
+        <div className="stalled" style={{ borderColor: "rgba(165, 42, 23, 0.45)",
+                                          background: "rgba(199, 53, 31, 0.07)" }}>
           <p>
             <b>Scripted fallback in use.</b>{" "}
             {fallbackTurns.map((t) =>
@@ -335,10 +335,10 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady,
 
       {/* ---------- Read while you wait ---------- */}
       <details style={{ border: "1px solid var(--line)", borderRadius: 6,
-                        background: "rgba(255,255,255,0.015)", fontSize: 13,
+                        background: "var(--wash)", fontSize: 13,
                         padding: "10px 12px" }}>
         <summary style={{ cursor: "pointer", color: "var(--gold)", fontWeight: 700,
-                          fontSize: 11, letterSpacing: 2, textTransform: "uppercase" }}>
+                          fontSize: 12, letterSpacing: 0.3 }}>
           About this benchmark (read while you wait)
         </summary>
         <div style={{ marginTop: 10, color: "var(--text-2)", lineHeight: 1.55 }}>
@@ -388,9 +388,8 @@ function QuipCard({ side, text }) {
   const color = side === "a" ? "var(--green)" : "var(--blue)";
   return (
     <div style={{ padding: "10px 12px", border: `1px solid ${color}`,
-                  borderRadius: 6, background: "rgba(255,255,255,0.02)" }}>
-      <div style={{ fontSize: 10, letterSpacing: 2, color, fontWeight: 700,
-                    textTransform: "uppercase", marginBottom: 4 }}>
+                  borderRadius: 4, background: "var(--wash)" }}>
+      <div style={{ fontSize: 11, letterSpacing: 0.3, color, fontWeight: 700, marginBottom: 4 }}>
         Fighter {side.toUpperCase()}
       </div>
       <div style={{ fontStyle: "italic", fontSize: 14, lineHeight: 1.4,

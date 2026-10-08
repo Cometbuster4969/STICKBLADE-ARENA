@@ -90,9 +90,9 @@ export default function FAQ() {
         }}
       >
         <h2 style={{
-          fontSize: 22, letterSpacing: 1, textTransform: "uppercase",
+          fontSize: 22, letterSpacing: 0.2,
           color: "var(--text)", fontWeight: 700, marginBottom: 6, textAlign: "center",
-          fontFamily: "var(--font-display), 'Rajdhani', system-ui, sans-serif",
+          fontFamily: "var(--font-display), system-ui, sans-serif",
         }}>
           Frequently asked
         </h2>
@@ -136,7 +136,7 @@ function FaqItem({ q, children, index = 0 }) {
         marginBottom: 8,
         border: `1px solid ${open ? "var(--line-strong)" : "var(--line)"}`,
         borderRadius: 12,
-        background: open ? "rgba(255,255,255,0.035)" : "rgba(255,255,255,0.02)",
+        background: open ? "var(--wash-2)" : "var(--wash)",
         overflow: "hidden",
         transition: "background 0.3s var(--ease-smooth), border-color 0.3s var(--ease-smooth)",
         "--r-in": `${index * 20}px`,

@@ -75,7 +75,7 @@ export default function TurnTranscript({ replay }) {
   return (
     <section className="panel" style={{
       marginTop: 12, padding: "14px 16px",
-      background: "rgba(255,255,255,0.02)",
+      background: "var(--wash)",
     }}>
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -102,7 +102,7 @@ export default function TurnTranscript({ replay }) {
       {expanded && (
         <div style={{ maxHeight: 340, overflowY: "auto",
                       border: "1px solid var(--line)", borderRadius: 4,
-                      background: "rgba(0,0,0,0.15)" }}>
+                      background: "var(--wash)" }}>
           {rows.map((r, i) => (
             <div key={r.turn} style={{
               padding: "10px 12px",
@@ -115,7 +115,7 @@ export default function TurnTranscript({ replay }) {
               }}>
                 <span style={{
                   color: "var(--gold, #d4b962)", fontWeight: 700,
-                  fontSize: 11, letterSpacing: 2, textTransform: "uppercase",
+                  fontSize: 12, letterSpacing: 0.3,
                 }}>
                   Turn {String(r.turn).padStart(2, "0")}
                 </span>
@@ -157,8 +157,7 @@ function ThoughtCell({ side, text }) {
       minHeight: 34,
     }}>
       <div style={{
-        color, fontSize: 10, letterSpacing: 2, fontWeight: 700,
-        textTransform: "uppercase", marginBottom: 2,
+        color, fontSize: 11, letterSpacing: 0.3, fontWeight: 700, marginBottom: 2,
       }}>
         Fighter {side.toUpperCase()}
       </div>

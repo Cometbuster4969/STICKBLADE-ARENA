@@ -136,7 +136,7 @@ function ReplayInner() {
             style={{ "--loop-d": "1.6s", "--loop-delay": `${i * 0.15}s`,
                      "--loop-mid": "0.45", opacity: 0.9,
                      height: i === 0 ? 320 : 90, borderRadius: 16,
-                     background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)" }}
+                     background: "var(--wash)", border: "1px solid var(--line)" }}
           />
         ))}
         <div className="status" role="status">

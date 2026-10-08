@@ -1,6 +1,4 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useReducedMotion } from "@/lib/motion";
 
 /* ---------------------------------------------------------------------------
    Motion primitives — one vocabulary for the whole site.
@@ -14,27 +12,33 @@ import { useReducedMotion } from "@/lib/motion";
      hydration — blank for no-JS readers and crawlers, LCP hostage to JS
      timing. `animation-timeline: view()` gives the identical effect with the
      visible state as the default; no support = plain visible content.
-   • Press feedback, loops, entrances, swaps, collapses, the reading rail and
-     the hero scroll-fade all became CSS the day framer-motion was dropped
-     (~48 kB first-load saved). The only JS left on the motion budget is in
-     lib/motion.js: reduced-motion awareness, swap-out unmount timing, and a
-     FLIP for the tournament seed list.
+   • Press feedback, loops, entrances, swaps, collapses and the reading rail
+     all became CSS the day framer-motion was dropped (~48 kB first-load
+     saved). The only JS left on the motion budget is in lib/motion.js:
+     reduced-motion awareness, swap-out unmount timing, and a FLIP for the
+     tournament seed list.
+   • The "kinematics plate" pass made reveals OPT-IN per section: sections no
+     longer announce themselves on scroll by default (fade-up-per-section is
+     the most recycled pattern in generated frontends). Pages read calm;
+     motion answers input.
 
-   Both halves honour reduced motion twice over: the CSS behind
-   `prefers-reduced-motion` + the site's own data-motion switch, and
-   useReducedMotion() here so ambient nodes are never even attached.
+   All of it honours reduced motion at the layer that owns it: the CSS behind
+   `prefers-reduced-motion` + the site's own data-motion switch. Nothing here
+   needs JS to stand down — the inert state is the default state.
 --------------------------------------------------------------------------- */
 
-/* Reveal a block as it crosses the fold. */
+/* Reveal a block as it crosses the fold — opt-in: pass `direction` to get
+   the animation, leave it off and the section is simply there (which is what
+   most sections on most pages do now). */
 export function MotionSection({
-  children, className = "", delay = 0, as = "div", direction = "up",
+  children, className = "", delay = 0, as = "div", direction = null,
   style, ref, ...props
 }) {
   const Comp = as;
   return (
     <Comp
       ref={ref}
-      data-reveal={direction}
+      {...(direction ? { "data-reveal": direction } : null)}
       style={{ ...style, ...(delay ? { "--r-in": `${Math.round(delay * 340)}px` } : null) }}
       className={className}
       {...props}
@@ -72,7 +76,8 @@ export function StaggerContainer({
   );
 }
 
-/* One staggered child. The parent drives timing; this only opts in. */
+/* One staggered child. The parent drives timing; this opts in — pass
+   direction={null} to park an item without any reveal. */
 export function StaggerItem({ children, className = "", as = "div", direction = "up", ...props }) {
   const Comp = as;
   return (
@@ -122,69 +127,5 @@ export function HeroAnimation({ children, className = "", delay = 0, style, ...p
   );
 }
 
-/* Ambient glow orb. Decorative, blurred, and removed entirely when the
-   visitor turns effects off — the animation is a CSS transform loop rather
-   than a JS one, so it costs no main-thread time. */
-export function FloatingOrb({
-  size = 300, color = "rgba(255, 51, 85, 0.06)", top, left, right, bottom,
-}) {
-  const reduce = useReducedMotion();
-  const fxOff = useEffectsOff();
-  if (reduce || fxOff) return null;
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        width: size, height: size, borderRadius: "50%",
-        background: `radial-gradient(circle, ${color}, transparent 70%)`,
-        filter: "blur(60px)", pointerEvents: "none",
-        top, left, right, bottom, zIndex: 0,
-        animation: "orb-drift 14s ease-in-out infinite",
-      }}
-    />
-  );
-}
-
-/* data-fx="off" is written by lib/prefs.js; honouring it here means the
-   "No effects" switch removes these ambient layers, not just the canvas FX.
-   Read after mount (the attribute does not exist during SSR) and re-read on
-   every toggle, so the orbs disappear the instant the switch flips. */
-function useEffectsOff() {
-  const [off, setOff] = useState(false);
-  useEffect(() => {
-    const read = () => setOff(document.documentElement?.dataset?.fx === "off");
-    read();
-    const obs = new MutationObserver(read);
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-fx"] });
-    return () => obs.disconnect();
-  }, []);
-  return off;
-}
-
-/* Scroll-linked parallax offset — CSS `animation-timeline: view()` with the
-   shift distance passed through --px (same mapping the framer version used:
-   ±120px × speed across the element's cover range). The class is inert where
-   the timeline is unsupported or motion is reduced, so nothing to gate in JS. */
-export function Parallax({ children, speed = 0.15, className = "" }) {
-  return (
-    <div className={`parallax ${className}`.trim()} style={{ "--px": `${Math.round(120 * speed)}px` }}>
-      {children}
-    </div>
-  );
-}
-
-/**
- * Scroll-linked hero motion: the hero drifts up, scales down slightly and
- * fades as the setup section takes over — `hero-out` on a `scroll(root)`
- * timeline in globals.css (0 → 65vh of page scroll).
- *
- * Safe to render server-side: like the reveals, the *default* style is the
- * final state, and the animation only expresses the leaving phase. The
- * unhydrated page still shows the hero.
- */
-export function HeroScrollFade({ children, className = "" }) {
-  return <div className={`hero-scroll-fade ${className}`.trim()}>{children}</div>;
-}
 
 export default MotionSection;

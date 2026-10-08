@@ -44,7 +44,7 @@ export function UL({ items }) {
 export function Pre({ children }) {
   return (
     <pre style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8,
-                  border: "1px solid var(--line)", background: "rgba(0,0,0,0.25)",
+                  border: "1px solid var(--line)", background: "var(--wash-2)",
                   color: "var(--text)", fontSize: 12.5, lineHeight: 1.6,
                   overflowX: "auto" }}>
       {children}
