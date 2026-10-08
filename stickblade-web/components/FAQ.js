@@ -1,6 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { useState } from "react";
 import { MotionSection } from "@/components/MotionSection";
 
 /**
@@ -9,9 +8,10 @@ import { MotionSection } from "@/components/MotionSection";
  * so first-timers scrolling past the vote can find quick answers.
  *
  * Motion redesign: each item is still a native <details>/<summary>, so the
- * accordion keeps its zero-JS keyboard + screen-reader semantics; framer-motion
- * only animates the height/opacity of the answer body (and is skipped entirely
- * under reduced motion). Items stagger in as the section scrolls into view.
+ * accordion keeps its zero-JS keyboard + screen-reader semantics; the answer
+ * body animates its height through `::details-content` (globals.css) where
+ * supported, and opens instantly everywhere else. Items stagger in as the
+ * section scrolls into view.
  */
 const ITEMS = [
   {
@@ -82,10 +82,13 @@ const ITEMS = [
 export default function FAQ() {
   return (
     <MotionSection>
-      <section style={{
-        width: "100%", maxWidth: 760, margin: "40px auto 20px",
-        padding: "0 4px",
-      }}>
+      <section
+        className="faq"
+        style={{
+          width: "100%", maxWidth: 760, margin: "40px auto 20px",
+          padding: "0 4px",
+        }}
+      >
         <h2 style={{
           fontSize: 22, letterSpacing: 1, textTransform: "uppercase",
           color: "var(--text)", fontWeight: 700, marginBottom: 6, textAlign: "center",
@@ -118,14 +121,13 @@ export default function FAQ() {
  */
 function FaqItem({ q, children, index = 0 }) {
   const [open, setOpen] = useState(false);
-  const bodyRef = useRef(null);
-  const reduce = useReducedMotion();
 
   return (
     /* The <details> itself is a plain element: a reveal that ships inline
        opacity:0 would make an accordion question unreadable — and
-       unopenable — until JS runs. The answer body below is fine to animate,
-       because it only exists after a client-side open. */
+       unopenable — until JS runs. The answer body is animated purely by the
+       ::details-content rules in globals.css, so the answer is simply open
+       where that pseudo is not supported. */
     <details
       open={open}
       onToggle={(e) => setOpen(e.currentTarget.open)}
@@ -148,37 +150,21 @@ function FaqItem({ q, children, index = 0 }) {
         padding: "12px 14px",
       }}>
         <span>{q}</span>
-        <motion.span
-          aria-hidden="true"
-          animate={{ rotate: open ? 45 : 0, color: open ? "var(--red)" : "var(--dim)" }}
-          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-          style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}
-        >
+        <span className="faq-chev" aria-hidden="true"
+              style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}>
           +
-        </motion.span>
+        </span>
       </summary>
 
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            ref={bodyRef}
-            key="body"
-            initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            animate={reduce ? { opacity: 1 } : { height: "auto", opacity: 1 }}
-            exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
-            style={{ overflow: "hidden" }}
-          >
-            <div style={{
-              padding: "0 14px 14px",
-              color: "var(--text-2)", lineHeight: 1.65,
-              fontSize: 13.5,
-            }}>
-              {children}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Always in the DOM: <details> itself shows/hides it, and the height +
+          fade choreography happens on ::details-content in CSS. */}
+      <div style={{
+        padding: "0 14px 14px",
+        color: "var(--text-2)", lineHeight: 1.65,
+        fontSize: 13.5,
+      }}>
+        {children}
+      </div>
     </details>
   );
 }

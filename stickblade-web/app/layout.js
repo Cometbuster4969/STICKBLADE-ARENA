@@ -150,9 +150,10 @@ export default function RootLayout({ children }) {
         {/* Skip link — the nav is a motion-animated sticky header, so
             keyboard users get a one-press route to the content. */}
         <a href="#main" className="skip-link">Skip to content</a>
-        {/* MotionProvider reads lib/prefs and tells framer-motion to drop
-            transform animations when the visitor asked for reduced motion.
-            ScrollProgress is the page-level reading rail. */}
+        {/* MotionProvider applies the saved ♿ preferences (reduced motion,
+            contrast, effects) to <html> before anything animates. All motion
+            is CSS-driven — see lib/motion.js for the three hooks on the JS
+            side. ScrollProgress is the page-level reading rail. */}
         <MotionProvider>
           <ScrollProgress />
           <main id="main">{children}</main>

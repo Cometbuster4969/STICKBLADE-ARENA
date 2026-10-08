@@ -1,5 +1,5 @@
 "use client";
-import { motion, useReducedMotion } from "framer-motion";
+import { useReducedMotion } from "@/lib/motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getMatch, getHeadToHead, getRecent, cancelMatch } from "@/lib/api";
 
@@ -200,14 +200,11 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady,
              aria-valuemax={100}
              aria-valuenow={Math.round(progress?.percent || 0)}
              aria-label="Match progress">
-          <motion.div className="progress-fill"
-            initial={false}
-            animate={{
-              width: `${Math.min(100, progress?.percent || 0)}%`,
-              boxShadow: (progress?.percent || 0) > 0 && (progress?.percent || 0) < 100
-                ? "0 0 12px rgba(255, 51, 85, 0.5)" : "none",
-            }}
-            transition={{ type: "spring", stiffness: 60, damping: 18 }} />
+          {/* Width springs along on the CSS transition (.progress-fill);
+              the glow is a class toggle so it can ease too. */}
+          <div className={"progress-fill"
+                + ((progress?.percent || 0) > 0 && (progress?.percent || 0) < 100 ? " glow" : "")}
+            style={{ width: `${Math.min(100, progress?.percent || 0)}%` }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between",
                       gap: 10, flexWrap: "wrap", marginTop: 6,
@@ -410,12 +407,7 @@ function TickerLine({ tick, tech }) {
   const hits = tick.hits || [];
   const reduce = useReducedMotion();
   return (
-    <motion.div
-      className="tk-row"
-      initial={reduce ? false : { opacity: 0, y: -8, filter: "blur(2px)" }}
-      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-    >
+    <div className={"tk-row" + (reduce ? "" : " tk-in")}>
       <span className="tk-turn">T{String(tick.turn).padStart(2, "0")}</span>
       {(tick.action_a?.action || tick.action_b?.action) && (
         <span className="tk-act">
@@ -446,6 +438,6 @@ function TickerLine({ tick, tech }) {
           {tick.distance != null && ` · d=${tick.distance}`}
         </span>
       )}
-    </motion.div>
+    </div>
   );
 }

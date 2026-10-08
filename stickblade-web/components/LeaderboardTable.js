@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { useReducedMotion } from "@/lib/motion";
 import { EvidenceChip, EvidenceMeta, fmtDate } from "@/components/DataQuality";
 
 // Minimum votes before a rating is considered non-provisional. Below this
@@ -210,15 +210,16 @@ export default function LeaderboardTable({ rows, compact = false, objective = {}
                   <td className="r elo" style={{ position: "relative" }}>
                     {/* Rating rail — length is relative to the top of this
                         page, so rows stay comparable at a glance. */}
+                    {/* Rail grows in on mount, cascaded by row index — the
+                        table renders once the data lands, so a plain
+                        `--ed`-delayed keyframe reproduces the whileInView
+                        version without shipping an observer. */}
                     {!reduce && rank <= 12 && r.rating != null && (
-                      <motion.span
+                      <span
                         aria-hidden="true"
-                        initial={{ scaleX: 0 }}
-                        whileInView={{ scaleX: 1 }}
-                        viewport={{ once: true }}
-                        transition={{ duration: 0.7, delay: 0.15 + i * 0.035,
-                                       ease: [0.16, 1, 0.3, 1] }}
+                        className="rail-x"
                         style={{
+                          "--ed": `${(0.15 + i * 0.035).toFixed(2)}s`,
                           position: "absolute", right: 8, bottom: 3,
                           width: `${Math.max(6, Math.min(100, (r.rating / (rows[0]?.rating || 1200)) * 70))}%`,
                           height: 2, borderRadius: 2, transformOrigin: "right",

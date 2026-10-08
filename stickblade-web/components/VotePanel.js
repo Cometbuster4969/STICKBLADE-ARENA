@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { useReducedMotion } from "@/lib/motion";
 import { getVoterTier, setVoterTier } from "@/lib/prefs";
 
 /**
@@ -64,37 +64,34 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
   const reduce = useReducedMotion();
 
   return (
-    <motion.div
-      className="panel"
+    <div
+      className="panel enter-up"
       style={{ padding: 14, textAlign: "center", borderColor: "var(--gold)",
                borderStyle: "solid", position: "relative", overflow: "hidden" }}
-      initial={reduce ? { opacity: 1 } : { opacity: 0, y: 24, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
     >
-      {/* Attention rail — a slow sweep along the top edge. Skipped entirely
-          for reduced motion, per the a11y switch in the nav. */}
+      {/* Attention rail — a slow sweep along the top edge (`.loop-fade`).
+          Skipped entirely for reduced motion, per the a11y switch in the nav. */}
       {!reduce && (
-        <motion.span
+        <span
           aria-hidden="true"
+          className="loop-fade"
           style={{
+            "--loop-d": "3s", "--loop-mid": "0.15", opacity: 0.6,
             position: "absolute", top: 0, left: 0, right: 0, height: 1,
             background: "linear-gradient(90deg, transparent, var(--gold), transparent)",
           }}
-          animate={{ opacity: [0.15, 0.6, 0.15] }}
-          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
         />
       )}
-      <motion.div
-        style={{ fontSize: 11, letterSpacing: 2, fontWeight: 700,
+      <div
+        className={reduce ? undefined : "loop-fade"}
+        style={{ "--loop-d": "2.4s", "--loop-mid": "0.65",
+                 fontSize: 11, letterSpacing: 2, fontWeight: 700,
                  color: "var(--gold)", textTransform: "uppercase",
                  marginBottom: 8, display: "flex", alignItems: "center",
                  justifyContent: "center", gap: 6 }}
-        animate={reduce ? {} : { opacity: [0.65, 1, 0.65] }}
-        transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
       >
         🔒 Models hidden — vote to reveal
-      </motion.div>
+      </div>
       <p style={{ color: "var(--dim)", fontSize: 13, marginBottom: 12,
                   maxWidth: 520, marginLeft: "auto", marginRight: "auto" }}>
         <b style={{ color: "var(--text)" }}>Who fought more intelligently?</b>{" "}
@@ -108,46 +105,36 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
           ["draw", "vote-draw", "Draw"],
           ["b", "vote-b", "Fighter B 👑"],
         ].map(([val, cls, label]) => (
-          <motion.button
+          <button
             key={val}
             className={cls}
             onClick={() => setChoice(val)}
             aria-pressed={choice === val}
             disabled={busy}
-            whileHover={reduce ? {} : { y: -3, scale: 1.015 }}
-            whileTap={reduce ? {} : { scale: 0.97 }}
-            transition={{ type: "spring", stiffness: 400, damping: 26 }}
-            style={{ position: "relative", overflow: "hidden" }}
+            data-press
+            style={{ "--hy": "-3px", "--ph": "1.015", "--pt": "0.97",
+                     position: "relative", overflow: "hidden" }}
           >
             {label}
-            <AnimatePresence>
-              {choice === val && !reduce && (
-                <motion.span
-                  aria-hidden="true"
-                  initial={{ scaleX: 0, opacity: 0 }}
-                  animate={{ scaleX: 1, opacity: 1 }}
-                  exit={{ scaleX: 0, opacity: 0 }}
-                  transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                  style={{
-                    position: "absolute", left: 8, right: 8, bottom: 4, height: 2,
-                    borderRadius: 2, background: "currentColor", transformOrigin: "50%",
-                  }}
-                />
-              )}
-            </AnimatePresence>
-          </motion.button>
+            {choice === val && (
+              <span
+                aria-hidden="true"
+                className="sel-rail"
+                style={{
+                  position: "absolute", left: 8, right: 8, bottom: 4, height: 2,
+                  borderRadius: 2, background: "currentColor", transformOrigin: "50%",
+                }}
+              />
+            )}
+          </button>
         ))}
       </div>
 
-      <AnimatePresence initial={false}>
-      {choice && (
-        <motion.div
-          style={{ marginTop: 12 }}
-          initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0, y: -8 }}
-          animate={{ opacity: 1, height: "auto", y: 0 }}
-          exit={{ opacity: 0, height: 0 }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-        >
+      {/* Detail stage collapses open/closed in CSS (`.collapse`), always in
+          the DOM, so no unmount timer is needed. */}
+      <div className="collapse" data-open={choice ? "" : undefined}>
+        <div>
+          <div style={{ marginTop: 12 }}>
           <button
             className="fight-btn"
             disabled={disabled || busy}
@@ -165,14 +152,9 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
             </button>
           </div>
 
-          <AnimatePresence initial={false}>
-          {showDetail && (
-            <motion.div
-              initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              style={{ overflow: "hidden", textAlign: "left", maxWidth: 620,
+          <div className="collapse" data-open={showDetail ? "" : undefined}>
+            <div>
+            <div style={{ textAlign: "left", maxWidth: 620,
                           margin: "10px auto 0", padding: 12, borderRadius: 8,
                           border: "1px solid var(--line)",
                           background: "rgba(0,0,0,0.2)" }}>
@@ -229,12 +211,12 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
                   ))}
                 </select>
               </label>
-            </motion.div>
-          )}
-          </AnimatePresence>
-        </motion.div>
-      )}
-      </AnimatePresence>
+            </div>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
 
       {streak?.total > 0 && (
         <div style={{ marginTop: 10, fontSize: 12, color: "var(--dim)",
@@ -246,6 +228,6 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
           streak <b style={{ color: "var(--gold)" }}>{streak.cur}</b>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

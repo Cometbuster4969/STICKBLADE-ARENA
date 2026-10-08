@@ -1,29 +1,28 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import {
-  motion, useScroll, useTransform, useReducedMotion,
-} from "framer-motion";
+import { useEffect, useState } from "react";
+import { useReducedMotion } from "@/lib/motion";
 
 /* ---------------------------------------------------------------------------
    Motion primitives — one vocabulary for the whole site.
 
-   SPLIT BY PURPOSE, ON PURPOSE:
+   Everything here renders plain elements carrying data-attributes or a CSS
+   class; the animation itself lives in globals.css ("MOTION UTILITIES" and
+   the scroll-reveal block). That is deliberate:
 
-   • Scroll reveals are CSS (`data-reveal`, globals.css), not framer-motion.
-     An observer-driven reveal has to ship the hidden state from the server and
-     only release it after hydration + IO fires, which costs a non-JS reader and
-     a text-extracting crawler the entire page, and puts LCP behind JS timing.
-     `animation-timeline: view()` gives the identical effect with the visible
-     state as the default, so no support = plain visible content.
-
-   • framer-motion keeps the jobs CSS genuinely cannot do: scroll-linked
-     values (the reading rail, the hero drift), layout transitions (reordering
-     tournament seeds, the nav indicator), mount/unmount choreography
-     (AnimatePresence), and spring physics on pointer interaction.
+   • Reveals must not be observer-driven. An IO/framer reveal ships markup
+     with inline opacity:0 from the server and only un-hides it after
+     hydration — blank for no-JS readers and crawlers, LCP hostage to JS
+     timing. `animation-timeline: view()` gives the identical effect with the
+     visible state as the default; no support = plain visible content.
+   • Press feedback, loops, entrances, swaps, collapses, the reading rail and
+     the hero scroll-fade all became CSS the day framer-motion was dropped
+     (~48 kB first-load saved). The only JS left on the motion budget is in
+     lib/motion.js: reduced-motion awareness, swap-out unmount timing, and a
+     FLIP for the tournament seed list.
 
    Both halves honour reduced motion twice over: the CSS behind
    `prefers-reduced-motion` + the site's own data-motion switch, and
-   `useReducedMotion()` here so JS-side listeners are never even attached.
+   useReducedMotion() here so ambient nodes are never even attached.
 --------------------------------------------------------------------------- */
 
 /* Reveal a block as it crosses the fold. */
@@ -163,46 +162,29 @@ function useEffectsOff() {
   return off;
 }
 
-/* Scroll-linked parallax offset. Real scroll math, so this one is JS. */
+/* Scroll-linked parallax offset — CSS `animation-timeline: view()` with the
+   shift distance passed through --px (same mapping the framer version used:
+   ±120px × speed across the element's cover range). The class is inert where
+   the timeline is unsupported or motion is reduced, so nothing to gate in JS. */
 export function Parallax({ children, speed = 0.15, className = "" }) {
-  const reduce = useReducedMotion();
-  const ref = useRef(null);
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
-  const y = useTransform(scrollYProgress, [0, 1], [120 * speed, -120 * speed]);
   return (
-    <motion.div ref={ref} className={className} style={reduce ? undefined : { y }}>
+    <div className={`parallax ${className}`.trim()} style={{ "--px": `${Math.round(120 * speed)}px` }}>
       {children}
-    </motion.div>
+    </div>
   );
 }
 
 /**
  * Scroll-linked hero motion: the hero drifts up, scales down slightly and
- * fades as the setup section takes over.
+ * fades as the setup section takes over — `hero-out` on a `scroll(root)`
+ * timeline in globals.css (0 → 65vh of page scroll).
  *
- * `useScroll({ target })` is measured against the element itself, so no global
- * scroll listener is added. Starts at full opacity and only ever reduces from
- * there, which is why this is safe to render server-side — unlike a reveal, the
+ * Safe to render server-side: like the reveals, the *default* style is the
+ * final state, and the animation only expresses the leaving phase. The
  * unhydrated page still shows the hero.
  */
-export function HeroScrollFade({ children, className = "", distance = 90 }) {
-  const reduce = useReducedMotion();
-  const ref = useRef(null);
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end start"] });
-  const y = useTransform(scrollYProgress, [0, 1], [0, -distance]);
-  const opacity = useTransform(scrollYProgress, [0, 0.85], [1, 0]);
-  const scale = useTransform(scrollYProgress, [0, 1], [1, 0.94]);
-
-  if (reduce) return <div className={className}>{children}</div>;
-  return (
-    <motion.div
-      ref={ref}
-      className={className}
-      style={{ y, opacity, scale, transformOrigin: "50% 30%", willChange: "transform" }}
-    >
-      {children}
-    </motion.div>
-  );
+export function HeroScrollFade({ children, className = "" }) {
+  return <div className={`hero-scroll-fade ${className}`.trim()}>{children}</div>;
 }
 
 export default MotionSection;

@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import { getStatus, getMetrics, getDataQuality } from "@/lib/api";
 import DataQualityBanner from "@/components/DataQuality";
@@ -29,30 +28,30 @@ function Level({ value }) {
   const v = String(value || "");
   const tone = v.startsWith("ok") ? "ok" : v.startsWith("degraded") ? "warn"
     : v ? "bad" : "warn";
+  // Unhealthy levels breathe (`.loop-fade`); "ok" stays static.
   return (
-    <motion.span
-      className={`badge ${tone}`}
-      animate={tone === "ok" ? {} : { opacity: [1, 0.55, 1] }}
-      transition={{ duration: 1.8, repeat: Infinity }}
+    <span
+      className={`badge ${tone}` + (tone === "ok" ? "" : " loop-fade")}
+      style={tone === "ok" ? undefined : { "--loop-d": "1.8s", "--loop-mid": "0.55" }}
     >
       {value || "unknown"}
-    </motion.span>
+    </span>
   );
 }
 
 function StatCard({ k, v }) {
   return (
     <StaggerItem direction="scale">
-      <motion.div
+      <div
         className="cell"
+        data-press data-press-edge
         style={{ padding: "14px 12px", borderRadius: 12, textAlign: "center",
-                 border: "1px solid var(--line)", background: "rgba(255,255,255,0.02)" }}
-        whileHover={{ y: -2, borderColor: "var(--line-strong)" }}
-        transition={{ type: "spring", stiffness: 300, damping: 22 }}
+                 border: "1px solid var(--line)", background: "rgba(255,255,255,0.02)",
+                 "--hy": "-2px", "--ph": "1.01" }}
       >
         <div className="k">{k}</div>
         <div className="v">{v ?? "—"}</div>
-      </motion.div>
+      </div>
     </StaggerItem>
   );
 }
@@ -96,11 +95,9 @@ export default function StatusPage() {
       <MotionSection>
         <div className="panel" style={{ overflow: "hidden", position: "relative" }}>
           <span className="panel-title">
-            <motion.span
-              className="tick"
-              animate={{ opacity: [1, 0.4, 1] }}
-              transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-              style={{ background: overallTone, color: overallTone }}
+            <span
+              className="tick loop-fade"
+              style={{ "--loop-d": "2s", "--loop-mid": "0.4", background: overallTone, color: overallTone }}
             />
             Service status
           </span>
@@ -109,22 +106,20 @@ export default function StatusPage() {
             Live health of the arena backend, the model providers it depends
             on, and the current queue. Refreshes every 30 seconds.
           </p>
-          <AnimatePresence>
-            {err && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10,
-                         border: "1px solid rgba(255, 51, 85, 0.4)",
-                         background: "rgba(255, 51, 85, 0.08)",
-                         color: "var(--text)", fontSize: 13 }}
-              >
-                ⚠ Backend unreachable: {err}. The site still loads; matches
-                cannot start until the API is back.
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* The banner appears once the poll fails and only clears on a
+              successful refresh — an entrance (enter-up) is the honest
+              animation budget here; the height tween is no longer needed. */}
+          {err && (
+            <div className="enter-up"
+                 style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10,
+                          border: "1px solid rgba(255, 51, 85, 0.4)",
+                          background: "rgba(255, 51, 85, 0.08)",
+                          color: "var(--text)", fontSize: 13 }}
+            >
+              ⚠ Backend unreachable: {err}. The site still loads; matches
+              cannot start until the API is back.
+            </div>
+          )}
         </div>
       </MotionSection>
 
@@ -143,11 +138,7 @@ export default function StatusPage() {
                   <ul style={{ margin: "4px 0 0", paddingLeft: 20, color: "var(--text)",
                                fontSize: 13, lineHeight: 1.7 }}>
                     {status.degraded_modes.map((d, i) => (
-                      <motion.li key={d}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.05 }}
-                      >{d}</motion.li>
+                      <li key={d} className="enter-x" style={{ "--ed": `${i * 0.05}s` }}>{d}</li>
                     ))}
                   </ul>
                 </>
@@ -202,16 +193,17 @@ export default function StatusPage() {
               <StaggerContainer style={{ marginTop: 10, display: "grid", gap: 6 }} staggerDelay={0.05}>
                 {COMPONENTS.map(([key, label]) => (
                   <StaggerItem key={key} direction="left">
-                    <motion.div
-                      style={{ display: "flex", justifyContent: "space-between",
+                    <div
+                      data-press data-press-edge
+                      style={{ "--hx": "2px", "--ph": "1",
+                               display: "flex", justifyContent: "space-between",
                                alignItems: "center", padding: "10px 12px",
                                borderRadius: 10, border: "1px solid var(--line)",
                                background: "rgba(255,255,255,0.015)" }}
-                      whileHover={{ borderColor: "var(--line-strong)", x: 2 }}
                     >
                       <span style={{ color: "var(--text)" }}>{label}</span>
                       <Level value={status.components?.[key]} />
-                    </motion.div>
+                    </div>
                   </StaggerItem>
                 ))}
               </StaggerContainer>

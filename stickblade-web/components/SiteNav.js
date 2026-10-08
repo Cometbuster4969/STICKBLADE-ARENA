@@ -4,13 +4,12 @@
 // dashboard without hunting through the footer of a single screen.
 //
 // Motion redesign: the header is sticky and condenses as you scroll (padding
-// + border tighten, backdrop blur deepens), the active pill gets a layoutId
-// underline that slides between links, and the accessibility switch-set is
-// finally reachable from every page.
+// + border tighten, backdrop blur deepens), the active link carries a glow
+// pill, and the accessibility switch-set is finally reachable from every page.
+// All of it is CSS + transitions — the nav ships zero animation JS.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import MotionControls from "@/components/MotionControls";
 
 const LINKS = [
@@ -28,7 +27,6 @@ const LINKS = [
 export default function SiteNav({ compact = false }) {
   const path = usePathname() || "/";
   const [scrolled, setScrolled] = useState(false);
-  const reduce = useReducedMotion();
 
   // Condense-on-scroll. One passive listener writing a single boolean, and
   // only when it actually crosses the threshold — no per-frame state churn.
@@ -62,14 +60,7 @@ export default function SiteNav({ compact = false }) {
         }}
       >
         <Link href="/" className="site-nav-brand" aria-label="Stickblade Arena home">
-          <motion.span
-            aria-hidden="true"
-            display="inline-block"
-            animate={reduce ? {} : { rotate: [0, -12, 8, 0] }}
-            transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 6, ease: "easeInOut" }}
-          >
-            ⚔
-          </motion.span>
+          <span className="brand-sword" aria-hidden="true">⚔</span>
           <span>STICKBLADE</span>
           <span style={{ color: "var(--red)" }}>ARENA</span>
         </Link>
@@ -86,13 +77,7 @@ export default function SiteNav({ compact = false }) {
                 style={{ position: "relative" }}
               >
                 {label}
-                {active && !reduce && (
-                  <motion.span
-                    layoutId="nav-active-pill"
-                    className="nav-active-glow"
-                    transition={{ type: "spring", stiffness: 380, damping: 32 }}
-                  />
-                )}
+                {active && <span aria-hidden="true" className="nav-active-glow" />}
               </Link>
             );
           })}
@@ -135,9 +120,9 @@ export function SiteFooter() {
     <footer className="site-footer" data-reveal="up">
       <div className="site-footer-links">
         {FOOT.map(([href, label]) => (
-          <motion.a key={href} href={href} whileHover={{ y: -1 }}>
+          <a key={href} href={href} data-press style={{ "--hy": "-1px" }}>
             {label}
-          </motion.a>
+          </a>
         ))}
         <a href="https://github.com/Cometbuster4969/STICKBLADE-ARENA"
            target="_blank" rel="noreferrer">⭐ github</a>

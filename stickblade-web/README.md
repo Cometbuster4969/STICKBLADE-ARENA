@@ -41,20 +41,34 @@ component class. There is no CSS-in-JS and no UI library, and fonts ship
 through `next/font/local` from `@fontsource/*`, so nothing reaches out to a
 third-party font host at build or runtime (the CSP does not allow it).
 
-Motion is split deliberately, and the split is the thing to preserve:
+There is no animation library. An earlier pass drove micro-interactions with
+framer-motion; it was removed once every effect turned out to be expressible
+as CSS (~48 kB first-load saved — `/` went 196 kB → 142 kB, and the dev
+compile dropped from 1632 to 820 modules). The split below is the thing to
+preserve:
 
 | Kind of motion | Where it lives | Why there |
 |---|---|---|
 | Scroll reveals, staggers, hover lift, hero entrance | CSS — `data-reveal`, `data-reveal-stagger`, `data-lift`, `data-hero-in` on `animation-timeline: view()` | A JS reveal ships `opacity:0` inline from the server and releases it only after hydration + IntersectionObserver. That is invisible to a non-JS reader, to a text-extracting crawler, and to LCP. CSS scroll-driven animation gives the same effect with the *visible* state as the default, so no support means no animation rather than no content. |
-| Scroll-linked values, layout transitions, mount/unmount choreography, springs | framer-motion (`components/MotionSection.js`) | These need real JS: reading `scrollY`, animating an element as it reorders, or animating something that does not exist until a click. |
+| Press feedback, ambient loops, entrances, swaps, collapse height | CSS — `[data-press]`, `.loop-fade`, `.enter-*`, `.swap`, `.collapse` ("MOTION UTILITIES" in `globals.css`) | A spring on `:hover`, a breathing dot, and a popover fading out are transition/keyframe problems, not animation-library problems. Call sites carry the values as custom properties (`--ph`, `--hy`, `--ed`). |
+| Reading rail, hero scroll-fade, parallax | CSS on `animation-timeline: scroll()` / `view()` (`.scroll-rail`, `.hero-scroll-fade`, `.parallax`) | Scroll-linked *values* needed a library only before scroll timelines existed. Guarded by `@supports`, so the default state is the final state. |
+| Reduced-motion awareness, swap-out unmount timing, FLIP reordering | three hooks in `lib/motion.js` (~130 lines, dependency-free) | These genuinely need JS: a server render cannot know the ♿ switch state, React unmounting a node leaves CSS nothing to animate out, and nobody else in the stack remembers a rect to invert. |
 
 Rules worth knowing before editing:
 
 - **Reduced motion is two-layered on purpose.** `components/MotionProvider.js`
-  reads `lib/prefs.js` and drives framer's `MotionConfig`, while the
-  `[data-motion="reduced"]` rules in `globals.css` and the
-  `prefers-reduced-motion` guards handle the CSS half. Any new reveal must go
-  through the `data-reveal` attributes so it inherits both.
+  applies `lib/prefs.js` to `<html>` on mount; the `[data-motion="reduced"]`
+  and `prefers-reduced-motion` rules in `globals.css` then neutralise every
+  animation and *transition* — which is why press feedback is a transition and
+  entrances are `both`-filled keyframes ending in the natural state. JS-side
+  skipping goes through `useReducedMotion()` from `lib/motion.js`. Any new
+  reveal must go through the `data-reveal` attributes so it inherits the
+  guards; anything scroll-linked must sit inside the `@supports` block,
+  because a timeline animation ignores the duration kill.
+- **The visible state is always the default state.** Never write
+  `opacity: 0` inline (or in a rule that an animation has to "undo") —
+  that's the regression framer's `whileInView` introduced and CSS removes
+  structurally.
 - **`backdrop-filter` is allowed on exactly two things**: the sticky nav and the
   modal. A prior audit measured ~6 ms/frame on the mobile compositor for it,
   which is why `.panel` has none and fakes depth with a solid fill and an inset

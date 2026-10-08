@@ -1,6 +1,5 @@
 "use client";
-import { useId } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useId, useRef } from "react";
 import { normalizeModel } from "@/lib/models";
 
 const CUSTOM = "__custom__";
@@ -25,6 +24,12 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
                                       onChange, onCustomChange,
                                       mode = "macro" }) {
   const isCustom = value === CUSTOM;
+  const customRef = useRef(null);
+  // The input used to remount inside AnimatePresence with autoFocus; it now
+  // stays mounted inside a CSS collapse, so focus has to follow the open.
+  useEffect(() => {
+    if (isCustom) customRef.current?.focus();
+  }, [isCustom]);
   const selectId = useId();
   const inputId = useId();
   const metaId = useId();
@@ -83,31 +88,25 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
         ))}
         <option value={CUSTOM}>✏ Custom model id…</option>
       </select>
-      <AnimatePresence initial={false}>
-        {isCustom && (
-          <motion.input
-            key="custom-input"
+      {/* Collapse keeps the row's height animating both ways without a JS
+          timer — the `.collapse` grid utility in globals.css. */}
+      <div className="collapse" data-open={isCustom ? "" : undefined}>
+        <div>
+          <input
+            ref={customRef}
             id={inputId}
             aria-label={`${label} custom model id`}
             type="text"
             placeholder="OpenRouter id, e.g. qwen/qwen3-coder:free"
             value={custom}
             onChange={(e) => onCustomChange(e.target.value)}
-            autoFocus
-            initial={{ opacity: 0, y: -6, height: 0 }}
-            animate={{ opacity: 1, y: 0, height: "auto" }}
-            exit={{ opacity: 0, y: -6, height: 0 }}
-            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            style={{ marginTop: 6, overflow: "hidden" }}
+            style={{ marginTop: 6 }}
           />
-        )}
-      </AnimatePresence>
+        </div>
+      </div>
       {picked && (
-        <motion.div
-          className="model-meta" id={metaId}
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        <div
+          className="model-meta enter-fade" id={metaId}
         >
           <span>{picked.provider}</span>
           {latencyText && (
@@ -144,7 +143,7 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
               {picked.tier === "free" ? "free tier" : "paid"}
             </span>
           )}
-        </motion.div>
+        </div>
       )}
       {isCustom && (
         <div className="model-meta">

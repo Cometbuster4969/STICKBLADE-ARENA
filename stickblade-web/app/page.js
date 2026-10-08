@@ -1,6 +1,5 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import ModelPicker, { CUSTOM } from "@/components/ModelPicker";
 import ReplayPlayer from "@/components/ReplayPlayer";
 import TurnTranscript from "@/components/TurnTranscript";
@@ -80,21 +79,6 @@ const WORKFLOW = [
   ["judge",     "Vote blind", "Who fought smarter"],
   ["inspect",   "Reveal",    "Names, Elo, integrity"],
 ];
-
-/* ---------- Motion transition helpers ---------- */
-const pageTransition = {
-  initial: { opacity: 0, y: 20 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -20 },
-};
-
-const cardTransition = {
-  initial: { opacity: 0, y: 30, scale: 0.97 },
-  animate: { opacity: 1, y: 0, scale: 1 },
-};
-
-const smoothSpring = { type: "spring", stiffness: 100, damping: 20 };
-const smoothEase = { duration: 0.6, ease: [0.16, 1, 0.3, 1] };
 
 export default function Home() {
   const [models, setModels] = useState([]);
@@ -351,22 +335,20 @@ export default function Home() {
 
           <HeroAnimation delay={0.3}>
             <div className="hero-actions">
-              <motion.button
+              <button
                 className="fight-btn"
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.97 }}
+                data-press style={{ "--ph": "1.04", "--pt": "0.97" }}
                 onClick={() => setupRef.current?.scrollIntoView({ behavior: "smooth" })}
               >
                 ⚔ Start a Duel
-              </motion.button>
-              <motion.button
+              </button>
+              <button
                 className="btn btn-ghost"
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.97 }}
+                data-press style={{ "--ph": "1.04", "--pt": "0.97" }}
                 onClick={() => setShowSample(true)}
               >
                 ▶ Watch Sample Fight
-              </motion.button>
+              </button>
             </div>
           </HeroAnimation>
         </HeroScrollFade>
@@ -382,30 +364,30 @@ export default function Home() {
         >
           {WORKFLOW.map(([key, title, sub], i) => (
             <StaggerItem key={key} direction="scale" as="div">
-              <motion.div
+              <div
                 className="workflow-step"
                 data-active={stage === key}
-                whileHover={{ y: -3 }}
-                whileTap={{ scale: 0.98 }}
-                transition={{ type: "spring", stiffness: 300, damping: 22 }}
+                data-press style={{ "--hy": "-3px", "--pt": "0.98" }}
               >
                 <span className="n">{i + 1}</span>
                 <span>
                   <div className="t">{title}</div>
                   <div className="s">{sub}</div>
                 </span>
+                {/* The active dot pops in where a shared layoutId element
+                    used to fly between steps; per-step entry, same read. */}
                 {stage === key && (
-                  <motion.span
+                  <span
                     aria-hidden="true"
-                    layoutId="workflow-active"
+                    className="act-dot"
                     style={{
                       marginLeft: "auto", width: 6, height: 6, borderRadius: "50%",
                       background: "var(--red)", boxShadow: "0 0 10px var(--red)",
+                      flexShrink: 0,
                     }}
-                    transition={{ type: "spring", stiffness: 350, damping: 30 }}
                   />
                 )}
-              </motion.div>
+              </div>
             </StaggerItem>
           ))}
         </StaggerContainer>
@@ -415,21 +397,15 @@ export default function Home() {
         <OnboardingCard />
       </MotionSection>
 
-      <AnimatePresence>
-        {error && (
-          <motion.div
-            className="panel"
-            style={{ borderColor: "var(--red)" }}
-            role="alert"
-            initial={{ opacity: 0, y: -20, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.97 }}
-            transition={smoothEase}
-          >
-            <b style={{ color: "var(--red-2)" }}>Error:</b> {error}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {error && (
+        <div
+          className="panel enter-down"
+          style={{ borderColor: "var(--red)" }}
+          role="alert"
+        >
+          <b style={{ color: "var(--red-2)" }}>Error:</b> {error}
+        </div>
+      )}
 
       {/* ================= CONFIGURE ================= */}
       <MotionSection ref={setupRef} delay={0.05}>
@@ -458,22 +434,22 @@ export default function Home() {
               onCustomChange={setCustom2} mode={mode}
             />
           </div>
-          {sameModel && (
-            <motion.div
-              className="stalled"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-            >
-              <p>
-                <b>Both slots point at the same model.</b> That is a mirror match —
-                legal, but the two fighters will play identically.
-              </p>
-              <button className="btn btn-sm" onClick={() => setAllowSelfPlay(true)}>
-                Run as self-play anyway
-              </button>
-            </motion.div>
-          )}
+          {/* Mirror-match notice collapses in CSS; always mounted so the
+              panel grows *and* shrinks smoothly without an unmount timer. */}
+          <div className="collapse" data-open={sameModel ? "" : undefined}>
+            <div>
+              <div className="stalled" style={{ marginTop: 12 }}>
+                <p>
+                  <b>Both slots point at the same model.</b> That is a mirror match —
+                  legal, but the two fighters will play identically.
+                </p>
+                <button className="btn btn-sm" onClick={() => setAllowSelfPlay(true)}
+                        data-press style={{ "--ph": "1.04" }}>
+                  Run as self-play anyway
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </MotionSection>
 
@@ -511,43 +487,43 @@ export default function Home() {
           <div>
             <div className="lbl" id="mode-legend">Control mode</div>
             <div className="cards" role="radiogroup" aria-labelledby="mode-legend">
-              <motion.button
+              <button
                 type="button" className="card" role="radio"
                 aria-checked={mode === "macro"} onClick={() => setMode("macro")}
-                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
               >
                 <span className="card-name">Macro</span>
                 <span className="card-desc">Picks tactical moves — thrust, lunge, draw_shot.</span>
-              </motion.button>
-              <motion.button
+              </button>
+              <button
                 type="button" className="card" role="radio"
                 aria-checked={mode === "joint"} onClick={() => setMode("joint")}
-                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
               >
                 <span className="card-name">Joint</span>
                 <span className="card-desc">Raw per-joint torques — Toribash motor control.</span>
-              </motion.button>
+              </button>
             </div>
           </div>
           <div>
             <div className="lbl" id="blind-legend">Spatial information</div>
             <div className="cards" role="radiogroup" aria-labelledby="blind-legend">
-              <motion.button
+              <button
                 type="button" className="card" role="radio"
                 aria-checked={!blindfolded} onClick={() => setBlindfolded(false)}
-                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
               >
                 <span className="card-name">Normal</span>
                 <span className="card-desc">Gets derived hints: enemy left/right, height, facing.</span>
-              </motion.button>
-              <motion.button
+              </button>
+              <button
                 type="button" className="card" role="radio"
                 aria-checked={blindfolded} onClick={() => setBlindfolded(true)}
-                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
               >
                 <span className="card-name">Blindfolded</span>
                 <span className="card-desc">Raw coordinates only — tests pure spatial reasoning.</span>
-              </motion.button>
+              </button>
             </div>
           </div>
         </div>
@@ -559,25 +535,24 @@ export default function Home() {
           <div className="step-head">
             <span className="step-num">4</span>
             <span className="step-title">Advanced</span>
-            <motion.button
+            <button
               className="btn btn-sm btn-ghost"
-              style={{ marginLeft: "auto" }}
+              style={{ marginLeft: "auto", "--ph": "1.05", "--pt": "0.95" }}
               aria-expanded={advancedOpen}
               onClick={() => setAdvancedOpen((v) => !v)}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              data-press
             >
               {advancedOpen ? "Hide" : "Show"}
-            </motion.button>
+            </button>
           </div>
-          <AnimatePresence>
-            {advancedOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                style={{ display: "flex", flexDirection: "column", gap: 14, overflow: "hidden" }}
+          {/* Advanced settings: CSS `.collapse` (0fr↔1fr grid row) gives the
+              same grow/shrink in both directions, always in the DOM, so the
+              BYOK inputs keep their state across toggles. */}
+          <div className="collapse" data-open={advancedOpen ? "" : undefined}>
+            <div>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 14,
+                         paddingTop: 12, paddingLeft: 2, paddingRight: 2 }}
               >
                 <ByokPanel />
 
@@ -588,14 +563,14 @@ export default function Home() {
                       ["standard", "Standard", "12 turns — the default cell"],
                       ["full", "Full", "24 turns — most data, slowest"]].map(
                       ([id, name, desc]) => (
-                      <motion.button key={id} type="button" className="card" role="radio"
+                      <button key={id} type="button" className="card" role="radio"
                               aria-checked={matchLength === id}
                               onClick={() => setMatchLength(id)}
-                              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                              data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
                       >
                         <span className="card-name">{name}</span>
                         <span className="card-desc">{desc}</span>
-                      </motion.button>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -606,14 +581,14 @@ export default function Home() {
                       ["operational", "Operational", "Fallback turns counted and disclosed"],
                       ["demo", "Demo", "Never ranked — for demonstrations"]].map(
                       ([id, name, desc]) => (
-                      <motion.button key={id} type="button" className="card" role="radio"
+                      <button key={id} type="button" className="card" role="radio"
                               aria-checked={fallbackPolicy === id}
                               onClick={() => setFallbackPolicy(id)}
-                              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                              data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
                       >
                         <span className="card-name">{name}</span>
                         <span className="card-desc">{desc}</span>
-                      </motion.button>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -651,24 +626,23 @@ export default function Home() {
                   seed: seed === "" ? null : Number(seed) }, null, 2)}
                   </pre>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              </div>
+            </div>
+          </div>
 
           {/* ---------- Fight bar ---------- */}
           <div className="fightbar" style={{ borderTop: "1px solid var(--line)", paddingTop: 14 }}>
-            <motion.button
+            <button
               className="fight-btn"
               onClick={launch}
               disabled={!ready || isBusy}
               aria-disabled={!ready || isBusy}
-              whileHover={ready && !isBusy ? { scale: 1.04, boxShadow: "0 4px 30px rgba(255, 51, 85, 0.4)" } : {}}
-              whileTap={ready && !isBusy ? { scale: 0.97 } : {}}
+              data-press style={{ "--ph": "1.04", "--pt": "0.97" }}
             >
               {status === "submitting" ? "Starting duel…"
                 : isBusy ? "Duel running…"
                 : "⚔ Fight"}
-            </motion.button>
+            </button>
             <div className="fight-summary">
               <b>{filterSummary}</b>{" · "}{matchLength} length
               <br />
@@ -681,18 +655,17 @@ export default function Home() {
                 </span></>
               )}
             </div>
-            <motion.button className="btn btn-sm" style={{ marginLeft: "auto" }}
+            <button className="btn btn-sm" style={{ marginLeft: "auto", "--ph": "1.05", "--pt": "0.95" }}
                     onClick={runRecommended}
-                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                    data-press>
               ⚡ Run recommended duel
-            </motion.button>
+            </button>
           </div>
         </div>
       </MotionSection>
 
       {/* ================= OBSERVE ================= */}
-      <AnimatePresence>
-        {isBusy && matchId && (
+      {isBusy && matchId && (
           <MotionSection>
             <WaitPanel
               matchId={matchId}
@@ -704,25 +677,21 @@ export default function Home() {
             />
           </MotionSection>
         )}
-      </AnimatePresence>
 
       {/* ================= REPLAY ================= */}
-      <AnimatePresence>
-        {replay && (
+      {replay && (
           <MotionSection>
             <div className="panel">
               <span className="panel-title"><span className="tick" /> Combat replay</span>
               <ReplayPlayer replay={replay} />
               {integrityNote && (
-                <motion.div
-                  className="stalled"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
+                <div
+                  className="stalled enter-down"
                   style={{ borderColor: "rgba(255, 102, 128, 0.45)",
                            background: "rgba(255, 61, 92, 0.07)" }}
                 >
                   <p>⚠️ <b>Scripted fallback used:</b> {integrityNote}</p>
-                </motion.div>
+                </div>
               )}
               {integrity && (
                 <IntegrityBadge audit={integrity} matchId={matchId} />
@@ -731,7 +700,6 @@ export default function Home() {
             </div>
           </MotionSection>
         )}
-      </AnimatePresence>
 
       {/* ================= JUDGE ================= */}
       {isBusy && !replay && !voteResult && (
@@ -747,8 +715,7 @@ export default function Home() {
       )}
 
       {/* ================= REVEAL ================= */}
-      <AnimatePresence>
-        {voteResult && (
+      {voteResult && (
           <MotionSection>
             <RevealPanel
               result={voteResult}
@@ -761,31 +728,26 @@ export default function Home() {
             />
           </MotionSection>
         )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {voteResult && (
-          <motion.div
+      {voteResult && (
+          <div
+            className="enter-up"
             style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
           >
-            <motion.button
+            <button
               className="btn"
               onClick={() => { resetMatchState();
                         setupRef.current?.scrollIntoView({ behavior: "smooth" }); }}
-              whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+              data-press style={{ "--ph": "1.04", "--pt": "0.97" }}
             >
               ⟲ Run another duel
-            </motion.button>
+            </button>
             {status === "ready" && (
               <span className="fight-summary" style={{ alignSelf: "center" }}>
                 same rules · <b>{filterSummary}</b>
               </span>
             )}
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
 
       {/* ================= LEADERBOARD ================= */}
       <MotionSection delay={0.1}>
@@ -812,22 +774,23 @@ export default function Home() {
             objective={objective}
             compact
             emptyAction={
-              <motion.button
+              <button
                 className="btn btn-sm"
                 onClick={() => setupRef.current?.scrollIntoView({ behavior: "smooth" })}
-                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                data-press style={{ "--ph": "1.05", "--pt": "0.95" }}
               >
                 Start a duel
-              </motion.button>
+              </button>
             }
           />
-          <motion.a
+          <a
             className="btn btn-sm btn-ghost" href="/leaderboard"
-            style={{ alignSelf: "flex-start", textDecoration: "none" }}
-            whileHover={{ scale: 1.05, x: 4 }}
+            style={{ alignSelf: "flex-start", textDecoration: "none",
+                     "--ph": "1.05", "--hx": "4px" }}
+            data-press
           >
             Full leaderboard & filters →
-          </motion.a>
+          </a>
         </div>
       </MotionSection>
 

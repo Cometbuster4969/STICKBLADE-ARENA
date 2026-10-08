@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import { getRecent } from "@/lib/api";
 import ShareButton from "@/components/ShareButton";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
@@ -93,26 +92,24 @@ export default function HistoryPage() {
             <div className="lbl" id="legend-histw">Weapon</div>
             <div className="chips" role="group" aria-labelledby="legend-histw">
               {weaponFilters.map(([w, label]) => (
-                <motion.button key={w || "all"} type="button" className="chip"
+                <button key={w || "all"} type="button" className="chip"
                         aria-pressed={weapon === w} onClick={() => setWeapon(w)}
-                        whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                        data-press style={{ "--ph": "1.05", "--pt": "0.95" }}>
                   {label}
-                </motion.button>
+                </button>
               ))}
-              <motion.button type="button" className="chip"
+              <button type="button" className="chip"
                       aria-pressed={unvotedOnly}
                       onClick={() => setUnvotedOnly((v) => !v)}
-                      whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      data-press style={{ "--ph": "1.05", "--pt": "0.95" }}>
                 🎭 Unvoted only
-              </motion.button>
+              </button>
             </div>
           </div>
         </SlideIn>
       )}
 
-      {err && <motion.div className="status" role="alert"
-        initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
-      >✖ {err}</motion.div>}
+      {err && <div className="status enter-down" role="alert">✖ {err}</div>}
 
       {!err && rows && !rows.length && (
         <MotionSection>
@@ -121,10 +118,10 @@ export default function HistoryPage() {
             <p style={{ color: "var(--dim)", fontSize: 13, margin: "6px 0 0" }}>
               You'll be the first. Pick two models, pick a weapon, and the physics engine does the rest.
             </p>
-            <motion.a className="btn btn-primary" href="/"
-               style={{ textDecoration: "none" }} whileHover={{ scale: 1.05 }}>
+            <a className="btn btn-primary" href="/"
+               style={{ textDecoration: "none", "--ph": "1.05" }} data-press>
               Start a duel →
-            </motion.a>
+            </a>
           </div>
         </MotionSection>
       )}
@@ -133,11 +130,11 @@ export default function HistoryPage() {
         <MotionSection>
           <div className="panel empty">
             <div className="empty-t">No duels match that filter.</div>
-            <motion.button className="btn btn-sm" type="button"
+            <button className="btn btn-sm" type="button"
                     onClick={() => { setWeapon(""); setUnvotedOnly(false); }}
-                    whileHover={{ scale: 1.05 }}>
+                    data-press style={{ "--ph": "1.05" }}>
               Clear filters
-            </motion.button>
+            </button>
           </div>
         </MotionSection>
       )}
@@ -203,19 +200,19 @@ export default function HistoryPage() {
                   )}
 
                   <span style={{ flex: 1 }} />
-                  <motion.a className="btn btn-sm btn-primary"
+                  <a className="btn btn-sm btn-primary"
                      href={`/replay?id=${m.match_id}`}
-                     style={{ textDecoration: "none" }}
-                     whileHover={{ scale: 1.05 }}>
+                     style={{ textDecoration: "none", "--ph": "1.05" }}
+                     data-press>
                     ▶ Watch replay
-                  </motion.a>
+                  </a>
                   {!m.voted && (
-                    <motion.a className="btn btn-sm"
+                    <a className="btn btn-sm"
                        href={`/replay?id=${m.match_id}#vote`}
-                       style={{ textDecoration: "none" }}
-                       whileHover={{ scale: 1.05 }}>
+                       style={{ textDecoration: "none", "--ph": "1.05" }}
+                       data-press>
                       🗳 Vote
-                    </motion.a>
+                    </a>
                   )}
                   <ShareButton url={url} label="📋 Share" compact />
                 </div>

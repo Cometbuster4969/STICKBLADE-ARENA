@@ -71,8 +71,50 @@ an entry, a hover response, or a scroll behaviour.
 Benchmark semantics untouched: no route, API call, payload field, blind-voting
 rule, or stored value changed. `npm run check:player`, the CI JSX balance
 check, and `next build` under `NEXT_PUBLIC_API_BASE=https://ci-placeholder.invalid`
-all pass. First Load JS for `/` is 196 kB (framer-motion ≈ +48 kB); every page
-remains statically prerendered.
+all pass; every page remains statically prerendered.
+
+### Changed — framer-motion removed; the motion layer is CSS + 130 lines (2026-10-08)
+
+The redesign above shipped framer-motion for ~48 kB of first-load JS, and an
+audit of what it was actually used for found that almost none of it needed a
+library. The dependency is gone (`stickblade-web` ships no animation runtime
+again), with intent preserved effect-for-effect:
+
+- Press feedback (`whileHover`/`whileTap` springs) → `[data-press]`: one
+  transition plus `--ph`/`--pt`/`--hy`/`--hx` custom properties at the call
+  sites; disabled controls get no feedback via `:disabled` guards.
+- Ambient loops (live dots, skeleton shimmer, attention rails, brand wiggle)
+  → `.loop-fade` / `.brand-sword` keyframes.
+- One-shot entrances → `.enter-up/down/fade/x/scale` keyframes with an `--ed`
+  delay; height tweens of conditional panels (advanced settings, vote detail,
+  BYOK input, self-play warning, onboarding) → the `.collapse` grid utility
+  (`grid-template-rows: 0fr↔1fr`), always mounted and `visibility`-hidden
+  when closed, which also keeps them out of the tab order.
+- `AnimatePresence` → a 25-line `useSwap` hook that defers unmount until a
+  `.swap` leave animation finishes (nav ♿ popover was the only true
+  exit-choreography site left standing).
+- `useScroll`/`useSpring` reading rail → `animation-timeline: scroll(root)`
+  (`.scroll-rail`); the hero's drift/scale/fade → `hero-out` on the same
+  timeline; `Parallax` → `view()` + `--px`. All inside the existing
+  `@supports`/reduced-motion guards, since progress-based animations ignore
+  the duration kill.
+- `layoutId` shared elements (nav pill, workflow dot, option-card rail) →
+  per-element entry animations — the honest no-engine translation, documented
+  at each call site. Tournament seed reordering keeps a real FLIP:
+  `useFlipList` measures rects in a layout effect and inverts with WAAPI.
+- framer's `useReducedMotion()`/`MotionConfig` → `useReducedMotion()` backed
+  by the same `lib/prefs.js` subscription the CSS uses; `MotionProvider`
+  reduces to applying prefs before first paint, and `ScrollProgress`/
+  `HeroScrollFade`/`FloatingOrb`/`Parallax` became class-only wrappers.
+- The Elo-delta count-up keeps its rAF tween, hand-rolled like
+  `ScrambleText` beside it; the FAQ answer animation moved to
+  `::details-content` + `interpolate-size` behind `@supports`, so the
+  accordion still opens instantly (correctly) where that is unavailable.
+
+`/` First Load JS: 196 kB → **142 kB**; `/leaderboard` 168 → 120 kB; the dev
+compile for `/` dropped from 1632 to 820 modules. `check:player`, the JSX
+balance check, and `next build` pass, and the static HTML still ships **0**
+invisible elements across all pages.
 
 ### Added — next-step priorities 1–5 (2026-09-09, second session)
 

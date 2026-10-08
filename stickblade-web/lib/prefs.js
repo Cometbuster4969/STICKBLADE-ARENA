@@ -74,9 +74,10 @@ export function savePref(patch) {
 }
 
 // ---- change subscription ---------------------------------------------------
-// CSS reacts to the data-* attributes for free, but framer-motion runs its
-// animations in JS, so anything driving <MotionConfig> needs to hear about a
-// toggle. A tiny listener set keeps prefs.js dependency-free.
+// CSS reacts to the data-* attributes for free; the JS side of the motion
+// system (lib/motion.js — the reduced-motion hook, swap timings) needs to
+// hear about a toggle too, so savePref fans out to listeners. A tiny listener
+// set keeps prefs.js dependency-free.
 const listeners = new Set();
 
 export function subscribePrefs(fn) {

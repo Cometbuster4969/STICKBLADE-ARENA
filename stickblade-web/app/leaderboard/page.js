@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import LeaderboardTable from "@/components/LeaderboardTable";
 import ObjectiveLeaderboardTable from "@/components/ObjectiveLeaderboardTable";
 import RatingTable from "@/components/RatingTable";
@@ -42,18 +41,17 @@ function FilterRow({ legend, hint, options, value, onChange, title }) {
         {options.map(([v, label]) => {
           const on = value === v;
           return (
-            <motion.button
+            <button
               key={String(v)}
               type="button"
               className="chip"
               aria-pressed={on}
               title={title ? title(v) : undefined}
               onClick={() => onChange(v)}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              data-press style={{ "--ph": "1.05", "--pt": "0.95" }}
             >
               {label}
-            </motion.button>
+            </button>
           );
         })}
       </div>
@@ -152,11 +150,11 @@ export default function LeaderboardPage() {
               ["objective", "📊 Objective metrics"],
               ["bradley_terry", "📐 Bradley–Terry (with CI)"],
               ["metrics", "🔬 Full metrics"]].map(([id, label]) => (
-              <motion.button key={id} type="button" className="chip"
+              <button key={id} type="button" className="chip"
                       aria-pressed={tab === id} onClick={() => setTab(id)}
-                      whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      data-press style={{ "--ph": "1.05", "--pt": "0.95" }}>
                 {label}
-              </motion.button>
+              </button>
             ))}
           </div>
         </MotionSection>
@@ -214,12 +212,12 @@ export default function LeaderboardPage() {
               {[[null, "All votes"],
                 ["casual", "🙋 Casual"],
                 ["expert", "🎓 Expert (self-declared)"]].map(([v, n]) => (
-                <motion.button key={String(v)} type="button" className="chip"
+                <button key={String(v)} type="button" className="chip"
                   aria-pressed={tier === v}
                   onClick={() => setTier(v)}
-                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  data-press style={{ "--ph": "1.05", "--pt": "0.95" }}>
                   {n}
-                </motion.button>
+                </button>
               ))}
             </div>
           </MotionSection>
@@ -231,10 +229,7 @@ export default function LeaderboardPage() {
 
         <MotionSection delay={0.25}>
           {err ? (
-            <motion.div className="status" role="alert"
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-            >✖ {err}</motion.div>
+            <div className="status enter-scale" role="alert">✖ {err}</div>
           ) : (
             <div className="panel">
               {tab === "objective"
@@ -250,11 +245,11 @@ export default function LeaderboardPage() {
                     rows={rows}
                     objective={objective}
                     emptyAction={
-                      <motion.a className="btn btn-sm" href="/"
-                         style={{ textDecoration: "none" }}
-                         whileHover={{ scale: 1.05 }}>
+                      <a className="btn btn-sm" href="/"
+                         style={{ textDecoration: "none", "--ph": "1.05" }}
+                         data-press>
                         Start a duel
-                      </motion.a>
+                      </a>
                     }
                   />
                 )}

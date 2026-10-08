@@ -4,7 +4,6 @@
  * Motion redesign: scroll-revealed event windows, staggered champion rows.
  */
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { getEvents } from "@/lib/api";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import { MotionSection, StaggerContainer, StaggerItem, FloatingOrb } from "@/components/MotionSection";
@@ -48,10 +47,9 @@ function Window({ w, delay = 0 }) {
                          letterSpacing: 1, fontWeight: 700,
                          display: "inline-flex", alignItems: "center", gap: 4 }}>
             {isActive && (
-              <motion.span
+              <span
+                className="loop-fade"
                 style={{ width: 6, height: 6, borderRadius: "50%", background: st.tone }}
-                animate={{ opacity: [1, 0.3, 1] }}
-                transition={{ duration: 1.6, repeat: Infinity }}
               />
             )}
             {st.label}
@@ -174,19 +172,14 @@ export default function EventsPage() {
           </p>
         </MotionSection>
 
-        {err && <motion.div className="status" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>✖ {err}</motion.div>}
-        <AnimatePresence>
-          {!data && !err && (
-            <div style={{ color: "var(--dim)", fontSize: 13 }}>
-              <motion.span
-                animate={{ opacity: [0.4, 1, 0.4] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
-                loading events…
-              </motion.span>
-            </div>
-          )}
-        </AnimatePresence>
+        {err && <div className="status enter-fade">✖ {err}</div>}
+        {!data && !err && (
+          <div style={{ color: "var(--dim)", fontSize: 13 }}>
+            <span className="loop-fade" style={{ "--loop-d": "1.5s", "--loop-mid": "0.4" }}>
+              loading events…
+            </span>
+          </div>
+        )}
 
         {!!active.length && (
           <>

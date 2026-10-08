@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import Link from "next/link";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import DataQualityBanner, { fmtDate } from "@/components/DataQuality";

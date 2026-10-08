@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
-import { motion, useReducedMotion, useMotionValue, useTransform, animate } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "@/lib/motion";
 import ShareButton from "@/components/ShareButton";
 
 /* Judge stage: optional prediction -> blind vote -> reveal (review items 11-15).
@@ -39,11 +39,10 @@ export function PredictPanel({ prediction, onPredict, streak }) {
         {[["a", "vote-a", "Fighter A wins"],
           ["draw", "vote-draw", "Draw"],
           ["b", "vote-b", "Fighter B wins"]].map(([side, cls, label]) => (
-          <motion.button key={side} className={cls} onClick={() => onPredict(side)}
-            whileHover={{ y: -3, scale: 1.01 }} whileTap={{ scale: 0.97 }}
-            transition={{ type: "spring", stiffness: 400, damping: 26 }}>
+          <button key={side} className={cls} onClick={() => onPredict(side)}
+            data-press style={{ "--hy": "-3px", "--ph": "1.01", "--pt": "0.97" }}>
             {label}
-          </motion.button>
+          </button>
         ))}
       </div>
     </div>
@@ -116,11 +115,8 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
   const fmtElo = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v}`);
 
   return (
-    <motion.div
-      className="panel reveal"
-      initial={{ opacity: 0, scale: 0.985 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+    <div
+      className="panel reveal enter-scale"
       style={{ position: "relative", overflow: "hidden" }}
     >
       {/* One-shot flash as the identities land — the payoff of a blind vote. */}
@@ -154,11 +150,8 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
       )}
 
       <div className="reveal-grid">
-        <motion.div className="reveal-cell"
-          initial={{ opacity: 0, x: -28, rotateY: 8 }}
-          animate={{ opacity: 1, x: 0, rotateY: 0 }}
-          transition={{ delay: 0.18, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-          style={{ position: "relative" }}
+        <div className="reveal-cell reveal-from-left"
+          style={{ "--ed": "0.18s", position: "relative" }}
         >
           <div className="side" style={{ color: "var(--green)" }}>Fighter A was</div>
           <div className="who"><ScrambleText text={nameA} delay={0.35} /></div>
@@ -167,12 +160,9 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
             {winnerSide === "a" && <b style={{ color: "var(--gold)" }}> · won the fight</b>}
             {votedSide === "a" && <b style={{ color: "var(--green)" }}> · your vote</b>}
           </div>
-        </motion.div>
-        <motion.div className="reveal-cell"
-          initial={{ opacity: 0, x: 28, rotateY: -8 }}
-          animate={{ opacity: 1, x: 0, rotateY: 0 }}
-          transition={{ delay: 0.26, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-          style={{ position: "relative" }}
+        </div>
+        <div className="reveal-cell reveal-from-right"
+          style={{ "--ed": "0.26s", position: "relative" }}
         >
           <div className="side" style={{ color: "var(--blue)" }}>Fighter B was</div>
           <div className="who"><ScrambleText text={nameB} delay={0.5} /></div>
@@ -181,7 +171,7 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
             {winnerSide === "b" && <b style={{ color: "var(--gold)" }}> · won the fight</b>}
             {votedSide === "b" && <b style={{ color: "var(--blue)" }}> · your vote</b>}
           </div>
-        </motion.div>
+        </div>
       </div>
 
       {disagreement && (
@@ -192,11 +182,7 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
         </div>
       )}
 
-      <motion.div className="reveal-rows"
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      >
+      <div className="reveal-rows enter-up" style={{ "--ed": "0.5s" }}>
         <div>
           Physical winner:{" "}
           <b>{winnerSide == null ? "Unknown" : winnerSide === "draw" ? "Draw"
@@ -229,7 +215,7 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
           Human-Voted Elo reflects human judgements of tactical decision
           quality, not only match wins.
         </div>
-      </motion.div>
+      </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <ShareButton
@@ -241,13 +227,14 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
           See the leaderboard
         </a>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
 /* ---------------------------------------------------------------------------
- * Reveal-only motion helpers. Both are no-ops when the visitor has asked for
- * reduced motion (OS setting or the ♿ Motion switch in the nav).
+ * Reveal-only motion helpers. The flash is a CSS keyframe (neutralised by
+ * the reduced-motion kill); the scramble and count-up check useReducedMotion
+ * so their rAF loops never start.
  * ------------------------------------------------------------------------ */
 
 /** Brief white-out along the panel edge the moment identities appear. */
@@ -255,11 +242,9 @@ function RevealFlash() {
   const reduce = useReducedMotion();
   if (reduce) return null;
   return (
-    <motion.span
+    <span
       aria-hidden="true"
-      initial={{ opacity: 0.9, scaleX: 0 }}
-      animate={{ opacity: 0, scaleX: 1 }}
-      transition={{ duration: 0.9, ease: "easeOut" }}
+      className="flash-x"
       style={{
         position: "absolute", top: 0, left: 0, right: 0, height: 2,
         transformOrigin: "0%", pointerEvents: "none",
@@ -312,23 +297,31 @@ function ScrambleText({ text, delay = 0 }) {
 /** Elo delta that ticks from 0 to its value — up green, down red. */
 function EloDelta({ value }) {
   const reduce = useReducedMotion();
-  const mv = useMotionValue(0);
   const [shown, setShown] = useState(0);
-  const color = useTransform(mv, (v) => (v >= 0 ? "var(--green)" : "var(--red)"));
+  const raf = useRef(0);
 
   useEffect(() => {
-    if (value == null) { setShown(null); return; }
-    if (reduce) { setShown(value); return; }
-    const controls = animate(mv, value, { duration: 0.9, ease: [0.16, 1, 0.3, 1] });
-    const unsub = mv.on("change", (v) => setShown(Math.round(v)));
-    return () => { controls.stop(); unsub(); };
-  }, [value, reduce, mv]);
+    cancelAnimationFrame(raf.current);
+    if (value == null) { setShown(0); return undefined; }
+    if (reduce) { setShown(value); return undefined; }
+    const start = performance.now();
+    const dur = 900;
+    const tick = (t) => {
+      const p = Math.min(1, (t - start) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setShown(Math.round(value * eased));
+      if (p < 1) raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [value, reduce]);
 
   if (value == null) return <>—</>;
-  const sign = shown >= 0 ? "+" : "";
+  const sign = value >= 0 ? "+" : "";
+  const color = value >= 0 ? "var(--green)" : "var(--red)";
   return (
-    <motion.b style={{ color, fontVariantNumeric: "tabular-nums" }}>
+    <b style={{ color, fontVariantNumeric: "tabular-nums" }}>
       {sign}{shown}
-    </motion.b>
+    </b>
   );
 }

@@ -821,8 +821,9 @@ button { font-family: inherit; }
 .progress-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--red), var(--gold));
-  transition: width 0.4s var(--ease-smooth);
+  transition: width 0.6s var(--ease-out-expo), box-shadow 0.4s var(--ease-smooth);
 }
+.progress-fill.glow { box-shadow: 0 0 12px rgba(255, 51, 85, 0.5); }
 
 /* ---------- Ticker ---------- */
 .ticker {
@@ -1308,6 +1309,224 @@ a { color: inherit; }
   }
 }
 
+/* ==========================================================================
+   MOTION UTILITIES — the layer that used to be framer-motion.
+   -------------------------------------------------------------------------
+   framer-motion (~48 kB of first-load JS) animated: press feedback, loops,
+   one-shot entrances, swap in/out, collapse height, the reading rail, the
+   hero scroll-fade, and a FLIP on the tournament seed list. The first five
+   are plain CSS below; the rail and the hero fade ride the same
+   `animation-timeline` machinery as the reveal system; only the FLIP, the
+   reduced-motion *awareness* for JS-driven bits, and swap-out timing survive
+   in JS — as three hooks in lib/motion.js.
+
+   Everything here is additive in the same spirit as [data-reveal]: the
+   natural (un-animated) state is always the final state, so a browser that
+   ignores these rules renders the design exactly as intended, and the
+   reduced-motion kill-switch below turns the motion off rather than the
+   content on.
+
+   [data-press]: pointer feedback. --hy/--hx nudge, --ph/--pt scale. The
+   transition (not an animation) is what the global reduced rule neutralises
+   to an instant snap — scale is non-vestibular, so the feedback itself is
+   worth keeping for those visitors.
+   ========================================================================= */
+[data-press][data-press] {
+  transition: transform 0.24s var(--ease-spring),
+              border-color 0.24s var(--ease-smooth),
+              box-shadow 0.24s var(--ease-smooth),
+              background 0.24s var(--ease-smooth),
+              color 0.2s var(--ease-smooth);
+}
+[data-press]:hover  { transform: translate(var(--hx, 0), var(--hy, 0)) scale(var(--ph, 1.03)); }
+[data-press]:active { transform: translate(var(--hx, 0), var(--hy, 0)) scale(var(--pt, 0.97)); }
+/* Opt-in: cards/cells that used to brighten their border on hover. Usable
+   standalone (scorecard cells) or with [data-press]. */
+[data-press-edge] { transition: border-color 0.24s var(--ease-smooth); }
+[data-press-edge]:hover { border-color: var(--line-strong); }
+/* Disabled controls get no pointer feedback (the fight button used to gate
+   its spring behind `ready && !isBusy` in JS). */
+[data-press]:disabled,
+[data-press][aria-disabled="true"] { transition: none; }
+[data-press]:disabled:hover, [data-press]:disabled:active,
+[data-press][aria-disabled="true"]:hover,
+[data-press][aria-disabled="true"]:active { transform: none; }
+.fight-btn[data-press]:not(:disabled):hover { box-shadow: 0 4px 30px rgba(255, 51, 85, 0.4); }
+
+/* One-shot entrances for elements that mount in response to state (alerts,
+   ticker rows, reveal rows). `--ed` staggers siblings; the animation ends in
+   the element's natural state, so reduced motion just means no show. */
+@keyframes enter-up   { from { opacity: 0; transform: translateY(16px); } }
+@keyframes enter-down { from { opacity: 0; transform: translateY(-10px); } }
+@keyframes enter-fade { from { opacity: 0; } }
+@keyframes enter-x    { from { opacity: 0; transform: translateX(-16px); } }
+@keyframes enter-scale { from { opacity: 0; transform: scale(0.985); } }
+.enter-up    { animation: enter-up 0.45s var(--ease-out-expo) var(--ed, 0s) both; }
+.enter-down  { animation: enter-down 0.35s var(--ease-out-expo) var(--ed, 0s) both; }
+.enter-fade  { animation: enter-fade 0.35s var(--ease-smooth) var(--ed, 0s) both; }
+.enter-x     { animation: enter-x 0.4s var(--ease-out-expo) var(--ed, 0s) both; }
+.enter-scale { animation: enter-scale 0.5s var(--ease-out-expo) var(--ed, 0s) both; }
+
+/* Ambient loops (live dots, skeleton shimmer, the vote-panel attention
+   rail). Base opacity is the max, so a killed animation leaves the element
+   fully visible. */
+@keyframes loop-fade { 50% { opacity: var(--loop-mid, 0.4); } }
+.loop-fade { animation: loop-fade var(--loop-d, 1.6s) ease-in-out var(--loop-delay, 0s) infinite; }
+@keyframes brand-wiggle { 0% { rotate: 0deg; } 5% { rotate: -12deg; } 11% { rotate: 8deg; } 17%, 100% { rotate: 0deg; } }
+.brand-sword {
+  display: inline-block;
+  animation: brand-wiggle 7.6s ease-in-out infinite;
+}
+
+/* Swap: mount + (with useSwap) leave animation for popovers/modals that React
+   conditionally renders. `.swap` plays on entry; `[data-out]` plays while the
+   node is kept mounted for its final 260 ms. */
+@keyframes swap-in  { from { opacity: 0; transform: translateY(-8px) scale(0.96); } }
+@keyframes swap-out { to   { opacity: 0; transform: translateY(-8px) scale(0.96); } }
+.swap       { animation: swap-in 0.22s var(--ease-out-expo) both; }
+.swap[data-out] { animation: swap-out 0.2s ease-in both; }
+
+/* Collapse: height 0↔auto without measuring, via an animatable grid track.
+   Both states keep the DOM (closed = collapsed + visibility-hidden, which
+   also keeps it out of the tab order and the screen-reader flow). */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition: grid-template-rows 0.34s var(--ease-out-expo), visibility 0s 0.34s;
+}
+.collapse[data-open] {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows 0.34s var(--ease-out-expo), visibility 0s;
+}
+.collapse > * { overflow: hidden; min-height: 0; }
+/* Onboarding opens after the hero settles (0.35 s) but collapses at once. */
+.collapse-delay[data-open] {
+  transition: grid-template-rows 0.45s var(--ease-out-expo) 0.35s, visibility 0s 0.35s;
+}
+
+/* Selection rails that replaced framer's layoutId shared elements: the rail
+   lives inside each card/row and animates in place, instead of one node
+   teleporting between parents. */
+@keyframes rail-x { from { transform: scaleX(0); } }
+@keyframes rail-y { from { transform: scaleY(0); } }
+@keyframes dot-pop { from { opacity: 0; transform: scale(0); } }
+.rail-x {
+  animation: rail-x 0.7s var(--ease-out-expo) var(--ed, 0s) both;
+}
+.card-rail {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  background: linear-gradient(180deg, var(--red), var(--gold));
+  transform-origin: 50% 0;
+  transform: scaleY(0);
+  transition: transform 0.3s var(--ease-spring);
+}
+.card[data-on] .card-rail { transform: scaleY(1); }
+@keyframes icon-pop { 0% { scale: 1; } 45% { scale: 1.25; } 100% { scale: 1; } }
+.card[data-on] .card-ico { animation: icon-pop 0.4s ease-out both; }
+.workflow-step .act-dot {
+  animation: dot-pop 0.35s var(--ease-spring) both;
+}
+
+/* Ticker line: rises out of a blur (WaitPanel's per-turn rows). */
+@keyframes tk-in { from { opacity: 0; transform: translateY(-8px); filter: blur(2px); } }
+.tk-in { animation: tk-in 0.35s var(--ease-out-expo) both; }
+
+/* Reveal cells swing in from their own side, with a touch of 3D (the
+   rotateY the RevealPanel used to tween through framer). */
+@keyframes reveal-l { from { opacity: 0; transform: translateX(-28px) rotateY(8deg); } }
+@keyframes reveal-r { from { opacity: 0; transform: translateX(28px) rotateY(-8deg); } }
+.reveal-grid { perspective: 900px; }
+.reveal-from-left  { animation: reveal-l 0.55s var(--ease-out-expo) var(--ed, 0s) both; }
+.reveal-from-right { animation: reveal-r 0.55s var(--ease-out-expo) var(--ed, 0s) both; }
+
+/* Reveal-flash bar along the top of the reveal panel (one-shot). */
+@keyframes flash-x { from { opacity: 0.9; transform: scaleX(0); } to { opacity: 0; transform: scaleX(1); } }
+.flash-x { animation: flash-x 0.9s ease-out both; }
+
+/* Scroll-linked chrome. Same triple guard as [data-reveal]: these are
+   progress-based, so the reduced-motion animation *duration* kill does not
+   stop them — they have to opt out explicitly. */
+.scroll-rail {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--red), var(--gold));
+  transform: scaleX(0); /* shown only by the timeline below */
+  z-index: 200;
+  pointer-events: none;
+}
+@keyframes rail-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes hero-out {
+  0%   { opacity: 1; transform: none; }
+  85%  { opacity: 0; transform: translateY(-90px) scale(0.94); }
+  100% { opacity: 0; transform: translateY(-90px) scale(0.94); }
+}
+@keyframes parallax-shift { from { transform: translateY(var(--px, 18px)); }
+                            to   { transform: translateY(calc(-1 * var(--px, 18px))); } }
+/* Vote buttons: the underline that marks the current pick. */
+@keyframes sel-rail { from { opacity: 0; transform: scaleX(0); } }
+.sel-rail { animation: sel-rail 0.3s var(--ease-out-expo) both; }
+
+/* Dismiss buttons that twist on hover (onboarding ×). */
+.dismiss-x { transition: rotate 0.25s var(--ease-spring), scale 0.25s var(--ease-spring); }
+.dismiss-x:hover { rotate: 90deg; scale: 1.1; }
+.dismiss-x:active { scale: 0.9; }
+
+/* FAQ chevron + native-details height animation. The <details> element keeps
+   its zero-JS semantics; where `::details-content` is supported the answer
+   additionally grows and fades (framer used to own this). Browsers without
+   it just open instantly — correct, only less dressed up. */
+.faq-chev {
+  color: var(--dim);
+  transition: rotate 0.25s var(--ease-out-expo), color 0.25s var(--ease-smooth);
+}
+details[open] > summary .faq-chev { rotate: 45deg; color: var(--red); }
+@supports selector(::details-content) {
+  .faq details { interpolate-size: allow-keywords; }
+  .faq details::details-content {
+    height: 0;
+    opacity: 0;
+    overflow: clip;
+    transition: height 0.32s var(--ease-out-expo),
+                opacity 0.32s var(--ease-smooth),
+                content-visibility 0.32s allow-discrete;
+  }
+  .faq details[open]::details-content { height: auto; opacity: 1; }
+  @starting-style {
+    .faq details[open]::details-content { height: 0; opacity: 0; }
+  }
+}
+
+/* The active-link pill fades in where framer's shared layoutId used to
+   slide between links; per-link entry is the honest no-library version. */
+.nav-active-glow { animation: enter-fade 0.3s var(--ease-smooth) both; }
+
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    html:not([data-motion="reduced"]) {
+      .scroll-rail {
+        transform-origin: 0%;
+        animation: rail-progress linear both;
+        animation-timeline: scroll(root);
+      }
+      .hero-scroll-fade {
+        transform-origin: 50% 30%;
+        will-change: transform;
+        animation: hero-out linear both;
+        animation-timeline: scroll(root);
+        animation-range: 0 65vh;
+      }
+      .parallax {
+        animation: parallax-shift linear both;
+        animation-timeline: view();
+        animation-range: cover;
+      }
+    }
+  }
+}
+
 /* ---------- Accessibility: focus ---------- */
 a:focus-visible, button:focus-visible, select:focus-visible,
 input:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
@@ -1380,6 +1599,7 @@ html[data-motion="reduced"] *::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
+  transition-delay: 0s !important;
   scroll-behavior: auto !important;
 }
 html[data-motion="reduced"] body::after { display: none; }
@@ -1390,7 +1610,9 @@ html[data-motion="reduced"] .ticker-live { animation: none !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 }

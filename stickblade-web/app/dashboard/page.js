@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import { exportUrl, getBenchmarkSpec } from "@/lib/api";
 import { MotionSection, StaggerContainer, StaggerItem, SlideIn, FloatingOrb } from "@/components/MotionSection";
@@ -130,17 +129,17 @@ export default function DashboardPage() {
               <div className="scorecard" style={{ display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginTop: 12 }}>
                 {statCards.map(([k, v]) => (
-                  <motion.div key={k} className="cell"
+                  <div key={k} className="cell"
                     style={{ padding: 14, borderRadius: 10, border: "1px solid var(--line)",
                              background: "rgba(255,255,255,0.02)", textAlign: "center" }}
-                    whileHover={{ borderColor: "var(--line-strong)" }}
+                    data-press-edge
                   >
                     <div style={{ fontSize: 11, letterSpacing: 1.2, textTransform: "uppercase",
                                   color: "var(--dim)", marginBottom: 6 }}>{k}</div>
                     <div style={{ fontSize: 20, fontWeight: 700,
                                   fontFamily: "var(--font-display), system-ui",
                                   color: "var(--text)" }}>{v}</div>
-                  </motion.div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -161,10 +160,10 @@ export default function DashboardPage() {
                 gap: 12, marginTop: 12 }} staggerDelay={0.08}>
                 {coverageGroups.map(([title, counts]) => (
                   <StaggerItem key={title} direction="scale">
-                    <motion.div style={{ padding: 14, borderRadius: 10,
+                    <div style={{ padding: 14, borderRadius: 10,
                             border: "1px solid var(--line)",
                             background: "rgba(255,255,255,0.02)" }}
-                      whileHover={{ borderColor: "var(--line-strong)" }}>
+                      data-press-edge>
                       <div style={{ fontSize: 11, letterSpacing: 1.4,
                                     textTransform: "uppercase",
                                     color: "var(--dim)", marginBottom: 8 }}>{title}</div>
@@ -179,7 +178,7 @@ export default function DashboardPage() {
                           <b style={{ color: "var(--text)" }}>{v}</b>
                         </div>
                       ))}
-                    </motion.div>
+                    </div>
                   </StaggerItem>
                 ))}
               </StaggerContainer>

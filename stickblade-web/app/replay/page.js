@@ -7,7 +7,6 @@ import { PredictPanel, VotePanel, RevealPanel } from "@/components/JudgePanels";
 import { getMatch, getReplay, postVote } from "@/lib/api";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import { MotionSection, SlideIn } from "@/components/MotionSection";
-import { motion } from "framer-motion";
 
 /* Replay + judge stage (review items 11-15, 22).
 
@@ -116,16 +115,15 @@ function ReplayInner() {
 
   if (err && !replay) {
     return (
-      <motion.div className="panel empty"
-        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}>
+      <div className="panel empty enter-up">
         <div className="empty-t">This replay could not be loaded.</div>
         <p style={{ color: "var(--dim)", fontSize: 13, margin: 0 }}>{err}</p>
-        <motion.a className="btn btn-sm" href="/" style={{ textDecoration: "none" }}
-          whileHover={{ scale: 1.05, y: -1 }} whileTap={{ scale: 0.97 }}>
+        <a className="btn btn-sm" href="/"
+          style={{ textDecoration: "none", "--ph": "1.05", "--hy": "-1px", "--pt": "0.97" }}
+          data-press>
           Start a duel
-        </motion.a>
-      </motion.div>
+        </a>
+      </div>
     );
   }
   if (!replay) {
@@ -133,12 +131,12 @@ function ReplayInner() {
       <div style={{ display: "grid", gap: 12 }}>
         {/* Skeleton mirrors the real layout so nothing jumps when data lands. */}
         {[0, 1, 2].map((i) => (
-          <motion.div key={i}
-            className="panel"
-            style={{ height: i === 0 ? 320 : 90, borderRadius: 16,
+          <div key={i}
+            className="panel loop-fade"
+            style={{ "--loop-d": "1.6s", "--loop-delay": `${i * 0.15}s`,
+                     "--loop-mid": "0.45", opacity: 0.9,
+                     height: i === 0 ? 320 : 90, borderRadius: 16,
                      background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)" }}
-            animate={{ opacity: [0.45, 0.9, 0.45] }}
-            transition={{ duration: 1.6, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
           />
         ))}
         <div className="status" role="status">
@@ -160,9 +158,7 @@ function ReplayInner() {
   return (
     <div style={{ width: "100%" }}>
       {err && (
-        <motion.div className="status" role="alert"
-          initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
-        >✖ {err}</motion.div>
+        <div className="status enter-down" role="alert">✖ {err}</div>
       )}
 
       <SlideIn direction="up">
