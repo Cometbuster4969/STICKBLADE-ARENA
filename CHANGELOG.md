@@ -14,6 +14,169 @@ cross-version leaderboard comparison, regardless of the API version.
 
 ## [Unreleased] — benchmark spec v1.0 (fingerprint `09de66effd02` under prompt v2; `029281ed627a` under prompt v1)
 
+### Changed — "kinematics plate" visual redesign of the web app (2026-10-08)
+
+A second pass over `stickblade-web`, this one on visual language rather than
+motion mechanics (benchmark semantics, routes, API and stored values are
+untouched). The dark "fluid glass" theme was replaced with a system grounded
+in what the product is: a motion-study plate.
+
+- **Tokens rewritten** (`app/globals.css`): drafting-paper surfaces
+  (`--bg-0` #e7e9e2, sheet `--bg-2-solid` #f1f3ec), ink text, 1px
+  pencil/ink rules (`--line`, `--line-strong`), semantic accents only —
+  signal red #c7351f for danger annotations, fighter green #0e7d5b / blue
+  #1f5fc4 matching the canvas, pencil amber #8a6400 for provisional state.
+  Radii are drafting-scale (3–6px); `--shadow-*` are now `none`: elevation
+  is a hairline, not a shadow. Text tokens verified AA on paper
+  (body 15.6:1, secondary 8.7:1, muted 4.7:1+).
+- **Type**: Big Shoulders (self-hosted via `@fontsource/big-shoulders`,
+  weights 500/700/800) replaces Rajdhani as `--font-display`, set in
+  sentence case with tracking near zero; Inter stays the body face;
+  monospace is reserved for measurements (turns, seeds, Elo).
+- **Hero rebuilt** as a split plate: headline + `components/HeroPlate.js`,
+  an inline-SVG motion-study figure of the duel (fighters, weapon, red
+  dashed tip arc, turn-budget bracket) with a `figcaption`. The animated
+  gradient wordmark, "Live Physics Arena" badge, floating glow orbs and all
+  `⚔ ▶ ⚡ →` CTA decorations were removed; copy now states the mechanics
+  and the CTAs name what happens ("Set up a duel", "Watch a sample fight").
+- **Chrome flattened**: glass nav re-tinted to paper glass with an ink
+  bottom rule; the active-link glow became a red 2px underline; panels,
+  cards, chips, zone tiles, badges, ticker, modal and tables lost their
+  gradient washes, inset highlights and glows; buttons are solid ink
+  plates (the fight button lost its shine sweep); the replay canvas is the
+  one dark surface — a monitor, framed by a hairline.
+- **Motion de-scattered**: `MotionSection` reveals are now opt-in (pass a
+  direction explicitly or a section simply appears), and every direction
+  resolves to `reveal-fade` — the per-section fade-and-slide entrance is
+  retired. The hero keeps the single orchestrated `data-hero-in`
+  stagger; response-motion (`[data-press]`, `.swap`, `.collapse`,
+  `.sel-rail`, vote confirmations) is unchanged. The now-unused
+  `FloatingOrb`, `Parallax` and `HeroScrollFade` primitives and their CSS
+  were deleted.
+- **Accessibility modes re-derived for light**: `high` contrast is now
+  max-ink-on-white, `fx-off` drops the drafting grid, focus rings moved
+  to amber. Inline styles across 14 components switched from white washes
+  to `--wash`/`--wash-2` ink tints.
+
+Verified: `next build` 18/18 static, `/` First Load 143 kB, all 14 routes
+200, zero elements inline-hidden for no-JS readers, `npm run check:player`
+PASS, JSX balance audited.
+
+### Changed — the two properties now reference each other (2026-10-09)
+
+The marketing site (`stick-web.vercel.app`) was re-themed to the same
+kinematics-plate language and reshaped into the narrative overview: it
+delegates methodology, limitations, reproducibility, data and trust to the
+canonical live-backed pages in this app, no longer renders stale hardcoded
+counters as "live" numbers (nulls until first fetch), and dropped the dark
+glass/blur/glow skin plus decorative glyphs from its chrome. In return this
+app links out to the overview site from the footer and says so in the
+`/research` lead: the app pages are canonical because every number on them
+can be re-fetched live.
+
+
+### Changed — full frontend redesign on a motion design system (2026-10-08)
+
+The UI was rebuilt around motion rather than re-skinned. No prior layout was
+preserved for its own sake; every page was restyled and every surface now has
+an entry, a hover response, or a scroll behaviour.
+
+- **Design system rewritten** (`stickblade-web/app/globals.css`): new token set
+  (`--ease-out-expo`, `--ease-spring`, `--glass`, `--purple`, glow tokens,
+  `--radius-lg`), ambient layered background, 16px radii, glass sticky nav,
+  hero with animated gradient wordmark, section-label / section-title scale,
+  and refreshed leaderboard, ticker, scorecard, modal and history styling.
+  All pre-existing component classes (`.lb`, `.scorecard`, `.prov-table`,
+  `.zone`, `.modal`, `.workflow`, `.reveal`, `.status`, `.hint.warn`,
+  `.rank-medal`, …) were re-skinned rather than dropped, plus `.why` and
+  `.visually-hidden` restored/utility-ised.
+- **Scroll reveals are CSS scroll-driven animations**, not JS. New
+  `data-reveal` / `data-reveal-stagger` / `data-lift` / `data-hero-in` system
+  built on `animation-timeline: view()` behind `@supports`, so the visible
+  state is the default. This was a deliberate correctness choice: an
+  IntersectionObserver reveal ships `opacity:0` inline from the server and only
+  releases it after hydration, which would have made the whole site unreadable
+  to a non-JS reader or a text-extracting crawler and put LCP behind JS timing.
+  Verified: **0 elements ship invisible across all 16 static pages** while 118
+  reveal hooks are active.
+- **framer-motion (`v14`) added for what CSS cannot do**: the scroll progress
+  rail, hero scroll-linked drift/scale/fade, the nav's `layoutId` active-pill
+  slide, tournament seed reordering, `AnimatePresence` mount/unmount
+  choreography (advanced panel, FAQ answers, self-play warning, errors), spring
+  hover/tap on buttons and cards, and the vote-reveal sequence.
+- **Reveal moment** (`components/JudgePanels.js`): fighter cells slide in from
+  their own side, model ids decode through a scramble, and Elo deltas count up
+  from zero with a colour that tracks sign.
+- **Accessibility is now wired, not just present.** `components/A11yControls.js`
+  existed but was rendered by no page — the ♿ Motion popover in the nav mounts
+  it on every screen, and the new `MotionProvider` bridges `data-motion` into
+  framer-motion's `MotionConfig`, so reduced motion drops transforms site-wide
+  rather than only muting CSS. `lib/prefs.js` gained a subscription hook so the
+  toggle propagates to JS-driven motion; `applyPrefs` moved into
+  `MotionProvider` so first paint respects the OS setting even with the popover
+  closed. Ambient orbs unmount under `data-fx="off"` via a MutationObserver.
+- **Perf decisions from the previous audit were kept, not re-litigated**:
+  `backdrop-filter` stays off `.panel` (measured ~6 ms/frame on mobile) and is
+  used only on the single sticky nav and the modal; the fullscreen grid layer is
+  still dropped on phones. `.glass-card` was removed as dead CSS carrying an
+  expensive property. `body` moved from `overflow-x: hidden` to `clip` so the
+  sticky nav keeps working, and `contain: paint` came off `.panel` because it
+  clipped the `glow-*` border rings.
+- Nav and footer break out of the 1200px container with the `calc(50% - 50vw)`
+  trick so the glass bar reads as chrome instead of an inset card.
+- Restyled/motion-added pages: `/`, `/leaderboard`, `/history`, `/status`,
+  `/events`, `/dashboard`, `/tournament`, `/replay`, `/trust`, plus the
+  `DocPage` shell used by `/research`, `/methodology`, `/data`,
+  `/reproducibility`, `/limitations`.
+
+Benchmark semantics untouched: no route, API call, payload field, blind-voting
+rule, or stored value changed. `npm run check:player`, the CI JSX balance
+check, and `next build` under `NEXT_PUBLIC_API_BASE=https://ci-placeholder.invalid`
+all pass; every page remains statically prerendered.
+
+### Changed — framer-motion removed; the motion layer is CSS + 130 lines (2026-10-08)
+
+The redesign above shipped framer-motion for ~48 kB of first-load JS, and an
+audit of what it was actually used for found that almost none of it needed a
+library. The dependency is gone (`stickblade-web` ships no animation runtime
+again), with intent preserved effect-for-effect:
+
+- Press feedback (`whileHover`/`whileTap` springs) → `[data-press]`: one
+  transition plus `--ph`/`--pt`/`--hy`/`--hx` custom properties at the call
+  sites; disabled controls get no feedback via `:disabled` guards.
+- Ambient loops (live dots, skeleton shimmer, attention rails, brand wiggle)
+  → `.loop-fade` / `.brand-sword` keyframes.
+- One-shot entrances → `.enter-up/down/fade/x/scale` keyframes with an `--ed`
+  delay; height tweens of conditional panels (advanced settings, vote detail,
+  BYOK input, self-play warning, onboarding) → the `.collapse` grid utility
+  (`grid-template-rows: 0fr↔1fr`), always mounted and `visibility`-hidden
+  when closed, which also keeps them out of the tab order.
+- `AnimatePresence` → a 25-line `useSwap` hook that defers unmount until a
+  `.swap` leave animation finishes (nav ♿ popover was the only true
+  exit-choreography site left standing).
+- `useScroll`/`useSpring` reading rail → `animation-timeline: scroll(root)`
+  (`.scroll-rail`); the hero's drift/scale/fade → `hero-out` on the same
+  timeline; `Parallax` → `view()` + `--px`. All inside the existing
+  `@supports`/reduced-motion guards, since progress-based animations ignore
+  the duration kill.
+- `layoutId` shared elements (nav pill, workflow dot, option-card rail) →
+  per-element entry animations — the honest no-engine translation, documented
+  at each call site. Tournament seed reordering keeps a real FLIP:
+  `useFlipList` measures rects in a layout effect and inverts with WAAPI.
+- framer's `useReducedMotion()`/`MotionConfig` → `useReducedMotion()` backed
+  by the same `lib/prefs.js` subscription the CSS uses; `MotionProvider`
+  reduces to applying prefs before first paint, and `ScrollProgress`/
+  `HeroScrollFade`/`FloatingOrb`/`Parallax` became class-only wrappers.
+- The Elo-delta count-up keeps its rAF tween, hand-rolled like
+  `ScrambleText` beside it; the FAQ answer animation moved to
+  `::details-content` + `interpolate-size` behind `@supports`, so the
+  accordion still opens instantly (correctly) where that is unavailable.
+
+`/` First Load JS: 196 kB → **142 kB**; `/leaderboard` 168 → 120 kB; the dev
+compile for `/` dropped from 1632 to 820 modules. `check:player`, the JSX
+balance check, and `next build` pass, and the static HTML still ships **0**
+invisible elements across all pages.
+
 ### Added — next-step priorities 1–5 (2026-09-09, second session)
 
 - **P1 · calibration batch runner** `tools/run_calibration_batch.py`:

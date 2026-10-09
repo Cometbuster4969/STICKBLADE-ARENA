@@ -1,4 +1,6 @@
 "use client";
+import { useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "@/lib/motion";
 import ShareButton from "@/components/ShareButton";
 
 /* Judge stage: optional prediction -> blind vote -> reveal (review items 11-15).
@@ -34,9 +36,14 @@ export function PredictPanel({ prediction, onPredict, streak }) {
         question, separate from the vote below — and entirely optional.
       </p>
       <div className="vote-row">
-        <button className="vote-a" onClick={() => onPredict("a")}>Fighter A wins</button>
-        <button className="vote-draw" onClick={() => onPredict("draw")}>Draw</button>
-        <button className="vote-b" onClick={() => onPredict("b")}>Fighter B wins</button>
+        {[["a", "vote-a", "Fighter A wins"],
+          ["draw", "vote-draw", "Draw"],
+          ["b", "vote-b", "Fighter B wins"]].map(([side, cls, label]) => (
+          <button key={side} className={cls} onClick={() => onPredict(side)}
+            data-press style={{ "--hy": "-3px", "--ph": "1.01", "--pt": "0.97" }}>
+            {label}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -46,8 +53,8 @@ export function VotePanel({ onVote, predictionLocked, integrityNote }) {
   return (
     <div className="panel" style={{ padding: 18, borderColor: "var(--gold)",
                                     borderStyle: "solid" }}>
-      <div style={{ fontSize: 11, letterSpacing: 2, fontWeight: 700,
-                    color: "var(--gold)", textTransform: "uppercase",
+      <div style={{ fontSize: 12, letterSpacing: 0.3, fontWeight: 700,
+                    color: "var(--gold)",
                     textAlign: "center", marginBottom: 10 }}>
         🔒 Blind vote · models hidden until you answer
       </div>
@@ -108,7 +115,12 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
   const fmtElo = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v}`);
 
   return (
-    <div className="panel reveal">
+    <div
+      className="panel reveal enter-scale"
+      style={{ position: "relative", overflow: "hidden" }}
+    >
+      {/* One-shot flash as the identities land — the payoff of a blind vote. */}
+      <RevealFlash />
       <span className="panel-title gold"><span className="tick" /> Reveal — who they were</span>
 
       {prediction && (
@@ -130,7 +142,7 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
                       background: "rgba(255, 197, 71, 0.07)",
                       border: "1px dashed var(--gold)", fontSize: 13, lineHeight: 1.55 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5,
-                        color: "var(--gold)", textTransform: "uppercase", marginBottom: 4 }}>
+                        color: "var(--gold)", marginBottom: 4 }}>
             AI commentator
           </div>
           “{result.commentary}”
@@ -138,20 +150,24 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
       )}
 
       <div className="reveal-grid">
-        <div className="reveal-cell">
+        <div className="reveal-cell reveal-from-left"
+          style={{ "--ed": "0.18s", position: "relative" }}
+        >
           <div className="side" style={{ color: "var(--green)" }}>Fighter A was</div>
-          <div className="who">{nameA}</div>
+          <div className="who"><ScrambleText text={nameA} delay={0.35} /></div>
           <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 6 }}>
-            Human-Voted Elo {fmtElo(eloA)}
+            Human-Voted Elo <EloDelta value={eloA} />
             {winnerSide === "a" && <b style={{ color: "var(--gold)" }}> · won the fight</b>}
             {votedSide === "a" && <b style={{ color: "var(--green)" }}> · your vote</b>}
           </div>
         </div>
-        <div className="reveal-cell">
+        <div className="reveal-cell reveal-from-right"
+          style={{ "--ed": "0.26s", position: "relative" }}
+        >
           <div className="side" style={{ color: "var(--blue)" }}>Fighter B was</div>
-          <div className="who">{nameB}</div>
+          <div className="who"><ScrambleText text={nameB} delay={0.5} /></div>
           <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 6 }}>
-            Human-Voted Elo {fmtElo(eloB)}
+            Human-Voted Elo <EloDelta value={eloB} />
             {winnerSide === "b" && <b style={{ color: "var(--gold)" }}> · won the fight</b>}
             {votedSide === "b" && <b style={{ color: "var(--blue)" }}> · your vote</b>}
           </div>
@@ -166,7 +182,7 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
         </div>
       )}
 
-      <div className="reveal-rows">
+      <div className="reveal-rows enter-up" style={{ "--ed": "0.5s" }}>
         <div>
           Physical winner:{" "}
           <b>{winnerSide == null ? "Unknown" : winnerSide === "draw" ? "Draw"
@@ -212,5 +228,100 @@ export function RevealPanel({ result, replay, voteChoice, prediction,
         </a>
       </div>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Reveal-only motion helpers. The flash is a CSS keyframe (neutralised by
+ * the reduced-motion kill); the scramble and count-up check useReducedMotion
+ * so their rAF loops never start.
+ * ------------------------------------------------------------------------ */
+
+/** Brief white-out along the panel edge the moment identities appear. */
+function RevealFlash() {
+  const reduce = useReducedMotion();
+  if (reduce) return null;
+  return (
+    <span
+      aria-hidden="true"
+      className="flash-x"
+      style={{
+        position: "absolute", top: 0, left: 0, right: 0, height: 2,
+        transformOrigin: "0%", pointerEvents: "none",
+        background: "linear-gradient(90deg, var(--green), var(--gold), var(--blue))",
+      }}
+    />
+  );
+}
+
+const SCRAMBLE_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_·";
+
+/**
+ * Decodes a model id into its final text. A cheap suspense beat that makes
+ * the reveal feel like a reveal; the finished string is always the real one,
+ * and it never affects what is stored or rated.
+ */
+function ScrambleText({ text, delay = 0 }) {
+  const reduce = useReducedMotion();
+  const [out, setOut] = useState(reduce ? text : "");
+
+  useEffect(() => {
+    if (reduce || !text) { setOut(text); return; }
+    let frame = 0;
+    let raf;
+    let start;
+    const total = text.length;
+    const step = (t) => {
+      if (start == null) start = t;
+      const elapsed = t - start - delay * 1000;
+      if (elapsed < 0) { raf = requestAnimationFrame(step); return; }
+      const settled = Math.min(total, Math.floor(elapsed / 26));
+      let s = text.slice(0, settled);
+      for (let i = settled; i < total; i++) {
+        s += text[i] === " " || text[i] === "/" || text[i] === ":"
+          ? text[i]
+          : SCRAMBLE_POOL[(Math.random() * SCRAMBLE_POOL.length) | 0];
+      }
+      setOut(s);
+      frame = settled;
+      if (frame < total) raf = requestAnimationFrame(step);
+      else setOut(text);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [text, delay, reduce]);
+
+  return <span aria-label={text}>{out || text}</span>;
+}
+
+/** Elo delta that ticks from 0 to its value — up green, down red. */
+function EloDelta({ value }) {
+  const reduce = useReducedMotion();
+  const [shown, setShown] = useState(0);
+  const raf = useRef(0);
+
+  useEffect(() => {
+    cancelAnimationFrame(raf.current);
+    if (value == null) { setShown(0); return undefined; }
+    if (reduce) { setShown(value); return undefined; }
+    const start = performance.now();
+    const dur = 900;
+    const tick = (t) => {
+      const p = Math.min(1, (t - start) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setShown(Math.round(value * eased));
+      if (p < 1) raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [value, reduce]);
+
+  if (value == null) return <>—</>;
+  const sign = value >= 0 ? "+" : "";
+  const color = value >= 0 ? "var(--green)" : "var(--red)";
+  return (
+    <b style={{ color, fontVariantNumeric: "tabular-nums" }}>
+      {sign}{shown}
+    </b>
   );
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { normalizeModel } from "@/lib/models";
 
 const CUSTOM = "__custom__";
@@ -24,6 +24,12 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
                                       onChange, onCustomChange,
                                       mode = "macro" }) {
   const isCustom = value === CUSTOM;
+  const customRef = useRef(null);
+  // The input used to remount inside AnimatePresence with autoFocus; it now
+  // stays mounted inside a CSS collapse, so focus has to follow the open.
+  useEffect(() => {
+    if (isCustom) customRef.current?.focus();
+  }, [isCustom]);
   const selectId = useId();
   const inputId = useId();
   const metaId = useId();
@@ -82,20 +88,26 @@ export default function ModelPicker({ label, slotIndex, models, value, custom,
         ))}
         <option value={CUSTOM}>✏ Custom model id…</option>
       </select>
-      {isCustom && (
-        <input
-          id={inputId}
-          aria-label={`${label} custom model id`}
-          type="text"
-          placeholder="OpenRouter id, e.g. qwen/qwen3-coder:free"
-          value={custom}
-          onChange={(e) => onCustomChange(e.target.value)}
-          style={{ marginTop: 6 }}
-          autoFocus
-        />
-      )}
+      {/* Collapse keeps the row's height animating both ways without a JS
+          timer — the `.collapse` grid utility in globals.css. */}
+      <div className="collapse" data-open={isCustom ? "" : undefined}>
+        <div>
+          <input
+            ref={customRef}
+            id={inputId}
+            aria-label={`${label} custom model id`}
+            type="text"
+            placeholder="OpenRouter id, e.g. qwen/qwen3-coder:free"
+            value={custom}
+            onChange={(e) => onCustomChange(e.target.value)}
+            style={{ marginTop: 6 }}
+          />
+        </div>
+      </div>
       {picked && (
-        <div className="model-meta" id={metaId}>
+        <div
+          className="model-meta enter-fade" id={metaId}
+        >
           <span>{picked.provider}</span>
           {latencyText && (
             <>

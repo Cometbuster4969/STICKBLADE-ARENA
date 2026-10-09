@@ -1,4 +1,5 @@
 "use client";
+import { useReducedMotion } from "@/lib/motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getMatch, getHeadToHead, getRecent, cancelMatch } from "@/lib/api";
 
@@ -154,7 +155,7 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady,
                     alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontFamily: "var(--font-display), system-ui, sans-serif",
-                        fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>
+                        fontSize: 21, fontWeight: 800, letterSpacing: 0.3 }}>
             <span style={{ color: "var(--green)" }}>FIGHTER A</span>
             <span style={{ color: "var(--mute)", margin: "0 10px" }}>vs</span>
             <span style={{ color: "var(--blue)" }}>FIGHTER B</span>
@@ -199,8 +200,11 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady,
              aria-valuemax={100}
              aria-valuenow={Math.round(progress?.percent || 0)}
              aria-label="Match progress">
-          <div className="progress-fill"
-               style={{ width: `${Math.min(100, progress?.percent || 0)}%` }} />
+          {/* Width springs along on the CSS transition (.progress-fill);
+              the glow is a class toggle so it can ease too. */}
+          <div className={"progress-fill"
+                + ((progress?.percent || 0) > 0 && (progress?.percent || 0) < 100 ? " glow" : "")}
+            style={{ width: `${Math.min(100, progress?.percent || 0)}%` }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between",
                       gap: 10, flexWrap: "wrap", marginTop: 6,
@@ -261,8 +265,8 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady,
 
       {/* ---------- Degraded-turn disclosure, live ---------- */}
       {fallbackTurns.length > 0 && (
-        <div className="stalled" style={{ borderColor: "rgba(255, 102, 128, 0.45)",
-                                          background: "rgba(255, 61, 92, 0.07)" }}>
+        <div className="stalled" style={{ borderColor: "rgba(165, 42, 23, 0.45)",
+                                          background: "rgba(199, 53, 31, 0.07)" }}>
           <p>
             <b>Scripted fallback in use.</b>{" "}
             {fallbackTurns.map((t) =>
@@ -331,10 +335,10 @@ export default function WaitPanel({ matchId, modelA, modelB, onReady,
 
       {/* ---------- Read while you wait ---------- */}
       <details style={{ border: "1px solid var(--line)", borderRadius: 6,
-                        background: "rgba(255,255,255,0.015)", fontSize: 13,
+                        background: "var(--wash)", fontSize: 13,
                         padding: "10px 12px" }}>
         <summary style={{ cursor: "pointer", color: "var(--gold)", fontWeight: 700,
-                          fontSize: 11, letterSpacing: 2, textTransform: "uppercase" }}>
+                          fontSize: 12, letterSpacing: 0.3 }}>
           About this benchmark (read while you wait)
         </summary>
         <div style={{ marginTop: 10, color: "var(--text-2)", lineHeight: 1.55 }}>
@@ -384,9 +388,8 @@ function QuipCard({ side, text }) {
   const color = side === "a" ? "var(--green)" : "var(--blue)";
   return (
     <div style={{ padding: "10px 12px", border: `1px solid ${color}`,
-                  borderRadius: 6, background: "rgba(255,255,255,0.02)" }}>
-      <div style={{ fontSize: 10, letterSpacing: 2, color, fontWeight: 700,
-                    textTransform: "uppercase", marginBottom: 4 }}>
+                  borderRadius: 4, background: "var(--wash)" }}>
+      <div style={{ fontSize: 11, letterSpacing: 0.3, color, fontWeight: 700, marginBottom: 4 }}>
         Fighter {side.toUpperCase()}
       </div>
       <div style={{ fontStyle: "italic", fontSize: 14, lineHeight: 1.4,
@@ -401,8 +404,9 @@ function QuipCard({ side, text }) {
    a word (SHARP / LETHAL / FALLBACK), so the meaning survives greyscale. */
 function TickerLine({ tick, tech }) {
   const hits = tick.hits || [];
+  const reduce = useReducedMotion();
   return (
-    <div className="tk-row">
+    <div className={"tk-row" + (reduce ? "" : " tk-in")}>
       <span className="tk-turn">T{String(tick.turn).padStart(2, "0")}</span>
       {(tick.action_a?.action || tick.action_b?.action) && (
         <span className="tk-act">

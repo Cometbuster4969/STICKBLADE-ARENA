@@ -1,18 +1,10 @@
 "use client";
-/**
- * Shared shell for the public research pages (next-step priority 5):
- * /research, /methodology, /data, /reproducibility, /limitations.
- *
- * Every page is a list of sections rendered in the same panel style as the
- * rest of the site, plus an optional live "evidence strip" pulled from
- * /api/data_quality so a page can never claim more than the dataset holds.
- * Prose lives in the page files; this is only the frame.
- */
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import DataQualityBanner, { fmtDate } from "@/components/DataQuality";
 import { getDataQuality } from "@/lib/api";
+import { MotionSection } from "@/components/MotionSection";
 
 export const GITHUB = "https://github.com/Cometbuster4969/STICKBLADE-ARENA";
 export const TREE = `${GITHUB}/blob/main`;
@@ -51,8 +43,8 @@ export function UL({ items }) {
 
 export function Pre({ children }) {
   return (
-    <pre style={{ marginTop: 10, padding: "10px 12px", borderRadius: 6,
-                  border: "1px solid var(--line)", background: "rgba(0,0,0,0.25)",
+    <pre style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8,
+                  border: "1px solid var(--line)", background: "var(--wash-2)",
                   color: "var(--text)", fontSize: 12.5, lineHeight: 1.6,
                   overflowX: "auto" }}>
       {children}
@@ -79,16 +71,17 @@ export function KV({ rows }) {
 
 export function Section({ id, title, tone, children }) {
   return (
-    <div className="panel" id={id}>
-      <span className={`panel-title ${tone || ""}`}>
-        <span className="tick" /> {title}
-      </span>
-      {children}
-    </div>
+    <MotionSection delay={0.05}>
+      <div className="panel" id={id}>
+        <span className={`panel-title ${tone || ""}`}>
+          <span className="tick" /> {title}
+        </span>
+        {children}
+      </div>
+    </MotionSection>
   );
 }
 
-/** Live evidence strip. Renders nothing while loading or if the API is down. */
 export function EvidenceStrip({ compact = false }) {
   const [q, setQ] = useState(null);
   const [err, setErr] = useState(false);
@@ -101,7 +94,7 @@ export function EvidenceStrip({ compact = false }) {
     return (
       <P style={{ color: "var(--mute)" }}>
         Live data-quality report unavailable (backend asleep or unreachable).
-        The numbers on this page that depend on it are shown as “—”.
+        The numbers on this page that depend on it are shown as "—".
       </P>
     );
   }
@@ -115,9 +108,8 @@ export function EvidenceStrip({ compact = false }) {
           Live from <Code>/api/data_quality</Code>: {s.matches ?? "—"} finished
           matches · {s.real_provider_matches ?? "—"} real-provider ·{" "}
           {s.mixed_provider_matches ?? "—"} mixed · {s.scripted_matches ?? "—"} scripted
-          · {s.real_ranked_matches ?? "—"} real + ranking-eligible (board minimum{" "}
-          {s.min_real_for_board ?? "—"}) · fallback {s.fallback_matches ?? "—"} ·
-          silent fallback {s.silent_fallback_matches ?? "—"} · token coverage{" "}
+          · {s.real_ranked_matches ?? "—"} real + ranking-eligible · fallback {s.fallback_matches ?? "—"} ·
+          token coverage{" "}
           {s.token_coverage == null ? "n/a" : `${Math.round(s.token_coverage * 100)}%`}
           · last match {fmtDate(s.last_match_at)} · benchmark v{q.benchmark_version}
           · prompt v{q.prompt_version ?? "?"} · fingerprint <Code>{q.spec_fingerprint}</Code>
@@ -156,12 +148,14 @@ export default function DocPage({ title, lead, current, children, evidence = tru
     <>
       <SiteNav />
       <div className="container">
-        <div className="panel">
-          <span className="panel-title gold"><span className="tick" /> {title}</span>
-          {lead && <P>{lead}</P>}
-          <ResearchSubnav current={current} />
-          {evidence && <EvidenceStrip />}
-        </div>
+        <MotionSection>
+          <div className="panel">
+            <span className="panel-title gold"><span className="tick" /> {title}</span>
+            {lead && <P>{lead}</P>}
+            <ResearchSubnav current={current} />
+            {evidence && <EvidenceStrip />}
+          </div>
+        </MotionSection>
         {children}
       </div>
       <SiteFooter />

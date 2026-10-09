@@ -10,11 +10,6 @@ import OnboardingCard from "@/components/OnboardingCard";
 import SharpZonePicker from "@/components/SharpZonePicker";
 import { WeaponPicker, ArenaPicker, WEAPON_INFO, ARENA_INFO } from "@/components/OptionCards";
 import { PredictPanel, RevealPanel } from "@/components/JudgePanels";
-// Our VotePanel, not JudgePanels': this one collects the optional
-// execution / entertainment / deserved axes, the 1-5 confidence rating and
-// the self-declared evaluator tier (action-plan §6). Only the tactical
-// choice moves a rating, but the other axes are what let the dataset
-// separate "fought intelligently" from "was fun to watch".
 import VotePanel from "@/components/VotePanel";
 import SampleFight from "@/components/SampleFight";
 import IntegrityBadge from "@/components/IntegrityBadge";
@@ -26,17 +21,14 @@ import { getModels, createMatch, getMatch, getReplay, postVote,
          getIntegrity, getDataQuality } from "@/lib/api";
 import SiteNav, { SiteFooter } from "@/components/SiteNav";
 import DataQualityBanner from "@/components/DataQuality";
+import {
+  MotionSection, StaggerContainer, StaggerItem,
+  MotionCard, SlideIn, HeroAnimation
+} from "@/components/MotionSection";
+import HeroPlate from "@/components/HeroPlate";
 
-/* Fight page — restructured around one workflow (review items 1, 2, 6, 23):
-
-     CONFIGURE  ->  OBSERVE  ->  JUDGE BLIND  ->  REVEAL  ->  INSPECT
-
-   Setup is split into numbered sections (Fighters / Fight Rules /
-   Evaluation mode / Advanced) instead of one flat column of equal-weight
-   controls, "Run recommended duel" fills every field with sane defaults in
-   one click, and terminology is fixed: models are "Model 1"/"Model 2" until
-   the fight starts, then they are only ever "Fighter A"/"Fighter B" until
-   the reveal names them. */
+/* Fight page — modern motion redesign:
+   CONFIGURE  ->  OBSERVE  ->  JUDGE BLIND  ->  REVEAL  ->  INSPECT */
 
 const WEAPON_ZONES = {
   sword:  ["tip", "edge", "back_edge", "pommel"],
@@ -54,7 +46,6 @@ const ZONE_TITLE = {
   arrow_shaft: "Arrow shaft sharp", bow_limb: "Bow limb sharp",
 };
 
-// ----- predict-streak + accuracy (localStorage) -----------------------------
 const STREAK_KEY = "sba.predictStreak";
 const STREAK_BEST_KEY = "sba.predictBest";
 const PREDICT_WINS_KEY = "sba.predictWins";
@@ -84,10 +75,10 @@ function writeStreak(cur, best, wins, total) {
 }
 
 const WORKFLOW = [
-  ["configure", "Configure", "pick two models"],
-  ["observe",   "Watch",     "live physics"],
-  ["judge",     "Vote blind", "who fought smarter"],
-  ["inspect",   "Reveal",    "names, Elo, integrity"],
+  ["configure", "Configure", "Pick two models"],
+  ["observe",   "Watch",     "Live physics"],
+  ["judge",     "Vote blind", "Who fought smarter"],
+  ["inspect",   "Reveal",    "Names, Elo, integrity"],
 ];
 
 export default function Home() {
@@ -105,25 +96,17 @@ export default function Home() {
   const [allowSelfPlay, setAllowSelfPlay] = useState(false);
 
   const [matchId, setMatchId] = useState(null);
-  const [status, setStatus] = useState("idle");     // idle|submitting|running|ready
+  const [status, setStatus] = useState("idle");
   const [error, setError] = useState(null);
   const [replay, setReplay] = useState(null);
   const [voteChoice, setVoteChoice] = useState(null);
   const [voteResult, setVoteResult] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
-  // Evidence level of the sidebar cell (scripted-only / insufficient /
-  // real) — the compact table carries per-row chips, this is the banner.
   const [quality, setQuality] = useState(null);
-  // ---- benchmark spec v1.0 controls (§1) ----
-  // Match length, fallback policy and seed are part of the frozen spec:
-  // they decide whether a result is comparable with anything else, and
-  // they travel in the match's provenance record.
   const [matchLength, setMatchLength] = useState("standard");
   const [fallbackPolicy, setFallbackPolicy] = useState("operational");
   const [seed, setSeed] = useState("");
-  // §8: replay integrity audit for the match just watched.
   const [integrity, setIntegrity] = useState(null);
-  // §3: sample-fight modal.
   const [showSample, setShowSample] = useState(false);
   const [objective, setObjective] = useState({});
   const [prediction, setPrediction] = useState(null);
@@ -132,13 +115,10 @@ export default function Home() {
 
   const setupRef = useRef(null);
 
-  // Keep the backend awake while this tab is open (cold-start mitigation).
   useEffect(() => startKeepalive(), []);
 
   useEffect(() => {
     getModels().then((ms) => {
-      // Normalize: stale backends send only {id, name}; re-derive
-      // provider/tier/no_api/modes from the id (see lib/models.js).
       const roster = (ms || []).map(normalizeModel);
       setModels(roster);
       const real = roster.filter((m) => !m.no_api);
@@ -169,13 +149,13 @@ export default function Home() {
 
   const pickWeapon = (w) => {
     setWeapon(w);
-    setSharp([WEAPON_ZONES[w][0]]);      // zones are weapon-specific
+    setSharp([WEAPON_ZONES[w][0]]);
   };
 
   const toggleSharp = (z) => {
     setSharp((prev) => {
       const next = prev.includes(z) ? prev.filter((x) => x !== z) : [...prev, z];
-      return next.length === 0 ? [z] : next;   // never zero sharp zones
+      return next.length === 0 ? [z] : next;
     });
   };
 
@@ -187,10 +167,6 @@ export default function Home() {
   const ready = Boolean(modelA && modelB) && (!sameModel || allowSelfPlay);
   const isBusy = status === "submitting" || status === "running";
 
-  // Worst-case wall clock, derived from the per-model turn budgets the
-  // backend actually enforces (brains._timeout_for). Shown as an upper
-  // bound next to the honest "usually 45-90s" so nobody reads a slow
-  // reasoning model as a hang.
   const worstCaseMin = useMemo(() => {
     const perTurn = (meta1?.est_turn_s || 0) + (meta2?.est_turn_s || 0) + 3;
     if (!perTurn || perTurn <= 3) return null;
@@ -231,8 +207,6 @@ export default function Home() {
       const res = await createMatch({
         model_a: modelA, model_b: modelB, sharp, blind: true,
         mode, weapon, arena, blindfolded, ...byok,
-        // Frozen-spec fields. Seeded matches are reproducible from the
-        // stored action log; empty input means unseeded (casual default).
         match_length: matchLength,
         fallback_policy: fallbackPolicy,
         seed: seed === "" ? null : Number(seed),
@@ -243,9 +217,8 @@ export default function Home() {
       setError(e.message);
       setStatus("idle");
     }
-  }, [modelA, modelB, sharp, mode, weapon, arena, blindfolded]);
+  }, [modelA, modelB, sharp, mode, weapon, arena, blindfolded, matchLength, fallbackPolicy, seed]);
 
-  // WaitPanel owns the polling; it calls back when the replay is ready.
   const handleReady = useCallback(async (id, err) => {
     if (err || !id) {
       setError(err || "Match simulation failed.");
@@ -257,9 +230,6 @@ export default function Home() {
       const r = await getReplay(id);
       setReplay(r);
       setStatus("ready");
-      // Replay integrity audit (§8) — 8 checks on provenance, seed, action
-      // log and reproducibility. Shown next to the replay so a viewer can
-      // see whether this result is auditable, not just watchable.
       getIntegrity(id).then(setIntegrity).catch(() => setIntegrity(null));
     } catch (e) {
       setError(e.message);
@@ -268,9 +238,6 @@ export default function Home() {
   }, []);
 
   const runRecommended = () => {
-    // Fastest two models on the free tier that aren't currently throttled.
-    // The point of the button is "get me a fight now", so latency beats
-    // capability here — and it's honest about what it picked.
     const pool = models
       .filter((m) => !m.no_api && m.cooldown_s === 0)
       .sort((a, b) => a.est_turn_s - b.est_turn_s);
@@ -291,9 +258,6 @@ export default function Home() {
     setupRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // `extra` carries the optional axes (execution / entertainment /
-  // deserved), the 1-5 confidence rating and voter_tier (§6). They are
-  // stored with the vote; none of them move a rating.
   const vote = async (choice, extra) => {
     if (!matchId) return;
     setVoteChoice(choice);
@@ -341,347 +305,490 @@ export default function Home() {
   return (
     <>
       <SiteNav />
-      {/* ---------- Workflow strip: what to do, in order ---------- */}
-      <section className="workflow" aria-label="How a duel works">
-        {WORKFLOW.map(([key, title, sub], i) => (
-          <div className="workflow-step" key={key} data-active={stage === key}>
-            <span className="n">{i + 1}</span>
-            <span>
-              <div className="t">{title}</div>
-              <div className="s">{sub}</div>
-            </span>
-          </div>
-        ))}
+
+      {/* ================= HERO — the plate's title block =================
+          Left: what this is, sentence-case, no badge. Right: the subject
+          itself drawn as a motion-study figure. One entrance, staggered
+          three beats; nothing fades in later just to prove it can. */}
+      <section className="hero">
+        <div className="hero-copy">
+          <HeroAnimation>
+            <h1>
+              Physics duels between<br />
+              language models,<br />
+              judged blind.
+            </h1>
+          </HeroAnimation>
+
+          <HeroAnimation delay={0.12}>
+            <p className="hero-sub">
+              Two models pilot stick fighters through up to 24 turns of
+              deterministic 2D physics. You watch the fight, vote on who
+              decided better, and only then do the names come out. Elo moves
+              with the verdict — never the brand.
+            </p>
+          </HeroAnimation>
+
+          <HeroAnimation delay={0.24}>
+            <div className="hero-actions">
+              <button
+                className="fight-btn"
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
+                onClick={() => setupRef.current?.scrollIntoView({ behavior: "smooth" })}
+              >
+                Set up a duel
+              </button>
+              <button
+                className="btn btn-ghost"
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
+                onClick={() => setShowSample(true)}
+              >
+                Watch a sample fight
+              </button>
+            </div>
+          </HeroAnimation>
+        </div>
+
+        <HeroPlate />
       </section>
 
-      <OnboardingCard />
+      {/* ================= WORKFLOW STRIP ================= */}
+      <MotionSection style={{ padding: "0 0 20px" }}>
+        <StaggerContainer
+          as="section"
+          className="workflow"
+          staggerDelay={0.09}
+          aria-label="How a duel works"
+        >
+          {WORKFLOW.map(([key, title, sub], i) => (
+            <StaggerItem key={key} direction="scale" as="div">
+              <div
+                className="workflow-step"
+                data-active={stage === key}
+                data-press style={{ "--hy": "-3px", "--pt": "0.98" }}
+              >
+                <span className="n">{i + 1}</span>
+                <span>
+                  <div className="t">{title}</div>
+                  <div className="s">{sub}</div>
+                </span>
+                {/* The active dot pops in where a shared layoutId element
+                    used to fly between steps; per-step entry, same read. */}
+                {stage === key && (
+                  <span
+                    aria-hidden="true"
+                    className="act-dot"
+                    style={{
+                      marginLeft: "auto", width: 6, height: 6, borderRadius: "50%",
+                      background: "var(--red)", boxShadow: "0 0 10px var(--red)",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+              </div>
+            </StaggerItem>
+          ))}
+        </StaggerContainer>
+      </MotionSection>
+
+      <MotionSection>
+        <OnboardingCard />
+      </MotionSection>
 
       {error && (
-        <div className="panel" style={{ borderColor: "var(--red)" }} role="alert">
+        <div
+          className="panel enter-down"
+          style={{ borderColor: "var(--red)" }}
+          role="alert"
+        >
           <b style={{ color: "var(--red-2)" }}>Error:</b> {error}
         </div>
       )}
 
       {/* ================= CONFIGURE ================= */}
-      <div ref={setupRef} className="panel setup-step">
-        <div className="step-head">
-          <span className="step-num">1</span>
-          <span className="step-title">Fighters</span>
-          <span className="step-desc">
-            Two language models. Canvas colours are randomised per match, so
-            you cannot tell which is which while watching.
-          </span>
-        </div>
-        <div className="row">
-          <ModelPicker
-            label="Model 1" slotIndex={1} models={models} value={m1}
-            custom={custom1} onChange={(v) => { setM1(v); setAllowSelfPlay(false); }}
-            onCustomChange={setCustom1} mode={mode}
-          />
-          <ModelPicker
-            label="Model 2" slotIndex={2} models={models} value={m2}
-            custom={custom2} onChange={(v) => { setM2(v); setAllowSelfPlay(false); }}
-            onCustomChange={setCustom2} mode={mode}
-          />
-        </div>
-        {sameModel && (
-          <div className="stalled">
-            <p>
-              <b>Both slots point at the same model.</b> That is a mirror match —
-              legal, but the two fighters will play identically and the vote
-              tells you little.
-            </p>
-            <button className="btn btn-sm" onClick={() => setAllowSelfPlay(true)}>
-              Run as self-play anyway
-            </button>
+      <MotionSection ref={setupRef} delay={0.05}>
+        <div className="panel setup-step">
+          <div className="step-head">
+            <span className="step-num">1</span>
+            <span className="step-title">Fighters</span>
+            <span className="step-desc">
+              Two language models. Canvas colours are randomised per match.
+            </span>
           </div>
-        )}
-      </div>
-
-      <div className="panel setup-step">
-        <div className="step-head">
-          <span className="step-num">2</span>
-          <span className="step-title">Fight rules</span>
-          <span className="step-desc">
-            Weapon, which part of it is lethal, and the arena physics.
-          </span>
-        </div>
-        <WeaponPicker value={weapon} onChange={pickWeapon} />
-        <ArenaPicker value={arena} onChange={setArena} />
-        <SharpZonePicker
-          weapon={weapon}
-          zones={sharp}
-          allZones={WEAPON_ZONES[weapon] || WEAPON_ZONES.sword}
-          onToggle={toggleSharp}
-        />
-      </div>
-
-      <div className="panel setup-step">
-        <div className="step-head">
-          <span className="step-num">3</span>
-          <span className="step-title">Evaluation mode</span>
-          <span className="step-desc">
-            How much control the model gets, and how much spatial help.
-          </span>
-        </div>
-        <div>
-          <div className="lbl" id="mode-legend">Control mode</div>
-          <div className="cards" role="radiogroup" aria-labelledby="mode-legend">
-            <button type="button" className="card" role="radio"
-                    aria-checked={mode === "macro"} onClick={() => setMode("macro")}>
-              <span className="card-name">Macro</span>
-              <span className="card-desc">Picks tactical moves — thrust, lunge, draw_shot.</span>
-            </button>
-            <button type="button" className="card" role="radio"
-                    aria-checked={mode === "joint"} onClick={() => setMode("joint")}>
-              <span className="card-name">Joint</span>
-              <span className="card-desc">Raw per-joint torques — Toribash motor control.</span>
-            </button>
+          <div className="row">
+            <ModelPicker
+              label="Model 1" slotIndex={1} models={models} value={m1}
+              custom={custom1} onChange={(v) => { setM1(v); setAllowSelfPlay(false); }}
+              onCustomChange={setCustom1} mode={mode}
+            />
+            <ModelPicker
+              label="Model 2" slotIndex={2} models={models} value={m2}
+              custom={custom2} onChange={(v) => { setM2(v); setAllowSelfPlay(false); }}
+              onCustomChange={setCustom2} mode={mode}
+            />
           </div>
-        </div>
-        <div>
-          <div className="lbl" id="blind-legend">Spatial information</div>
-          <div className="cards" role="radiogroup" aria-labelledby="blind-legend">
-            <button type="button" className="card" role="radio"
-                    aria-checked={!blindfolded} onClick={() => setBlindfolded(false)}>
-              <span className="card-name">Normal</span>
-              <span className="card-desc">Gets derived hints: enemy left/right, height, facing.</span>
-            </button>
-            <button type="button" className="card" role="radio"
-                    aria-checked={blindfolded} onClick={() => setBlindfolded(true)}>
-              <span className="card-name">Blindfolded</span>
-              <span className="card-desc">Raw coordinates only — tests pure spatial reasoning. Separate rating cell.</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ---------- Advanced (BYOK + raw config) ---------- */}
-      <div className="panel setup-step">
-        <div className="step-head">
-          <span className="step-num">4</span>
-          <span className="step-title">Advanced</span>
-          <button
-            className="btn btn-sm btn-ghost"
-            style={{ marginLeft: "auto" }}
-            aria-expanded={advancedOpen}
-            onClick={() => setAdvancedOpen((v) => !v)}
-          >
-            {advancedOpen ? "Hide" : "Show"}
-          </button>
-        </div>
-        {advancedOpen && (
-          <>
-            <ByokPanel />
-
-            {/* ---- benchmark spec v1.0 (§1): length, fallback policy, seed ----
-                These three are part of what makes two results comparable,
-                so they are recorded in every match's provenance. */}
+          {/* Mirror-match notice collapses in CSS; always mounted so the
+              panel grows *and* shrinks smoothly without an unmount timer. */}
+          <div className="collapse" data-open={sameModel ? "" : undefined}>
             <div>
-              <div className="lbl" id="len-legend">Match length</div>
-              <div className="cards" role="radiogroup" aria-labelledby="len-legend">
-                {[["sprint", "Sprint", "4 turns — fast, noisy; use for smoke tests"],
-                  ["standard", "Standard", "12 turns — the default cell"],
-                  ["full", "Full", "24 turns — most data, slowest"]].map(
-                  ([id, name, desc]) => (
-                  <button key={id} type="button" className="card" role="radio"
-                          aria-checked={matchLength === id}
-                          onClick={() => setMatchLength(id)}>
-                    <span className="card-name">{name}</span>
-                    <span className="card-desc">{desc}</span>
-                  </button>
-                ))}
+              <div className="stalled" style={{ marginTop: 12 }}>
+                <p>
+                  <b>Both slots point at the same model.</b> That is a mirror match —
+                  legal, but the two fighters will play identically.
+                </p>
+                <button className="btn btn-sm" onClick={() => setAllowSelfPlay(true)}
+                        data-press style={{ "--ph": "1.04" }}>
+                  Run as self-play anyway
+                </button>
               </div>
             </div>
-            <div>
-              <div className="lbl" id="fb-legend">Fallback policy</div>
-              <div className="cards" role="radiogroup" aria-labelledby="fb-legend">
-                {[["strict", "Strict", "Any scripted fallback turn ⇒ the match is unranked"],
-                  ["operational", "Operational", "Fallback turns are counted and disclosed, match still ranks"],
-                  ["demo", "Demo", "Never ranked — for demonstrations"]].map(
-                  ([id, name, desc]) => (
-                  <button key={id} type="button" className="card" role="radio"
-                          aria-checked={fallbackPolicy === id}
-                          onClick={() => setFallbackPolicy(id)}>
-                    <span className="card-name">{name}</span>
-                    <span className="card-desc">{desc}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="lbl" htmlFor="seed-input">
-                Seed{" "}
-                <span style={{ fontWeight: 400, color: "var(--dim)" }}>
-                  — a seeded match replays bit-for-bit from its action log
-                </span>
-              </label>
-              <input
-                id="seed-input"
-                type="number"
-                value={seed}
-                placeholder="random"
-                onChange={(e) => setSeed(e.target.value)}
-                style={{ maxWidth: 180 }}
-              />
-            </div>
-            <div>
+          </div>
+        </div>
+      </MotionSection>
+
+      {/* ================= FIGHT RULES ================= */}
+      <MotionSection delay={0.1}>
+        <div className="panel setup-step">
+          <div className="step-head">
+            <span className="step-num">2</span>
+            <span className="step-title">Fight rules</span>
+            <span className="step-desc">
+              Weapon, lethal zones, and arena physics.
+            </span>
+          </div>
+          <WeaponPicker value={weapon} onChange={pickWeapon} />
+          <ArenaPicker value={arena} onChange={setArena} />
+          <SharpZonePicker
+            weapon={weapon}
+            zones={sharp}
+            allZones={WEAPON_ZONES[weapon] || WEAPON_ZONES.sword}
+            onToggle={toggleSharp}
+          />
+        </div>
+      </MotionSection>
+
+      {/* ================= EVALUATION MODE ================= */}
+      <MotionSection delay={0.15}>
+        <div className="panel setup-step">
+          <div className="step-head">
+            <span className="step-num">3</span>
+            <span className="step-title">Evaluation mode</span>
+            <span className="step-desc">
+              Control scheme and spatial information.
+            </span>
+          </div>
+          <div>
+            <div className="lbl" id="mode-legend">Control mode</div>
+            <div className="cards" role="radiogroup" aria-labelledby="mode-legend">
               <button
-                className="btn btn-sm btn-ghost"
-                onClick={() => setShowSample(true)}
+                type="button" className="card" role="radio"
+                aria-checked={mode === "macro"} onClick={() => setMode("macro")}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
               >
-                ▶ Watch a sample fight first
+                <span className="card-name">Macro</span>
+                <span className="card-desc">Picks tactical moves — thrust, lunge, draw_shot.</span>
+              </button>
+              <button
+                type="button" className="card" role="radio"
+                aria-checked={mode === "joint"} onClick={() => setMode("joint")}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
+              >
+                <span className="card-name">Joint</span>
+                <span className="card-desc">Raw per-joint torques — Toribash motor control.</span>
               </button>
             </div>
+          </div>
+          <div>
+            <div className="lbl" id="blind-legend">Spatial information</div>
+            <div className="cards" role="radiogroup" aria-labelledby="blind-legend">
+              <button
+                type="button" className="card" role="radio"
+                aria-checked={!blindfolded} onClick={() => setBlindfolded(false)}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
+              >
+                <span className="card-name">Normal</span>
+                <span className="card-desc">Gets derived hints: enemy left/right, height, facing.</span>
+              </button>
+              <button
+                type="button" className="card" role="radio"
+                aria-checked={blindfolded} onClick={() => setBlindfolded(true)}
+                data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
+              >
+                <span className="card-name">Blindfolded</span>
+                <span className="card-desc">Raw coordinates only — tests pure spatial reasoning.</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </MotionSection>
 
+      {/* ================= ADVANCED ================= */}
+      <MotionSection delay={0.2}>
+        <div className="panel setup-step">
+          <div className="step-head">
+            <span className="step-num">4</span>
+            <span className="step-title">Advanced</span>
+            <button
+              className="btn btn-sm btn-ghost"
+              style={{ marginLeft: "auto", "--ph": "1.05", "--pt": "0.95" }}
+              aria-expanded={advancedOpen}
+              onClick={() => setAdvancedOpen((v) => !v)}
+              data-press
+            >
+              {advancedOpen ? "Hide" : "Show"}
+            </button>
+          </div>
+          {/* Advanced settings: CSS `.collapse` (0fr↔1fr grid row) gives the
+              same grow/shrink in both directions, always in the DOM, so the
+              BYOK inputs keep their state across toggles. */}
+          <div className="collapse" data-open={advancedOpen ? "" : undefined}>
             <div>
-              <div className="lbl">Raw configuration sent to the engine</div>
-              <pre style={{ fontSize: 11.5, color: "var(--dim)", overflowX: "auto",
-                            background: "rgba(0,0,0,0.25)", padding: 10,
-                            borderRadius: 6, border: "1px solid var(--line)" }}>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 14,
+                         paddingTop: 12, paddingLeft: 2, paddingRight: 2 }}
+              >
+                <ByokPanel />
+
+                <div>
+                  <div className="lbl" id="len-legend">Match length</div>
+                  <div className="cards" role="radiogroup" aria-labelledby="len-legend">
+                    {[["sprint", "Sprint", "4 turns — fast, noisy; smoke tests"],
+                      ["standard", "Standard", "12 turns — the default cell"],
+                      ["full", "Full", "24 turns — most data, slowest"]].map(
+                      ([id, name, desc]) => (
+                      <button key={id} type="button" className="card" role="radio"
+                              aria-checked={matchLength === id}
+                              onClick={() => setMatchLength(id)}
+                              data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
+                      >
+                        <span className="card-name">{name}</span>
+                        <span className="card-desc">{desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="lbl" id="fb-legend">Fallback policy</div>
+                  <div className="cards" role="radiogroup" aria-labelledby="fb-legend">
+                    {[["strict", "Strict", "Any scripted fallback turn ⇒ unranked"],
+                      ["operational", "Operational", "Fallback turns counted and disclosed"],
+                      ["demo", "Demo", "Never ranked — for demonstrations"]].map(
+                      ([id, name, desc]) => (
+                      <button key={id} type="button" className="card" role="radio"
+                              aria-checked={fallbackPolicy === id}
+                              onClick={() => setFallbackPolicy(id)}
+                              data-press style={{ "--ph": "1.02", "--pt": "0.98" }}
+                      >
+                        <span className="card-name">{name}</span>
+                        <span className="card-desc">{desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="lbl" htmlFor="seed-input">
+                    Seed{" "}
+                    <span style={{ fontWeight: 400, color: "var(--dim)" }}>
+                      — a seeded match replays bit-for-bit from its action log
+                    </span>
+                  </label>
+                  <input
+                    id="seed-input"
+                    type="number"
+                    value={seed}
+                    placeholder="random"
+                    onChange={(e) => setSeed(e.target.value)}
+                    style={{ maxWidth: 180 }}
+                  />
+                </div>
+                <div>
+                  <button className="btn btn-sm btn-ghost" onClick={() => setShowSample(true)}>
+                    Watch a sample fight first
+                  </button>
+                </div>
+
+                <div>
+                  <div className="lbl">Raw configuration sent to the engine</div>
+                  <pre style={{ fontSize: 11.5, color: "var(--dim)", overflowX: "auto",
+                                background: "var(--wash-2)", padding: 12,
+                                borderRadius: 6, border: "1px solid var(--line)" }}>
 {JSON.stringify({ model_a: modelA || null, model_b: modelB || null, sharp,
                   weapon, mode, arena, blindfolded, blind: true,
                   match_length: matchLength,
                   fallback_policy: fallbackPolicy,
                   seed: seed === "" ? null : Number(seed) }, null, 2)}
-              </pre>
+                  </pre>
+                </div>
+              </div>
             </div>
-          </>
-        )}
-
-        {/* ---------- Fight bar with preflight feedback ---------- */}
-        <div className="fightbar" style={{ borderTop: "1px solid var(--line)",
-                                           paddingTop: 14 }}>
-          <button
-            className="fight-btn"
-            onClick={launch}
-            disabled={!ready || isBusy}
-            aria-disabled={!ready || isBusy}
-          >
-            {status === "submitting" ? "Starting duel…"
-              : isBusy ? "Duel running…"
-              : "⚔ Fight"}
-          </button>
-          <div className="fight-summary">
-            <b>{filterSummary}</b>{" · "}{matchLength} length
-            <br />
-            usually 45–90s
-            {worstCaseMin ? ` · up to ~${worstCaseMin} min if both models use their full budget` : ""}
-            {" · blind vote on"}
-            {!ready && !isBusy && (
-              <><br /><span style={{ color: "var(--gold)" }}>
-                {sameModel ? "confirm self-play to continue" : "pick two models to continue"}
-              </span></>
-            )}
           </div>
-          <button className="btn btn-sm" style={{ marginLeft: "auto" }}
-                  onClick={runRecommended}>
-            ⚡ Run recommended duel
-          </button>
+
+          {/* ---------- Fight bar ---------- */}
+          <div className="fightbar" style={{ borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+            <button
+              className="fight-btn"
+              onClick={launch}
+              disabled={!ready || isBusy}
+              aria-disabled={!ready || isBusy}
+              data-press style={{ "--ph": "1.04", "--pt": "0.97" }}
+            >
+              {status === "submitting" ? "Starting duel…"
+                : isBusy ? "Duel running…"
+                : "Fight"}
+            </button>
+            <div className="fight-summary">
+              <b>{filterSummary}</b>{" · "}{matchLength} length
+              <br />
+              usually 45–90s
+              {worstCaseMin ? ` · up to ~${worstCaseMin} min if both models use their full budget` : ""}
+              {" · blind vote on"}
+              {!ready && !isBusy && (
+                <><br /><span style={{ color: "var(--gold)" }}>
+                  {sameModel ? "confirm self-play to continue" : "pick two models to continue"}
+                </span></>
+              )}
+            </div>
+            <button className="btn btn-sm" style={{ marginLeft: "auto", "--ph": "1.05", "--pt": "0.95" }}
+                    onClick={runRecommended}
+                    data-press>
+              Run recommended duel
+            </button>
+          </div>
         </div>
-      </div>
+      </MotionSection>
 
       {/* ================= OBSERVE ================= */}
       {isBusy && matchId && (
-        <WaitPanel
-          matchId={matchId}
-          modelA={modelA}
-          modelB={modelB}
-          onReady={handleReady}
-          onCancel={() => { resetMatchState(); }}
-          onRetry={() => { resetMatchState(); launch(); }}
-        />
-      )}
+          <MotionSection>
+            <WaitPanel
+              matchId={matchId}
+              modelA={modelA}
+              modelB={modelB}
+              onReady={handleReady}
+              onCancel={() => { resetMatchState(); }}
+              onRetry={() => { resetMatchState(); launch(); }}
+            />
+          </MotionSection>
+        )}
 
       {/* ================= REPLAY ================= */}
       {replay && (
-        <div className="panel">
-          <span className="panel-title"><span className="tick" /> Combat replay</span>
-          <ReplayPlayer replay={replay} />
-          {integrityNote && (
-            <div className="stalled" style={{ borderColor: "rgba(255, 102, 128, 0.45)",
-                                              background: "rgba(255, 61, 92, 0.07)" }}>
-              <p>⚠️ <b>Scripted fallback used:</b> {integrityNote}</p>
+          <MotionSection>
+            <div className="panel">
+              <span className="panel-title"><span className="tick" /> Combat replay</span>
+              <ReplayPlayer replay={replay} />
+              {integrityNote && (
+                <div
+                  className="stalled enter-down"
+                  style={{ borderColor: "rgba(255, 102, 128, 0.45)",
+                           background: "rgba(255, 61, 92, 0.07)" }}
+                >
+                  <p>⚠️ <b>Scripted fallback used:</b> {integrityNote}</p>
+                </div>
+              )}
+              {integrity && (
+                <IntegrityBadge audit={integrity} matchId={matchId} />
+              )}
+              <TurnTranscript replay={replay} />
             </div>
-          )}
-          {integrity && (
-            <IntegrityBadge audit={integrity} matchId={matchId} />
-          )}
-          <TurnTranscript replay={replay} />
-        </div>
-      )}
+          </MotionSection>
+        )}
 
       {/* ================= JUDGE ================= */}
       {isBusy && !replay && !voteResult && (
-        <PredictPanel prediction={prediction} onPredict={setPrediction} streak={streak} />
+        <MotionSection>
+          <PredictPanel prediction={prediction} onPredict={setPrediction} streak={streak} />
+        </MotionSection>
       )}
       {replay && !voteResult && (
-        <VotePanel onVote={vote} predictionLocked={Boolean(prediction)}
-                   integrityNote={integrityNote} />
+        <MotionSection>
+          <VotePanel onVote={vote} predictionLocked={Boolean(prediction)}
+                     integrityNote={integrityNote} />
+        </MotionSection>
       )}
 
       {/* ================= REVEAL ================= */}
       {voteResult && (
-        <RevealPanel
-          result={voteResult}
-          replay={replay}
-          voteChoice={voteChoice}
-          prediction={prediction}
-          predictionCorrect={lastPredWasCorrect}
-          streak={streak}
-          matchId={matchId}
-        />
-      )}
-      {voteResult && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button className="btn" onClick={() => { resetMatchState();
-                    setupRef.current?.scrollIntoView({ behavior: "smooth" }); }}>
-            ⟲ Run another duel
-          </button>
-          {status === "ready" && (
-            <span className="fight-summary" style={{ alignSelf: "center" }}>
-              same rules · <b>{filterSummary}</b>
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* ================= INSPECT: leaderboard ================= */}
-      <div className="panel">
-        <div className="step-head">
-          <span className="panel-title gold"><span className="tick" /> Human-Voted Elo</span>
-          <span style={{ fontSize: 12, color: "var(--dim)", marginLeft: "auto" }}
-                title="Ratings reflect human judgements of tactical decision quality, not only match wins.">
-            ratings reflect judged decision quality, not only wins
-          </span>
-        </div>
-        <div className="filter-summary">{filterSummary}</div>
-        {quality && quality.evidence_level !== "real" && (
-          <DataQualityBanner summary={quality} cell={filterSummary} />
+          <MotionSection>
+            <RevealPanel
+              result={voteResult}
+              replay={replay}
+              voteChoice={voteChoice}
+              prediction={prediction}
+              predictionCorrect={lastPredWasCorrect}
+              streak={streak}
+              matchId={matchId}
+            />
+          </MotionSection>
         )}
-        <LeaderboardTable
-          rows={leaderboard}
-          objective={objective}
-          compact
-          emptyAction={
-            <button className="btn btn-sm"
-                    onClick={() => setupRef.current?.scrollIntoView({ behavior: "smooth" })}>
-              Start a duel
+      {voteResult && (
+          <div
+            className="enter-up"
+            style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
+          >
+            <button
+              className="btn"
+              onClick={() => { resetMatchState();
+                        setupRef.current?.scrollIntoView({ behavior: "smooth" }); }}
+              data-press style={{ "--ph": "1.04", "--pt": "0.97" }}
+            >
+              ⟲ Run another duel
             </button>
-          }
-        />
-        <a className="btn btn-sm btn-ghost" href="/leaderboard"
-           style={{ alignSelf: "flex-start", textDecoration: "none" }}>
-          Full leaderboard & filters →
-        </a>
-      </div>
+            {status === "ready" && (
+              <span className="fight-summary" style={{ alignSelf: "center" }}>
+                same rules · <b>{filterSummary}</b>
+              </span>
+            )}
+          </div>
+        )}
 
-      {/* ---------- Sample fight (§3) ----------
-          Served from a static replay so it works even when the backend is
-          asleep or a provider is throttled. */}
+      {/* ================= LEADERBOARD ================= */}
+      <MotionSection delay={0.1}>
+        <div className="panel">
+          <div className="step-head">
+            <span className="panel-title gold"><span className="tick" /> Human-Voted Elo</span>
+            <span style={{ fontSize: 12, color: "var(--dim)", marginLeft: "auto" }}
+                  title="Ratings reflect human judgements of tactical decision quality, not only match wins.">
+              ratings reflect judged decision quality, not only wins
+            </span>
+          </div>
+          <div className="filter-summary">{filterSummary}</div>
+          {quality && quality.evidence_level !== "real" && (
+            <DataQualityBanner summary={quality} cell={filterSummary} />
+          )}
+          <LeaderboardTable
+            rows={leaderboard}
+            objective={objective}
+            compact
+            emptyAction={
+              <button
+                className="btn btn-sm"
+                onClick={() => setupRef.current?.scrollIntoView({ behavior: "smooth" })}
+                data-press style={{ "--ph": "1.05", "--pt": "0.95" }}
+              >
+                Start a duel
+              </button>
+            }
+          />
+          <a
+            className="btn btn-sm btn-ghost" href="/leaderboard"
+            style={{ alignSelf: "flex-start", textDecoration: "none",
+                     "--ph": "1.05", "--hx": "4px" }}
+            data-press
+          >
+            Full leaderboard & filters
+          </a>
+        </div>
+      </MotionSection>
+
+      {/* ================= SAMPLE FIGHT MODAL ================= */}
       <SampleFight open={showSample} onClose={() => setShowSample(false)} />
 
-      <FAQ />
+      {/* ================= FAQ ================= */}
+      <MotionSection delay={0.1}>
+        <FAQ />
+      </MotionSection>
+
       <SiteFooter />
     </>
   );

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useReducedMotion } from "@/lib/motion";
 import { getVoterTier, setVoterTier } from "@/lib/prefs";
 
 /**
@@ -60,13 +61,35 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
     }
   };
 
+  const reduce = useReducedMotion();
+
   return (
-    <div className="panel" style={{ padding: 14, textAlign: "center",
-                                    borderColor: "var(--gold, #d4b962)",
-                                    borderStyle: "solid" }}>
-      <div style={{ fontSize: 11, letterSpacing: 2, fontWeight: 700,
-                    color: "var(--gold, #d4b962)", textTransform: "uppercase",
-                    marginBottom: 8 }}>
+    <div
+      className="panel enter-up"
+      style={{ padding: 14, textAlign: "center", borderColor: "var(--gold)",
+               borderStyle: "solid", position: "relative", overflow: "hidden" }}
+    >
+      {/* Attention rail — a slow sweep along the top edge (`.loop-fade`).
+          Skipped entirely for reduced motion, per the a11y switch in the nav. */}
+      {!reduce && (
+        <span
+          aria-hidden="true"
+          className="loop-fade"
+          style={{
+            "--loop-d": "3s", "--loop-mid": "0.15", opacity: 0.6,
+            position: "absolute", top: 0, left: 0, right: 0, height: 1,
+            background: "linear-gradient(90deg, transparent, var(--gold), transparent)",
+          }}
+        />
+      )}
+      <div
+        className={reduce ? undefined : "loop-fade"}
+        style={{ "--loop-d": "2.4s", "--loop-mid": "0.65",
+                 fontSize: 12, letterSpacing: 0.3, fontWeight: 700,
+                 color: "var(--gold)",
+                 marginBottom: 8, display: "flex", alignItems: "center",
+                 justifyContent: "center", gap: 6 }}
+      >
         🔒 Models hidden — vote to reveal
       </div>
       <p style={{ color: "var(--dim)", fontSize: 13, marginBottom: 12,
@@ -77,22 +100,41 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
       </p>
 
       <div className="vote-row" role="group" aria-label="Tactical vote">
-        <button className="vote-a" onClick={() => setChoice("a")}
-                aria-pressed={choice === "a"} disabled={busy}>
-          👑 Fighter A
-        </button>
-        <button className="vote-draw" onClick={() => setChoice("draw")}
-                aria-pressed={choice === "draw"} disabled={busy}>
-          Draw
-        </button>
-        <button className="vote-b" onClick={() => setChoice("b")}
-                aria-pressed={choice === "b"} disabled={busy}>
-          Fighter B 👑
-        </button>
+        {[
+          ["a", "vote-a", "👑 Fighter A"],
+          ["draw", "vote-draw", "Draw"],
+          ["b", "vote-b", "Fighter B 👑"],
+        ].map(([val, cls, label]) => (
+          <button
+            key={val}
+            className={cls}
+            onClick={() => setChoice(val)}
+            aria-pressed={choice === val}
+            disabled={busy}
+            data-press
+            style={{ "--hy": "-3px", "--ph": "1.015", "--pt": "0.97",
+                     position: "relative", overflow: "hidden" }}
+          >
+            {label}
+            {choice === val && (
+              <span
+                aria-hidden="true"
+                className="sel-rail"
+                style={{
+                  position: "absolute", left: 8, right: 8, bottom: 4, height: 2,
+                  borderRadius: 2, background: "currentColor", transformOrigin: "50%",
+                }}
+              />
+            )}
+          </button>
+        ))}
       </div>
 
-      {choice && (
-        <div style={{ marginTop: 12 }}>
+      {/* Detail stage collapses open/closed in CSS (`.collapse`), always in
+          the DOM, so no unmount timer is needed. */}
+      <div className="collapse" data-open={choice ? "" : undefined}>
+        <div>
+          <div style={{ marginTop: 12 }}>
           <button
             className="fight-btn"
             disabled={disabled || busy}
@@ -110,11 +152,12 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
             </button>
           </div>
 
-          {showDetail && (
-            <div style={{ marginTop: 10, textAlign: "left", maxWidth: 620,
+          <div className="collapse" data-open={showDetail ? "" : undefined}>
+            <div>
+            <div style={{ textAlign: "left", maxWidth: 620,
                           margin: "10px auto 0", padding: 12, borderRadius: 8,
                           border: "1px solid var(--line)",
-                          background: "rgba(0,0,0,0.2)" }}>
+                          background: "var(--wash-2)" }}>
               {AXES.map((ax) => (
                 <fieldset key={ax.key} style={{ border: "none", marginBottom: 10,
                                                 padding: 0 }}>
@@ -169,9 +212,11 @@ export default function VotePanel({ onVote, disabled, prediction, streak }) {
                 </select>
               </label>
             </div>
-          )}
+            </div>
+          </div>
         </div>
-      )}
+        </div>
+      </div>
 
       {streak?.total > 0 && (
         <div style={{ marginTop: 10, fontSize: 12, color: "var(--dim)",

@@ -23,7 +23,7 @@
  */
 
 const TONE = {
-  scripted_baseline: { fg: "var(--dim)",   bg: "rgba(255,255,255,0.06)", border: "var(--line)" },
+  scripted_baseline: { fg: "var(--dim)",   bg: "var(--wash-2)", border: "var(--line)" },
   mixed_provider:    { fg: "var(--gold, #d4b962)", bg: "rgba(212,185,98,0.12)", border: "rgba(212,185,98,0.45)" },
   real_provider:     { fg: "var(--green)", bg: "rgba(86,220,130,0.12)", border: "rgba(86,220,130,0.45)" },
 };
@@ -63,7 +63,6 @@ export function EvidenceChip({ dq, compact = false }) {
         fontSize: compact ? 10 : 10.5, fontWeight: 700, letterSpacing: 0.4,
         padding: compact ? "1px 5px" : "2px 7px", borderRadius: 4,
         color: tone.fg, background: tone.bg, border: `1px solid ${tone.border}`,
-        textTransform: "uppercase",
       }}
     >
       {compact ? short : dq.evidence_label}

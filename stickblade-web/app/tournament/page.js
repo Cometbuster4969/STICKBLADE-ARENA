@@ -1,6 +1,8 @@
 "use client";
 import { Suspense, useEffect, useId, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { MotionSection, HeroAnimation } from "@/components/MotionSection";
+import { useFlipList } from "@/lib/motion";
 import {
   getModels, createTournament, getTournament, listTournaments,
 } from "@/lib/api";
@@ -93,16 +95,26 @@ function CreateBracket({ onCreated }) {
     }
   }
 
+  // Seed rows reorder via ▲/▼; useFlipList animates the position change —
+  // the one layout transition worth keeping in JS (~30 lines in lib/motion.js
+  // instead of a layout-animation engine).
+  const seedListRef = useRef(null);
+  useFlipList(seedListRef, picked.join(","));
+
   return (
     <>
       <SiteNav />
     <>
-      <section className="tagline" style={{ marginBottom: 8 }}>
-        <h1>🏆 Tournament</h1>
-        <p>Bracket of {size} models · single elimination · pure carnage.</p>
-      </section>
+      <div style={{ position: "relative" }}>
+        <HeroAnimation>
+          <section className="tagline" style={{ marginBottom: 8 }}>
+            <h1>🏆 Tournament</h1>
+            <p>Bracket of {size} models · single elimination · pure carnage.</p>
+          </section>
+        </HeroAnimation>
+      </div>
 
-      <div className="row">
+      <div className="row enter-up" style={{ "--ed": "0.1s", animationDuration: "0.6s" }}>
         {/* Setup panel */}
         <div className="panel glow-red">
           <div className="panel-head">
@@ -178,8 +190,9 @@ function CreateBracket({ onCreated }) {
             </div>
           </div>
 
-          <button className="fight-btn" onClick={start} disabled={busy || picked.length !== size}>
-            {busy ? "⚙ Queuing" : `🏆 Start ${size}-Bracket`}
+          <button className="fight-btn" onClick={start} disabled={busy || picked.length !== size}
+            data-press style={{ "--hy": "-2px", "--ph": "1.02", "--pt": "0.98" }}>
+            {busy ? <span className="dots">⚙ Queuing</span> : `🏆 Start ${size}-Bracket`}
           </button>
           {err && <div className="status" style={{ color: "var(--red-2)" }}>✖ {err}</div>}
         </div>
@@ -196,12 +209,13 @@ function CreateBracket({ onCreated }) {
           </p>
 
           {/* picked / seeded list */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }} ref={seedListRef}>
             {picked.map((id, i) => (
-              <div key={id} style={{
+              <div key={id} data-flip-id={id} className="enter-x"
+                style={{
                 display: "flex", alignItems: "center", gap: 8, padding: "8px 10px",
                 background: "var(--bg-3)", borderRadius: "var(--radius-xs)",
-                border: "1px solid var(--line)",
+                border: "1px solid var(--line)", overflow: "hidden",
               }}>
                 <span style={{
                   width: 22, height: 22, borderRadius: 4, display: "inline-flex",
@@ -222,7 +236,7 @@ function CreateBracket({ onCreated }) {
               </div>
             ))}
             {!picked.length && (
-              <div style={{ color: "var(--dim)", fontSize: 13, textAlign: "center", padding: 8 }}>
+              <div className="enter-fade" style={{ color: "var(--dim)", fontSize: 13, textAlign: "center", padding: 8 }}>
                 no models chosen yet — click to add from below
               </div>
             )}
@@ -238,9 +252,11 @@ function CreateBracket({ onCreated }) {
                   <button key={m.id}
                     onClick={() => toggleModel(m.id)}
                     disabled={full}
+                    data-press
                     style={{
+                      "--ph": "1.04", "--pt": "0.97",
                       width: "auto", padding: "6px 10px", fontSize: 12,
-                      background: isOn ? "rgba(255,197,71,0.10)" : "var(--bg-3)",
+                      background: isOn ? "rgba(199, 53, 31, 0.10)" : "var(--bg-3)",
                       borderColor: isOn ? "var(--gold)" : "var(--line)",
                       color: isOn ? "var(--gold)" : "var(--text-2)",
                     }}>
@@ -254,6 +270,7 @@ function CreateBracket({ onCreated }) {
       </div>
 
       {/* Recent tournaments */}
+      <MotionSection delay={0.1}>
       <div className="panel">
         <div className="panel-head">
           <span className="panel-title"><span className="tick" /> Recent Brackets</span>
@@ -282,6 +299,7 @@ function CreateBracket({ onCreated }) {
             </table>
           )}
       </div>
+      </MotionSection>
     </>
       <SiteFooter />
     </>
@@ -296,8 +314,8 @@ function StatusPill({ status }) {
   return (
     <span style={{
       display: "inline-block", padding: "2px 8px", borderRadius: 999,
-      border: `1px solid ${color}`, color, fontSize: 11, fontWeight: 700,
-      letterSpacing: 1, textTransform: "uppercase",
+      border: `1px solid ${color}`, color, fontSize: 11.5, fontWeight: 700,
+      letterSpacing: 0.2, borderRadius: 3,
     }}>{status}</span>
   );
 }
@@ -378,11 +396,11 @@ function BracketView({ tid, onPickOther }) {
         <div className="panel" style={{
           padding: "12px 16px", textAlign: "center",
           border: "1px solid var(--gold, #d4b962)",
-          background: "rgba(212,185,98,0.06)",
+          background: "rgba(138, 100, 0, 0.06)",
           animation: "sb-pulse 1.8s ease-in-out infinite",
         }}>
-          <div style={{ fontSize: 11, letterSpacing: 3, color: "var(--gold, #d4b962)",
-                        textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>
+          <div style={{ fontSize: 12.5, letterSpacing: 0.4, color: "var(--gold)",
+                        fontWeight: 700, marginBottom: 4 }}>
             🥊 Match {completed + 1} of {total} in progress
           </div>
           <div style={{ fontSize: 15, color: "var(--text)" }}>
@@ -392,8 +410,8 @@ function BracketView({ tid, onPickOther }) {
           </div>
           <style jsx>{`
             @keyframes sb-pulse {
-              0%, 100% { box-shadow: 0 0 0 0 rgba(212,185,98,0.4); }
-              50%      { box-shadow: 0 0 0 8px rgba(212,185,98,0);  }
+              0%, 100% { box-shadow: 0 0 0 0 rgba(138, 100, 0, 0.35); }
+              50%      { box-shadow: 0 0 0 8px rgba(138, 100, 0, 0);  }
             }
           `}</style>
         </div>
@@ -401,13 +419,13 @@ function BracketView({ tid, onPickOther }) {
 
       {champion && (
         <div className="panel" style={{ textAlign: "center", padding: 18,
-          background: "radial-gradient(600px 200px at 50% 0%, rgba(255,197,71,0.18), transparent 70%), var(--bg-2)" }}>
-          <div style={{ fontSize: 11, letterSpacing: 3, color: "var(--gold)",
-                        textTransform: "uppercase", marginBottom: 4, fontWeight: 700 }}>
+          background: "rgba(138, 100, 0, 0.09)", border: "1px solid rgba(138, 100, 0, 0.4)" }}>
+          <div style={{ fontSize: 12.5, letterSpacing: 0.4, color: "var(--gold)",
+                        marginBottom: 4, fontWeight: 700 }}>
             🥇 Champion
           </div>
           <div style={{ fontSize: 24, fontWeight: 800,
-                        fontFamily: "var(--font-display)", letterSpacing: 2 }}>
+                        fontFamily: "var(--font-display)", letterSpacing: 0.4 }}>
             {nameOf(champion)}
           </div>
         </div>
@@ -420,8 +438,8 @@ function BracketView({ tid, onPickOther }) {
             justifyContent: "space-around", gap: 12,
           }}>
             <div style={{
-              fontSize: 11, letterSpacing: 2, color: "var(--dim)",
-              textTransform: "uppercase", fontWeight: 700, textAlign: "center",
+              fontSize: 13, letterSpacing: 0.3, color: "var(--dim)",
+              fontWeight: 700, textAlign: "center",
             }}>
               {ri === rounds.length - 1 ? "Final"
                 : ri === rounds.length - 2 ? "Semifinals"
@@ -463,7 +481,7 @@ function BracketCard({ m, nameOf, isCurrent = false }) {
     borderRadius: "var(--radius-sm)",
     background: "var(--bg-2)",
     overflow: "hidden",
-    boxShadow: pending ? "none" : "0 6px 20px rgba(0,0,0,0.35)",
+    boxShadow: "none",
     animation: isCurrent ? "sb-card-pulse 1.6s ease-in-out infinite" : "none",
     // Fully-pending future matches (no fighters assigned yet, e.g. Round 2
     // slots before Round 1 finishes) get muted so users know they're
@@ -473,7 +491,7 @@ function BracketCard({ m, nameOf, isCurrent = false }) {
   const rowStyle = (won, lost) => ({
     display: "flex", alignItems: "center", justifyContent: "space-between",
     padding: "10px 12px", fontSize: 13,
-    background: won ? "rgba(255,197,71,0.10)" : "transparent",
+    background: won ? "rgba(138, 100, 0, 0.10)" : "transparent",
     color: lost ? "var(--mute)" : "var(--text)",
     fontWeight: won ? 700 : 500,
     borderBottom: "1px solid var(--line)",
@@ -492,13 +510,13 @@ function BracketCard({ m, nameOf, isCurrent = false }) {
         </span>
         {m.match_id && (
           <a className="mlink" style={{ fontSize: 11 }}
-             href={`/replay?id=${m.match_id}`}>watch ▶</a>
+             href={`/replay?id=${m.match_id}`}>watch</a>
         )}
       </div>
       <style jsx>{`
         @keyframes sb-card-pulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(212,185,98,0.5); }
-          50%      { box-shadow: 0 0 0 6px rgba(212,185,98,0);  }
+          0%, 100% { box-shadow: 0 0 0 0 rgba(138, 100, 0, 0.4); }
+          50%      { box-shadow: 0 0 0 6px rgba(138, 100, 0, 0);  }
         }
       `}</style>
     </div>

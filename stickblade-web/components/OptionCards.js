@@ -1,12 +1,18 @@
 "use client";
+import { StaggerContainer, StaggerItem } from "@/components/MotionSection";
 
 /* Weapon + arena option cards (review item 3).
 
    The old setup rendered `🗡 SWORD` / `❄ ICE` as bare labels in a segmented
    control, which forced users to leave the match screen and read the README
    to know what they were picking. Each option now carries the one line that
-   actually changes how the duel plays. Copy is consistent with
-   stickblade/weapons.py WEAPON_HINTS and main.py's arena modifiers. */
+   actually changes how the duel plays.
+
+   Motion: cards stagger in as the group scrolls into view, press on hover,
+   and the selected card's accent rail scales in (`.card-rail`, globals.css).
+   Reduced motion flattens all of it through the CSS guards — no JS-side
+   branch needed. Copy is consistent with stickblade/weapons.py WEAPON_HINTS
+   and main.py's arena modifiers. */
 
 export const WEAPON_INFO = {
   sword:  { icon: "🗡", label: "Sword",  desc: "Balanced reach and damage — the reference weapon." },
@@ -19,11 +25,9 @@ export const WEAPON_INFO = {
 export const ARENA_INFO = {
   normal:      { icon: "🏟", label: "Normal", desc: "Standard stone floor physics." },
   ice:         { icon: "❄", label: "Ice",    desc: "~3× less friction — lunges overshoot, slides last." },
-  low_gravity: { icon: "🌙", label: "Low G",  desc: "35% gravity — floaty jumps, arrows drop far less." },
+  low_gravity: { icon: "🌙", label: "Low G", desc: "35% gravity — floaty jumps, arrows drop far less." },
 };
 
-/* The roster order matches /api/version's `weapons` array so the picker and
-   the backend never disagree about what exists. */
 export const WEAPON_ORDER = ["sword", "dagger", "spear", "flail", "bow"];
 export const ARENA_ORDER = ["normal", "ice", "low_gravity"];
 
@@ -31,32 +35,47 @@ function CardGroup({ legend, items, value, onChange, columns }) {
   return (
     <div>
       <div className="lbl" id={`${legend}-legend`}>{legend}</div>
-      <div
+      <StaggerContainer
         className="cards"
         role="radiogroup"
         aria-labelledby={`${legend}-legend`}
+        staggerDelay={0.05}
         style={columns ? { gridTemplateColumns: columns } : undefined}
       >
         {items.map(([id, info]) => {
           const on = value === id;
           return (
-            <button
-              key={id}
-              type="button"
-              className="card"
-              role="radio"
-              aria-checked={on}
-              onClick={() => onChange(id)}
-              title={info.desc}
-            >
-              <span className="card-name">
-                <span aria-hidden="true">{info.icon} </span>{info.label}
-              </span>
-              <span className="card-desc">{info.desc}</span>
-            </button>
+            <StaggerItem key={id} direction="scale">
+              <button
+                type="button"
+                className="card"
+                role="radio"
+                aria-checked={on}
+                data-on={on ? "" : undefined}
+                data-press
+                onClick={() => onChange(id)}
+                title={info.desc}
+                style={{
+                  "--hy": "-3px", "--ph": "1.015", "--pt": "0.98",
+                  position: "relative", overflow: "hidden", width: "100%", height: "100%",
+                }}
+              >
+                {/* One rail per card, toggled by [data-on]: the framer
+                    layoutId version teleported a single node between cards,
+                    which needs a layout engine. A rail that scales in place
+                    reads the same and costs nothing. */}
+                <span aria-hidden="true" className="card-rail" />
+                <span className="card-name">
+                  <span className="card-ico" aria-hidden="true" style={{ display: "inline-block", marginRight: 2 }}>
+                    {info.icon}
+                  </span>{" "}{info.label}
+                </span>
+                <span className="card-desc">{info.desc}</span>
+              </button>
+            </StaggerItem>
           );
         })}
-      </div>
+      </StaggerContainer>
     </div>
   );
 }

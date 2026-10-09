@@ -69,8 +69,28 @@ export function savePref(patch) {
   if (patch.contrast != null) write(CONTRAST_KEY, patch.contrast);
   if (patch.fx != null) write(FX_KEY, patch.fx);
   applyPrefs(next);
+  notifyPrefs(next);
   return next;
 }
+
+// ---- change subscription ---------------------------------------------------
+// CSS reacts to the data-* attributes for free; the JS side of the motion
+// system (lib/motion.js — the reduced-motion hook, swap timings) needs to
+// hear about a toggle too, so savePref fans out to listeners. A tiny listener
+// set keeps prefs.js dependency-free.
+const listeners = new Set();
+
+export function subscribePrefs(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+function notifyPrefs(prefs) {
+  for (const fn of listeners) {
+    try { fn(prefs); } catch { /* one bad listener must not break the toggle */ }
+  }
+}
+
 
 
 // ---------------------------------------------------------------- §6 tier

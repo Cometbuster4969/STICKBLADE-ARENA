@@ -59,7 +59,7 @@ function CIBar({ row, min, max }) {
       title={`95% CI ${row.ci_low} – ${row.ci_high}`}
       style={{
         position: "relative", height: 8, width: 92,
-        background: "rgba(255,255,255,0.06)",
+        background: "var(--wash-2)",
         borderRadius: 3, overflow: "hidden",
       }}
     >
