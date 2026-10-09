@@ -24,7 +24,12 @@ export default function ResearchPage() {
         page answers the seven questions a reviewer asks first. Everything
         here is backed by a file in the{" "}
         <a href={GITHUB} target="_blank" rel="noreferrer"
-           style={{ color: "var(--gold)" }}>public repository</a>.
+           style={{ color: "var(--gold)" }}>public repository</a>. For the
+        plain-language tour — the pitch, the weapon lab, the API story — see
+        the <a href="https://stick-web.vercel.app/research" target="_blank"
+           rel="noreferrer" style={{ color: "var(--gold)" }}>project site</a>;
+        these pages stay canonical because every number here can be re-fetched
+        live.
       </>}
     >
       <Section id="q1" title="1. What is being measured">

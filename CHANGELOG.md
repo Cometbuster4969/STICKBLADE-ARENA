@@ -62,6 +62,18 @@ Verified: `next build` 18/18 static, `/` First Load 143 kB, all 14 routes
 200, zero elements inline-hidden for no-JS readers, `npm run check:player`
 PASS, JSX balance audited.
 
+### Changed — the two properties now reference each other (2026-10-09)
+
+The marketing site (`stick-web.vercel.app`) was re-themed to the same
+kinematics-plate language and reshaped into the narrative overview: it
+delegates methodology, limitations, reproducibility, data and trust to the
+canonical live-backed pages in this app, no longer renders stale hardcoded
+counters as "live" numbers (nulls until first fetch), and dropped the dark
+glass/blur/glow skin plus decorative glyphs from its chrome. In return this
+app links out to the overview site from the footer and says so in the
+`/research` lead: the app pages are canonical because every number on them
+can be re-fetched live.
+
 
 ### Changed — full frontend redesign on a motion design system (2026-10-08)
 

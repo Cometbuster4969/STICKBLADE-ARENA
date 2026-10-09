@@ -124,6 +124,8 @@ export function SiteFooter() {
             {label}
           </a>
         ))}
+        <a href="https://stick-web.vercel.app"
+           target="_blank" rel="noreferrer">overview site</a>
         <a href="https://github.com/Cometbuster4969/STICKBLADE-ARENA"
            target="_blank" rel="noreferrer">⭐ github</a>
         <a href="https://github.com/sponsors/Cometbuster4969"
