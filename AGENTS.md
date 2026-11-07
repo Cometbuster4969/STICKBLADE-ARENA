@@ -176,6 +176,11 @@ STICKBLADE-ARENA/
 │   ├── server.py                  # REST endpoints, worker loops, LIVE_STATE
 │   ├── main.py                    # Match class: 24-turn fight orchestration
 │   ├── brains.py                  # Brain hierarchy: Mock, OpenRouter, Groq
+│   │                              #   (+ transport: retries, buddy pools,
+│   │                              #   cooldowns, reasoning policies)
+│   ├── prompts.py                 # SYSTEM_PROMPT + build_state(): the
+│   │                              #   evaluation interface; every semantic
+│   │                              #   change here bumps PROMPT_VERSION
 │   ├── joint_mode.py              # Raw per-joint control mode
 │   ├── weapons.py                 # sword/dagger/spear/flail/bow builders
 │   ├── ragdoll.py                 # pymunk Fighter (16 limbs, 10 joints)
