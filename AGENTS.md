@@ -173,7 +173,15 @@ escape hatch. Don't waffle for a paragraph then pick one anyway.
 ```
 STICKBLADE-ARENA/
 ├── stickblade/                    # Python backend (FastAPI + pymunk)
-│   ├── server.py                  # REST endpoints, worker loops, LIVE_STATE
+│   ├── server.py                  # REST endpoints + app/middleware; imports
+│   │                              #   and re-exports runtime/workers so
+│   │                              #   `server.store` & co. keep working
+│   ├── runtime.py                 # store bootstrap, OBS counters, job
+│   │                              #   queues, MATCH_MODES/FLIP/API_KEYS,
+│   │                              #   LIVE_STATE + its _live_* accessors
+│   ├── workers.py                 # run_simulation + worker_loop and the
+│   │                              #   tournament bracket runner; threads
+│   │                              #   are started by server.py, not here
 │   ├── main.py                    # Match class: 24-turn fight orchestration
 │   ├── brains.py                  # Brain hierarchy: Mock, OpenRouter, Groq
 │   │                              #   (+ transport: retries, buddy pools,
