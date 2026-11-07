@@ -22,6 +22,7 @@ SDL_VIDEODRIVER=dummy uvicorn server:app --reload --port 8000
 cd stickblade-web
 npm install
 npm run dev                              # http://localhost:3000
+npm test                                 # Vitest, headless jsdom
 ```
 
 The frontend defaults to **same-origin** API calls: `next.config.mjs` proxies
@@ -31,14 +32,31 @@ hard-coded host, works from a phone on the same LAN.
 ## Tests
 
 ```bash
-python3 -m pytest tests -q                     # 117 cases, ~35 s, headless
-python3 -m pytest tests -q -k physics          # one file
+python3 -m pytest -q                           # 253 cases, ~35 s, headless
+python3 -m pytest tests -q -k physics          # one subset
 python3 -m pytest tests/test_replay_determinism.py -q -vv
 ```
 
 `tests/conftest.py` sets `SDL_VIDEODRIVER=dummy` and raises the rate limits so
 rapid-fire API tests don't trip `503 arena is busy`. It does not touch the
 production defaults in `stickblade/security.py`.
+
+**Always run pytest from the repo root, without a path, or with `tests`.**
+`pytest.ini` pins `testpaths = tests` because five files in `stickblade/`
+match `test_*.py` but are procedural scripts, not pytest modules
+(`test_bow_mobility.py`, `test_headless.py`, `test_phases.py`, and the two
+Supabase regression scripts). Importing one simulates a match, writes
+`battle_log_*.json` into the CWD, and `test_bow_mobility.py` calls
+`sys.exit(0)` — which aborts the session with `INTERNALERROR`. They still run
+directly (`SDL_VIDEODRIVER=dummy python stickblade/test_bow_mobility.py`), and
+`stickblade/conftest.py` keeps them out of collection even if you point pytest
+at that directory.
+
+Frontend tests are Vitest + jsdom + Testing Library, scoped to the voting
+surface (`stickblade-web/tests/VotePanel.test.js`). They exist to catch a
+leak path the backend suite cannot see: a model name reaching the DOM through
+text or an `aria-label` before the vote. Run them with `npm test` in
+`stickblade-web`; CI runs them on Node 20 and 22.
 
 ## Offline tools
 

@@ -200,6 +200,58 @@ def test_multi_axis_vote_is_recorded():
     assert row["confidence"] == 4
 
 
+def test_vote_moves_the_rating_the_leaderboard_actually_serves():
+    """The vote response's `elo_change` is a claim; `/api/leaderboard` is the
+    artefact a reader actually trusts. Nothing asserted the two agreed over
+    HTTP — the equivalent check lives at the store layer
+    (test_elo_updates.py:87), one abstraction below the code path users hit.
+
+    The cell is read BEFORE the vote rather than assumed fresh: the suite
+    shares one temp SQLite file, so an earlier test may already have voted
+    in sword/macro/normal/tip. Comparing deltas keeps the assertion exact
+    without depending on execution order.
+    """
+    cell = {"sharp": ["tip"], "weapon": "sword", "mode": "macro", "arena": "normal"}
+    query = "/api/leaderboard?sharp=tip&weapon=sword&mode=macro&arena=normal"
+
+    def cell_rows():
+        return {r["model"]: r for r in CLIENT.get(query).json()}
+
+    def counts(rows):
+        return {m: (r["rating"], r["wins"], r["losses"], r["draws"])
+                for m, r in rows.items()}
+
+    before = cell_rows()
+    mid = _finished_match(**cell)
+
+    # A finished-but-unvoted match must leave the rating untouched: Elo moves
+    # on votes, not on simulations. If this ever regresses, every "vote moves
+    # the rating" assertion below would still pass while being meaningless.
+    assert counts(cell_rows()) == counts(before), (
+        "an unvoted match changed the leaderboard")
+
+    res = CLIENT.post(f"/api/vote/{mid}", json={"choice": "a"}).json()
+    elo = res["elo_change"]
+    assert len(elo) == 2, elo
+    winner, loser = sorted(elo, key=elo.get, reverse=True)
+    assert elo[winner] > 0 > elo[loser], elo
+
+    after = cell_rows()
+    empty = {"rating": 1000.0, "wins": 0, "losses": 0, "draws": 0, "n": 0}
+    for model, delta in elo.items():
+        prev = {**empty, **before.get(model, {})}
+        row = after[model]
+        # Both sides round to 1dp (storage.py:803 for the delta, the
+        # leaderboard route for the rating), so allow 0.11 of accumulated
+        # rounding error without loosening the test into uselessness.
+        assert row["rating"] == pytest.approx(prev["rating"] + delta, abs=0.11), (
+            f"{model}: leaderboard {row['rating']} != "
+            f"{prev['rating']} + {delta}")
+        assert row["n"] == prev["n"] + 1, f"{model}: vote did not land in this cell"
+    assert after[winner]["wins"] == {**empty, **before.get(winner, {})}["wins"] + 1
+    assert after[loser]["losses"] == {**empty, **before.get(loser, {})}["losses"] + 1
+
+
 def test_ranking_ineligible_match_does_not_move_elo():
     mid = _finished_match(fallback_policy="demo")
     r = CLIENT.post(f"/api/vote/{mid}", json={"choice": "a"}).json()

@@ -3,23 +3,24 @@ name: CI
 # ---------------------------------------------------------------------------
 # STICKBLADE ARENA — Continuous Integration
 #
-# Runs on every push to main + every PR. Six independent jobs run in parallel:
+# Runs on every push to main + every PR. Seven independent jobs run in parallel:
 #
 #   1. backend-tests        — Python 3.11/3.12/3.13 matrix
 #                             compile check + smoke-run every weapon
 #                             + full 24-turn mock match + test_phases suite
-#   1b. test-suite          — pytest regression gate: benchmark spec,
+#   2. test-suite           — pytest regression gate: benchmark spec,
 #                             physics, replay determinism, API schema,
 #                             Elo/rating maths, blind identity, anti-gaming,
 #                             BYOK secret-leak checks
-#   2. frontend-checks      — Node 20/22: install, lint-ish balance check,
-#                             next build (catches SSR/hydration + type errors)
-#   3. security             — Bandit static analysis + secret-scanning regex
+#   3. frontend-checks      — Node 20/22: install, Vitest unit tests,
+#                             lint-ish balance check, next build
+#                             (catches SSR/hydration + type errors)
+#   4. security             — Bandit static analysis + secret-scanning regex
 #                             + confirm no .env or key files ever tracked
-#   4. link-check           — validate all URLs in README + AGENTS.md respond
-#   5. brains-payload-check — assert every model in ARENA_MODELS has a
+#   5. link-check           — validate all URLs in README + AGENTS.md respond
+#   6. roster-consistency   — assert every model in ARENA_MODELS has a
 #                             _reasoning_policy entry (or explicit skip)
-#   6. summary              — depends on all above, prints green badge status
+#   7. ci-summary           — depends on all above, prints green badge status
 #
 # Design goals:
 #   - Runs in <5 min total (matrix parallelism)
@@ -282,6 +283,15 @@ jobs:
       - name: Install frontend deps
         working-directory: stickblade-web
         run: npm ci --prefer-offline --no-audit --no-fund
+
+      # First (and currently only) frontend test tier. Covers the voting
+      # surface specifically: the blind-identity guarantee is enforced on the
+      # server by tests/test_blind_identity.py, but nothing stopped the UI
+      # from leaking a model name through text, an aria-label or a title
+      # attribute — a leak path the backend tests structurally cannot see.
+      - name: Frontend unit tests (Vitest)
+        working-directory: stickblade-web
+        run: npm test
 
       - name: JSX / JS balance check (braces + parens)
         run: |

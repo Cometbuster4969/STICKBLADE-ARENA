@@ -14,6 +14,37 @@ cross-version leaderboard comparison, regardless of the API version.
 
 ## [Unreleased] — benchmark spec v1.0 (fingerprint `09de66effd02` under prompt v2; `029281ed627a` under prompt v1)
 
+### Changed — test infrastructure (2026-11-07)
+
+No benchmark-spec impact: no match rule, physics constant or prompt changed,
+so `BENCHMARK_VERSION` / `PHYSICS_VERSION` / `PROMPT_VERSION` and the spec
+fingerprint are untouched and existing ratings stay comparable.
+
+- **`pytest.ini` with `testpaths = tests`.** A bare `pytest` from the repo
+  root used to walk into `stickblade/`, import the five procedural
+  `test_*.py` scripts there, execute real matches as an import side effect
+  (writing `battle_log_*.json` into the CWD) and die with
+  `INTERNALERROR> SystemExit: 0` from `test_bow_mobility.py:313`. CI never
+  caught it because every job passes an explicit path.
+- **`stickblade/conftest.py`** lists those scripts in `collect_ignore_glob`,
+  so even `pytest stickblade/` collects only the genuine
+  `test_audit_fixes.py` module (5 tests). The scripts remain runnable
+  directly, exactly as documented.
+- **Leaderboard read-back test** —
+  `tests/test_api_schema.py::test_vote_moves_the_rating_the_leaderboard_actually_serves`.
+  `elo_change` in the vote response and the rating served by
+  `/api/leaderboard` are now asserted to agree over HTTP (the store-level
+  equivalent is `test_elo_updates.py:87`), and a finished-but-unvoted match
+  is asserted not to move the board.
+- **First frontend test tier** — Vitest + jsdom + Testing Library
+  (`stickblade-web/tests/`, `vitest.config.mjs`). Covers the voting surface:
+  the panel never renders a model identity in text or attributes, the
+  payload shape sent to `/api/vote` (including the `voter_tier`), the
+  reveal-gate, the `disabled` guard, and `aria-pressed` state.
+- **CI** — the frontend job now runs `npm test` alongside the build, and the
+  workflow's own header comment was corrected from "six jobs" to the seven
+  it actually defines (`roster-consistency`, not `brains-payload-check`).
+
 ### Added — next-step priorities 1–5 (2026-09-09, second session)
 
 - **P1 · calibration batch runner** `tools/run_calibration_batch.py`:
