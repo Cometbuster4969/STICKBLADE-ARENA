@@ -402,11 +402,15 @@ def render(ctx):
         L += ["*not supplied* — run `tools/weapon_balance.py` and pass "
               "`--balance`", ""]
     else:
-        L += ["| weapon | matches | side-A win rate (95% CI) | avg damage | "
-              "avg turns | lethal rate |", "|---|---:|---:|---:|---:|---:|"]
+        L += ["| weapon | rows | distinct fights | side-A win rate (95% CI) | "
+              "avg damage | avg turns | lethal rate |",
+              "|---|---:|---:|---:|---:|---:|---:|"]
         for r in bal.get("by_weapon", []):
             ci = f"[{r['ci_lo']}, {r['ci_hi']}]" if r["ci_lo"] is not None else "—"
-            L.append(f"| {r['weapon']} | {r['matches']} | "
+            # Intervals are computed on distinct fights, because scripted bots
+            # replay the same fight under a new seed (pseudo-replication).
+            uniq = r.get("unique_fights", "—")
+            L.append(f"| {r['weapon']} | {r['matches']} | {uniq} | "
                      f"{r['side_a_win_rate']} {ci} | {r['avg_damage']} | "
                      f"{r['avg_turns']} | {r['lethal_rate']} |")
         L += [""]

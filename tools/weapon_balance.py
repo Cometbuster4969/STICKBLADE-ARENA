@@ -38,6 +38,47 @@ DEFAULT_WEAPONS = ["sword", "dagger", "spear", "flail", "bow"]
 DEFAULT_ARENAS = ["normal", "ice", "low_gravity"]
 
 
+# Fields that identify the FIGHT rather than the row. Two rows sharing all of
+# them are the same deterministic fight observed twice.
+FIGHT_SIG_FIELDS = ("weapon", "arena", "sharp", "flipped", "winner_side",
+                    "method", "turns", "damage_a", "damage_b", "hits_a",
+                    "hits_b", "hp_a", "hp_b")
+
+
+def fight_signature(row):
+    """Identity of the fight behind a row.
+
+    Scripted bots are deterministic given (config, bots), and they do not
+    consume the seed on the decision paths that matter here — so
+    `seed=5000` and `seed=5017` with the same weapon/arena/zone/flip often
+    produce the *same fight*, bit for bit. Counting those rows as separate
+    trials is pseudo-replication: it shrinks every Wilson interval by about
+    sqrt(k) without adding a single new observation.
+
+    Observed on the committed v1.0 sweep: flail had 24 rows but 15 distinct
+    fights; across the five weapons 15-23 of 24 rows were unique.
+    """
+    def norm(v):
+        if isinstance(v, float):
+            return round(v, 3)
+        if isinstance(v, (list, tuple)):
+            return tuple(v)
+        return v
+    return tuple(norm(row.get(f)) for f in FIGHT_SIG_FIELDS)
+
+
+def unique_rows(rows):
+    """First occurrence of each distinct fight, preserving order."""
+    seen, out = set(), []
+    for r in rows:
+        sig = fight_signature(r)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append(r)
+    return out
+
+
 def zone_sets_for(weapon):
     simcore.bootstrap(quiet=True)
     from weapons import WEAPON_ZONES
@@ -80,12 +121,16 @@ def sweep(weapons, arenas, bots, n, match_length, base_seed, verbose=True):
 def summarize_by(rows, key):
     """Aggregate rows by a config key: win rate, damage, hits, turns."""
     out = {}
+    seen_sigs = {}
     for r in rows:
         k = r.get(key)
         d = out.setdefault(k, {"n": 0, "dmg": [], "hits": [], "turns": [],
                                "first_side_a": 0, "first_side_b": 0,
-                               "draws": 0, "lethal": 0})
+                               "uniq_side_a": 0, "uniq_side_b": 0,
+                               "uniq_draws": 0, "draws": 0, "lethal": 0,
+                               "sigs": set()})
         d["n"] += 1
+        d["sigs"].add(fight_signature(r))
         for src, dst in (("damage_a", "dmg"), ("damage_b", "dmg")):
             if r.get(src) is not None:
                 d[dst].append(float(r[src]))
@@ -103,16 +148,39 @@ def summarize_by(rows, key):
             d["draws"] += 1
         if r.get("method") == "kill":
             d["lethal"] += 1
+    # Second pass: winner tallies counted once per DISTINCT fight. This is the
+    # number the CI is allowed to be computed from.
+    seen = set()
+    for r in rows:
+        sig = fight_signature(r)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        d = out[r.get(key)]
+        if r.get("winner_side") == "a":
+            d["uniq_side_a"] += 1
+        elif r.get("winner_side") == "b":
+            d["uniq_side_b"] += 1
+        else:
+            d["uniq_draws"] += 1
     res = []
     for k, d in sorted(out.items()):
         n = d["n"] or 1
-        rate, lo, hi = wilson_ci(d["first_side_a"], d["first_side_b"],
-                                 d["draws"])
+        unique = len(d["sigs"]) or 1
+        # CI from DISTINCT fights only: deterministic repeats add no evidence.
+        rate, lo, hi = wilson_ci(d["uniq_side_a"], d["uniq_side_b"],
+                                 d["uniq_draws"])
+        naive_rate, _, _ = wilson_ci(d["first_side_a"], d["first_side_b"],
+                                     d["draws"])
         res.append({
-            key: k, "matches": d["n"],
+            key: k, "matches": d["n"], "unique_fights": len(d["sigs"]),
+            "duplicate_rows": d["n"] - len(d["sigs"]),
             # side-a win rate — with mirrored slots this is the config's
-            # own bias; 0.5 means the configuration is neutral.
+            # own bias; 0.5 means the configuration is neutral. Computed on
+            # distinct fights; `side_a_win_rate_naive` is what you would get
+            # by treating duplicated rows as independent trials.
             "side_a_win_rate": rate, "ci_lo": lo, "ci_hi": hi,
+            "side_a_win_rate_naive": naive_rate,
             "avg_damage": round(statistics.mean(d["dmg"]), 2) if d["dmg"] else 0,
             "avg_hits": round(statistics.mean(d["hits"]), 2) if d["hits"] else 0,
             "avg_turns": round(statistics.mean(d["turns"]), 1) if d["turns"] else 0,
@@ -137,10 +205,23 @@ def verdict(rows_by_weapon):
         if rate is None:
             continue
         n = r.get("matches") or 0
-        if n < 12:
+        unique = r.get("unique_fights", n)
+        # PSEUDO-REPLICATION. Scripted bots are deterministic, so N rows can
+        # contain far fewer than N distinct fights — the same fight replayed
+        # under a new seed. CIs are computed on distinct fights only; say so
+        # loudly when the gap is large, because "n=24" would otherwise read
+        # as 24 independent observations.
+        if unique < n:
             flags.append(
-                f"• {r['weapon']}: only {n} matches — balance verdict "
-                f"provisional (need ≥12, ideally ≥30)")
+                f"• {r['weapon']}: {n} rows but only {unique} distinct "
+                f"fights — scripted bots are deterministic, so repeated "
+                f"seeds replayed the same fight. The CI uses {unique}; "
+                f"vary the CONFIG (arena / zone / matchup), not the seed, "
+                f"to add samples.")
+        if unique < 12:
+            flags.append(
+                f"• {r['weapon']}: only {unique} distinct fights — balance "
+                f"verdict provisional (need ≥12, ideally ≥30)")
             continue
         excludes = (lo is not None and hi is not None
                     and (lo > 0.5 or hi < 0.5))
@@ -153,7 +234,8 @@ def verdict(rows_by_weapon):
             flags.append(
                 f"• {r['weapon']}: point estimate {rate} is off 50/50 but the "
                 f"95% CI [{lo}, {hi}] still contains it — widen the batch "
-                f"(n={n}) before treating this as imbalance")
+                f"(n={unique} distinct fights) before treating this as "
+                f"imbalance")
         if r.get("lethal_rate", 0) > 0.8:
             flags.append(
                 f"⚠ {r['weapon']}: lethal in {r['lethal_rate']:.0%} of "
@@ -170,13 +252,14 @@ def render_md(rows, by_weapon, by_arena, by_zone, flags, meta):
         if not rs:
             return ""
         lines = [f"### {title}", "",
-                 f"| {key} | matches | side-A win rate (95% CI) | avg damage "
-                 f"| avg hits | avg turns | lethal rate |",
-                 "|---|---:|---:|---:|---:|---:|---:|"]
+                 f"| {key} | rows | distinct fights | side-A win rate (95% CI) "
+                 f"| avg damage | avg hits | avg turns | lethal rate |",
+                 "|---|---:|---:|---:|---:|---:|---:|---:|"]
         for r in rs:
             ci = f"[{r['ci_lo']}, {r['ci_hi']}]" if r["ci_lo"] is not None else "—"
             lines.append(
-                f"| {r[key]} | {r['matches']} | {r['side_a_win_rate']} {ci} "
+                f"| {r[key]} | {r['matches']} | {r.get('unique_fights', '—')} "
+                f"| {r['side_a_win_rate']} {ci} "
                 f"| {r['avg_damage']} | {r['avg_hits']} | {r['avg_turns']} "
                 f"| {r['lethal_rate']} |")
         return "\n".join(lines) + "\n"
@@ -200,9 +283,21 @@ def render_md(rows, by_weapon, by_arena, by_zone, flags, meta):
              "perfectly neutral configuration trends to 0.5. A deviation is "
              "only evidence of imbalance when the 95% Wilson interval "
              "excludes 0.5 — otherwise it is noise at this sample size, and "
-             "the report says so rather than claiming a finding.", ""]
+             "the report says so rather than claiming a finding.", "",
+             "**Distinct fights, not rows, are the sample.** Scripted bots "
+             "are deterministic: the same weapon/arena/zone/flip under a new "
+             "seed replays the *same* fight, bit for bit. The `rows` column "
+             "is how many matches were run; `distinct fights` is how many "
+             "independent observations that produced. Every interval in this "
+             "report is computed on distinct fights only, because counting "
+             "a deterministic repeat as a new trial is pseudo-replication "
+             "and narrows the CI by roughly sqrt(k).", ""]
     if flags:
-        head += ["## Balance flags", ""] + [f"- {f}" for f in flags] + [""]
+        # Flags already carry their own marker (• / ⚠); adding the markdown
+        # dash without stripping it produced "- • ..." in the published report.
+        head += ["## Balance flags", ""] + [
+            "- " + (f[2:].strip() if f.startswith("• ") else f) for f in flags
+        ] + [""]
     else:
         head += ["## Balance flags", "",
                  "No configuration exceeded the §9 thresholds (no weapon "
@@ -256,7 +351,8 @@ def main(argv=None):
 
     print()
     for r in by_weapon:
-        print(f"  {str(r['weapon']):8s} n={r['matches']:3d} "
+        print(f"  {str(r['weapon']):8s} rows={r['matches']:3d} "
+              f"unique={r.get('unique_fights', '?'):3} "
               f"sideA={r['side_a_win_rate']} dmg={r['avg_damage']:6.2f} "
               f"turns={r['avg_turns']:4.1f} lethal={r['lethal_rate']}")
     for f in flags:

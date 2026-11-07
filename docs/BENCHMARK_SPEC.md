@@ -10,8 +10,9 @@
 |---|---|
 | **Benchmark version** | `1.0` |
 | **Physics version** | `1.0` |
+| **Engine** | `pymunk` **7.3.0**, pinned exactly in `stickblade/requirements.txt` — `engine_version` is hashed into the fingerprint, so a floating bound would let a `pip install` rewrite the frozen spec |
 | **Prompt version** | `2` (v1 → v2 on 2026-09-08, additive/soft cutover — AGENTS.md §10.5) |
-| **Spec fingerprint** | `09de66effd02` — rows with `prompt_version = 1` carry `029281ed627a`; the fingerprint hashes the prompt version, so the two are the same physics + rules under two prompts |
+| **Spec fingerprint** | `09de66effd02` — rows with `prompt_version = 1` carry `029281ed627a`; the fingerprint hashes the prompt version, so the two are the same physics + rules under two prompts. It also hashes `pymunk`'s version: `09de66effd02` is the value **pymunk 7.3.0** produces (7.3.1 → `0330fdac94ab`), which is why the engine is pinned. |
 | **Data licence** | CC-BY-SA-4.0 |
 | **Code licence** | Apache-2.0 |
 

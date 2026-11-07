@@ -39,6 +39,51 @@ def test_fingerprint_is_stable_across_calls():
     assert B.fingerprint() == B.fingerprint() == B.SPEC_FINGERPRINT
 
 
+# Pinned per prompt version, mirroring the assertion in ci.yml. The fingerprint
+# hashes PROMPT_VERSION *and* `physics.engine_version`, so it moves when either
+# the prompt or the resolved pymunk version changes.
+PINNED_FINGERPRINTS = {1: "029281ed627a", 2: "09de66effd02"}
+PINNED_ENGINE = "pymunk==7.3.0"
+
+
+def test_engine_version_is_pinned_in_requirements():
+    """The physics engine is part of the benchmark's identity, not a detail.
+
+    `physics_spec()` publishes `engine_version` and `fingerprint()` hashes it,
+    so an unpinned `pymunk>=7.0` lets a routine `pip install` change the
+    frozen spec without touching a line of this repository: pymunk 7.3.0
+    hashes to 09de66effd02 (the value on every published replay), 7.3.1 to
+    0330fdac94ab. That is exactly the silent-drift failure the version story
+    exists to prevent, so the requirement is asserted here rather than trusted.
+    """
+    from pathlib import Path
+    req = (Path(__file__).resolve().parent.parent / "stickblade" /
+           "requirements.txt").read_text(encoding="utf-8")
+    pinned = [ln.strip() for ln in req.splitlines()
+              if ln.strip().startswith("pymunk")]
+    assert pinned == [PINNED_ENGINE], (
+        f"requirements.txt must pin the engine exactly ({PINNED_ENGINE}); "
+        f"found {pinned}. Upgrading pymunk is a benchmark change: bump "
+        f"PHYSICS_VERSION, the pinned fingerprint here and in ci.yml, "
+        f"docs/BENCHMARK_SPEC.md and CHANGELOG.md.")
+
+
+def test_installed_engine_matches_the_spec_and_the_pin():
+    """Guards the other direction: a stale venv must not silently produce a
+    different spec identity than the one the repo publishes."""
+    import pymunk
+    from brains import PROMPT_VERSION
+
+    pinned_version = PINNED_ENGINE.split("==", 1)[1]
+    assert pymunk.version == pinned_version, (
+        f"installed pymunk {pymunk.version} != pinned {pinned_version} — "
+        f"run `pip install -r stickblade/requirements.txt`")
+    assert B.spec()["physics"]["engine_version"] == pymunk.version
+    assert B.SPEC_FINGERPRINT == PINNED_FINGERPRINTS[PROMPT_VERSION], (
+        f"fingerprint {B.SPEC_FINGERPRINT} != pinned "
+        f"{PINNED_FINGERPRINTS[PROMPT_VERSION]} for prompt v{PROMPT_VERSION}")
+
+
 def test_fingerprint_changes_when_physics_constants_change():
     """The core promise: a physics change invalidates comparability."""
     original = C.DMG_SCALE

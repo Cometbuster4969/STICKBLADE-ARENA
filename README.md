@@ -166,11 +166,21 @@ headless (`SDL_VIDEODRIVER=dummy`) and touches no provider.
 - **Sample sizes are small.** This is a solo project on free tiers. Leaderboard
   rows carry Wilson confidence intervals and a `provisional` flag; treat any
   row with fewer than ~30 matches as a signal, not a result.
-- **Flail is asymmetric.** On a mirrored bot batch (n=24) side B wins ~81% of
-  flail matches — the 95% interval excludes 50/50, so the configuration, not
-  the model, is deciding those fights. Flail is labelled `asymmetric` in
+- **Flail is asymmetric — and the previous number was overstated.** The
+  first balance sweep reported "side B wins ~81% (n=24)". Scripted bots are
+  deterministic, so those 24 rows were only **15 distinct fights**; the 24
+  was pseudo-replication and its Wilson interval was too narrow. Re-measured
+  on distinct fights only: side A wins **23.3%** of flail fights, 95% CI
+  [8.9%, 48.6%] — still an imbalance (the interval excludes 50/50), still
+  small-sample, but not 81%. Flail stays labelled `asymmetric` in
   `/api/weapons` and in the UI; do not read flail matches as a like-for-like
-  comparison. Details in [research/balance_report.md](./research/balance_report.md).
+  comparison. The same correction flags **bow** at 21.7% (23 distinct fights,
+  CI [9.7%, 41.9%]), which the naive count had dismissed as noise. Every
+  interval in [research/balance_report.md](./research/balance_report.md) is
+  now computed on distinct fights, and the report prints both counts.
+- **Bot batches are deterministic, so they cannot be widened by changing the
+  seed.** Add samples by varying the configuration (weapon, arena, sharp
+  zone, matchup), not the seed — a new seed replays the same fight.
 - **LLM decisions are not reproducible from a seed.** Physics and scripted
   baselines are (verified bit-for-bit in tests); model outputs are not. What
   is reproducible is everything around them — the action log records exactly

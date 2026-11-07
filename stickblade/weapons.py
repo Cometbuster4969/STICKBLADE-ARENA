@@ -31,22 +31,30 @@ WEAPONS = ["sword", "flail", "bow", "dagger", "spear"]
 # Numbers live in research/balance_report.md — regenerate them with:
 #     python3 tools/weapon_balance.py --n 8 --md-out research/balance_report.md
 # ---------------------------------------------------------------------------
+# Measured on DISTINCT fights — scripted bots are deterministic, so repeated
+# seeds replay the same fight and inflate n (see tools/weapon_balance.py
+# fight_signature()). `n` here is distinct fights, not rows.
 WEAPON_BALANCE = {
-    "sword":  {"status": "provisional", "side_a_win_rate": 0.58,
-               "ci": [0.39, 0.75], "n": 24},
-    "dagger": {"status": "balanced", "side_a_win_rate": 0.48,
-               "ci": [0.30, 0.67], "n": 24},
-    "spear":  {"status": "balanced", "side_a_win_rate": 0.44,
-               "ci": [0.26, 0.63], "n": 24},
-    "flail":  {"status": "asymmetric", "side_a_win_rate": 0.19,
-               "ci": [0.08, 0.38], "n": 24,
-               "note": "Mirrored bot batch: side B wins ~81% of flail "
-                       "matches regardless of model. Treat flail matches as "
-                       "an asymmetric challenge, not a like-for-like "
-                       "comparison — momentum/spin-up makes side assignment "
-                       "decisive at this tuning."},
-    "bow":    {"status": "provisional", "side_a_win_rate": 0.31,
-               "ci": [0.16, 0.51], "n": 24},
+    "sword":  {"status": "provisional", "side_a_win_rate": 0.60,
+               "ci": [0.35, 0.81], "n": 15},
+    "dagger": {"status": "balanced", "side_a_win_rate": 0.50,
+               "ci": [0.26, 0.74], "n": 15},
+    "spear":  {"status": "provisional", "side_a_win_rate": 0.39,
+               "ci": [0.20, 0.61], "n": 18},
+    "flail":  {"status": "asymmetric", "side_a_win_rate": 0.23,
+               "ci": [0.09, 0.49], "n": 15,
+               "note": "Mirrored bot batch, distinct fights only: side A wins "
+                       "23% (95% CI [9%, 49%]) — the interval excludes 50/50, "
+                       "so side assignment, not the model, decides these "
+                       "fights. Treat flail matches as an asymmetric "
+                       "challenge, not a like-for-like comparison. Small "
+                       "sample: 15 distinct fights, not 24 rows."},
+    "bow":    {"status": "asymmetric", "side_a_win_rate": 0.22,
+               "ci": [0.10, 0.42], "n": 23,
+               "note": "Same mirrored-batch bias as flail (23 distinct "
+                       "fights). Ranged footwork makes canvas side decisive "
+                       "at this tuning; do not compare bow cells across "
+                       "sides."},
 }
 
 WEAPON_ZONES = {

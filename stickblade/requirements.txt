@@ -1,5 +1,21 @@
 pygame>=2.5
-pymunk>=7.0
+# The physics engine is PINNED ON PURPOSE — do not loosen this to `>=`.
+#
+# `benchmark.physics_spec()` publishes `engine_version` and the spec
+# fingerprint hashes it, so the resolved pymunk version is part of the
+# benchmark's IDENTITY. A floating bound means a routine `pip install` can
+# silently rewrite the frozen spec: pymunk 7.3.0 hashes to 09de66effd02
+# (the value every published replay carries); 7.3.1 hashes to 0330fdac94ab.
+# Two matches with different fingerprints are, by this project's own rule,
+# not comparable.
+#
+# Upgrading pymunk is therefore a benchmark change, not a dependency bump:
+#   bump PHYSICS_VERSION -> update the pinned fingerprint in
+#   .github/workflows/ci.yml and docs/BENCHMARK_SPEC.md -> record it in
+#   CHANGELOG.md -> re-run the balance sweep.
+# tests/test_benchmark_spec.py::test_engine_version_is_pinned fails loudly
+# if the installed engine drifts from this line.
+pymunk==7.3.0
 # Web arena backend:
 fastapi>=0.110
 uvicorn>=0.29

@@ -14,6 +14,49 @@ cross-version leaderboard comparison, regardless of the API version.
 
 ## [Unreleased] — benchmark spec v1.0 (fingerprint `09de66effd02` under prompt v2; `029281ed627a` under prompt v1)
 
+### Fixed — balance statistics were pseudo-replicated, engine was unpinned (2026-11-07)
+
+No benchmark-spec change: `BENCHMARK_VERSION` / `PHYSICS_VERSION` /
+`PROMPT_VERSION` and the fingerprint (`09de66effd02`) are unchanged, so
+existing ratings remain comparable.
+
+- **`pymunk` is now pinned to `7.3.0`.** `physics_spec()` publishes
+  `engine_version` and the spec fingerprint hashes it, so the engine is part
+  of the benchmark's identity — but `requirements.txt` said `pymunk>=7.0`.
+  A fresh `pip install` after the 7.3.1 release resolved 7.3.1 and moved the
+  fingerprint to `0330fdac94ab`, which by this project's own rule makes old
+  and new matches incomparable (and contradicts the value pinned in CI and
+  published in the README). Pinning 7.3.0 restores `09de66effd02`;
+  `tests/test_benchmark_spec.py` now asserts both the requirement line and
+  the installed version, so the drift fails locally instead of at the next
+  pip resolve.
+- **Balance intervals are computed on distinct fights, not rows.**
+  `tools/weapon_balance.py` deduplicates by fight signature before counting:
+  scripted bots are deterministic, so a new seed usually replays the same
+  fight, and the committed 24-row sweep held only 15–23 distinct fights per
+  weapon. Counting repeats as independent trials narrowed every Wilson
+  interval by ~√k.
+- **The "side B wins ~81% of flail matches" claim is withdrawn as stated.**
+  It was 4 wins / 24 rows, which is 3 / 15 distinct fights: side A wins
+  **23.3%** (95% CI [8.9%, 48.6%]). Still an imbalance, still small-sample,
+  materially smaller than reported. `WEAPON_BALANCE` in `/api/weapons`,
+  `README.md`, `METHODOLOGY.md` and `research/balance_report.{md,json}` all
+  carry the corrected numbers.
+- **The same correction promotes `bow` to a flagged imbalance.** 21.7% on 23
+  distinct fights, CI [9.7%, 41.9%] — the naive row count had dismissed it as
+  "point estimate off 50/50, interval contains it".
+- **New report columns / flags.** `rows` vs `distinct fights` per
+  configuration, and an explicit pseudo-replication flag telling the reader to
+  widen a batch by varying the configuration rather than the seed.
+- **`research/balance_matches.csv` regenerated.** 98 of 120 rows reproduce
+  the committed sweep exactly (same winners, damage, hits, turns) — a useful
+  side-effect proof that the engine is bit-deterministic. The 22 that moved
+  are all bow, from the bow-footwork fix that landed after the previous sweep
+  was generated; everything else is unchanged.
+- **Stale methodology claims corrected.** `METHODOLOGY.md` §7 said
+  bit-identical replay is "not currently reproducible" (it is — see
+  `tests/test_replay_determinism.py`) and that `PROMPT_VERSION = 1` (it is 2).
+
 ### Changed — test infrastructure (2026-11-07)
 
 No benchmark-spec impact: no match rule, physics constant or prompt changed,
